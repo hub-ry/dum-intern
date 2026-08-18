@@ -122,6 +122,15 @@ src/ui.ts       everything the terminal looks like
 src/repo.ts     what the intern knows about where it is
 ```
 
+## Staying in the session
+
+The session does not end when a build does. After each turn you get a `›` prompt
+for the next thing - so when the intern asks "want me to also handle X?", you
+just answer. Empty line or `exit` ends it.
+
+Each new request earns its own spec approval. Carrying approval forward would
+mean the second thing you asked for was never gated.
+
 ## Not built yet
 
 - **Bash is a hole in the pre-approval gate.** It's denied before approval for

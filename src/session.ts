@@ -164,6 +164,8 @@ function recall(repo: Repo): string | undefined {
   }
 }
 
+const QUIT = new Set(["exit", "quit", ":q", "bye"]);
+
 export async function run(request: string, repo: Repo, mode: Mode, input: Input) {
   let approved = false;
   let stopSpinner: (() => void) | null = null;
@@ -171,6 +173,27 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
     stopSpinner?.();
     stopSpinner = null;
   };
+
+  // The session outlives a single request.
+  //
+  // The first version ended after one build, so when the intern said "want me
+  // to also handle X?" the only way to answer was to run `dum` again - which
+  // is exactly the text-box-to-output shape this is supposed to not be. Now
+  // the query stays open and each reply is fed in as another user turn, so a
+  // follow-up costs a sentence instead of a restart.
+  const pending: { deliver: ((text: string) => void) | null } = { deliver: null };
+
+  async function* turns(): AsyncGenerator<any> {
+    yield userTurn(`${BAR[mode]}\n\n${describe(repo)}\n\nTHEIR REQUEST:\n${request}`);
+    for (;;) {
+      const next = await new Promise<string>((res) => (pending.deliver = res));
+      if (!next || QUIT.has(next.toLowerCase())) return; // ends the query cleanly
+      // Each new request earns its own spec. Carrying approval across turns
+      // would mean the second thing you asked for was never gated.
+      approved = false;
+      yield userTurn(next);
+    }
+  }
 
   const tools = createSdkMcpServer({
     name: "dum",
@@ -252,7 +275,7 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
   const blocked: string[] = [];
 
   const session = query({
-    prompt: `${BAR[mode]}\n\n${describe(repo)}\n\nTHEIR REQUEST:\n${request}`,
+    prompt: turns(),
     options: {
       cwd: repo.root,
       systemPrompt: { type: "preset", preset: "claude_code", append: CONTRACT },
@@ -304,13 +327,27 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
     if (msg.type === "result") {
       pause();
       for (const why of blocked) console.log(`  ${c.red("✗")} ${c.dim("refused: " + why)}`);
-      // Only claim nothing was built when the gate actually held. Saying it
-      // while files sit on disk is the one lie this program cannot tell.
+      blocked.length = 0;
       if (!approved) console.log(`  ${c.dim("spec not approved - nothing was built.")}`);
+
+      // The turn is over, not the session. Ask what's next and hand it back to
+      // the generator; an empty line or `exit` ends the query.
+      const next = (await input.ask(`  ${c.dim("›")} `)).trim();
       console.log();
-      return;
+      pending.deliver?.(next);
+      if (!next || QUIT.has(next.toLowerCase())) return;
+      continue;
     }
   }
+}
+
+/** Wrap plain text as the SDK's user-turn shape. */
+function userTurn(text: string) {
+  return {
+    type: "user" as const,
+    message: { role: "user" as const, content: text },
+    parent_tool_use_id: null,
+  };
 }
 
 /** One short line about what a tool call is doing. */
