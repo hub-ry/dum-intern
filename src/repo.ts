@@ -15,7 +15,14 @@ const README_CHARS = 2000;
 export type Repo = { name: string; root: string; files: string[]; readme: string };
 
 function git(args: string[], cwd: string): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  // Capture git's stderr rather than letting it inherit - outside a repo it
+  // prints its own "fatal:" line above ours, and two errors for one problem
+  // reads as a crash.
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 export function readRepo(cwd: string): Repo {

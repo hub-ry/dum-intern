@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
 # dum-intern launcher: Node strips the TypeScript types at load, so there is no build step.
+#
+# Resolve symlinks before locating src/. `npm link` installs this as a symlink
+# on PATH, so $BASH_SOURCE is the link, not the file - and macOS ships BSD
+# readlink with no -f, hence the loop.
+set -euo pipefail
+
+target="${BASH_SOURCE[0]}"
+while [ -L "$target" ]; do
+  dir="$(cd -P "$(dirname "$target")" && pwd)"
+  target="$(readlink "$target")"
+  [[ "$target" != /* ]] && target="$dir/$target"
+done
+root="$(cd -P "$(dirname "$target")/.." && pwd)"
+
 exec node --experimental-strip-types --no-warnings=ExperimentalWarning \
-  "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/src/cli.ts" "$@"
+  "$root/src/cli.ts" "$@"
