@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# dum-intern launcher: Node strips the TypeScript types at load, so there is no build step.
+exec node --experimental-strip-types --no-warnings=ExperimentalWarning \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/src/cli.ts" "$@"

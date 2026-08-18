@@ -1,0 +1,11 @@
+{
+  "name": "dum-intern",
+  "version": "0.0.1",
+  "description": "One intern. It builds what you can explain.",
+  "type": "module",
+  "bin": { "dum": "./bin/dum", "dum-intern": "./bin/dum" },
+  "engines": { "node": ">=22.6" },
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "devDependencies": { "typescript": "^5.6.0", "@types/node": "^22.0.0" },
+  "license": "MIT"
+}
