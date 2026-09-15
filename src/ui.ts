@@ -19,12 +19,12 @@ export const c = {
 
 const WIDTH = 74;
 
-export function wrap(text: string, indent = ""): string {
+export function wrap(text: string, indent = "", width = WIDTH): string {
   const out: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
     for (const w of para.split(/\s+/).filter(Boolean)) {
-      if ((line + " " + w).trim().length > WIDTH) {
+      if ((line + " " + w).trim().length > width) {
         out.push(indent + line.trim());
         line = w;
       } else line += " " + w;
@@ -72,6 +72,30 @@ export function lesson(l: {
     wrap(l.here, "  "),
   ];
   box(c.amber, "wizard", parts.join("\n"));
+}
+
+/**
+ * The wizard, in the margin.
+ *
+ * Set narrower and further in than anything the intern says, because the
+ * indent is doing the work the second tmux pane will do later: telling you at a
+ * glance that this is the voice you are free to ignore. A quip that renders
+ * like a question gets read like a question, and then the wizard is
+ * interrupting you.
+ */
+export function quip(text: string, about?: string) {
+  const bar = c.amber("\u2502");
+  console.log(`     ${bar} ${c.amber("\ud83e\uddd9")} ${c.dim(lines(text)[0])}`);
+  for (const l of lines(text).slice(1)) console.log(`     ${bar}    ${c.dim(l)}`);
+  console.log();
+
+  function lines(t: string) {
+    // A quip that arrived a beat late gets anchored to the answer it is about.
+    // Without this it reads as a non-sequitur, and a non-sequitur in the margin
+    // is the exact wallpaper the wizard is supposed to never become.
+    const head = about ? `re: "${about}"\n` : "";
+    return wrap(head + t, "", 56).split("\n");
+  }
 }
 
 export function say(text: string) {

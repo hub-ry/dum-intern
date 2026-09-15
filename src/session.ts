@@ -15,7 +15,8 @@ import { z } from "zod";
 import { resolve, relative, isAbsolute } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
-import { c, box, lesson, say, tool as renderTool, Input } from "./ui.ts";
+import { c, box, lesson, say, quip as renderQuip, tool as renderTool, Input } from "./ui.ts";
+import { Wizard, debug as wdebug, log as logQuip, type Quip } from "./wizard.ts";
 
 /**
  * How high the bar is - the level of abstraction you must explain yourself at.
@@ -166,8 +167,59 @@ function recall(repo: Repo): string | undefined {
 
 const QUIT = new Set(["exit", "quit", ":q", "bye"]);
 
+/**
+ * How long a render point will wait on the wizard before moving on.
+ *
+ * Short on purpose. The wizard is fired the moment you answer and the intern
+ * then spends its own ten-odd seconds forming the next question, so by the time
+ * anything is about to print the quip is usually already sitting there and this
+ * wait costs nothing. When it is not ready, the quip is not dropped - it lands
+ * at the next render point instead, anchored to the answer it was about.
+ * Blocking the intern's next question on a margin note would invert what the
+ * margin is.
+ */
+const WIZARD_WAIT = 2500;
+
 export async function run(request: string, repo: Repo, mode: Mode, input: Input) {
   let approved = false;
+
+  // The wizard runs beside the session, never inside it.
+  //
+  // Fired on an answer, awaited at the next point where something is about to
+  // be printed. That ordering is the whole design: by the time a quip appears
+  // the engineer has already committed to an answer, so the wizard cannot have
+  // influenced it.
+  //
+  // Started here, before the first question, so its process spawn overlaps the
+  // interrogation rather than being charged to the first answer you give.
+  const wizard = new Wizard(repo);
+  wizard.start();
+  let wizardPending: Promise<Quip | null> | null = null;
+  let wizardLate = false;
+  let currentRequest = request;
+
+  async function drainWizard() {
+    if (!wizardPending) return;
+    wdebug("drain: waiting");
+    const p = wizardPending;
+    const settled = await Promise.race([
+      p.then((q) => ({ q })),
+      new Promise<null>((r) => setTimeout(() => r(null), WIZARD_WAIT).unref()),
+    ]);
+    if (!settled) {
+      wdebug("drain: not ready, will land later");
+      wizardLate = true; // still thinking - it lands at the next render point
+      return;
+    }
+    wdebug("drain: settled", settled.q ? "with quip" : "with pass");
+    const late = wizardLate;
+    wizardPending = null;
+    wizardLate = false;
+    if (!settled.q) return;
+    logQuip(repo, settled.q);
+    renderQuip(settled.q.text, late ? settled.q.about : undefined);
+  }
+
   let stopSpinner: (() => void) | null = null;
   const pause = () => {
     stopSpinner?.();
@@ -191,6 +243,7 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
       // Each new request earns its own spec. Carrying approval across turns
       // would mean the second thing you asked for was never gated.
       approved = false;
+      currentRequest = next;
       yield userTurn(next);
     }
   }
@@ -210,10 +263,15 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
         },
         async (args) => {
           pause();
+          await drainWizard();
           console.log(`  ${c.bold(args.question)}`);
           console.log(`  ${c.dim(args.why_it_matters)}`);
           const reply = (await input.ask(`  ${c.dim(">")} `)).trim();
           console.log();
+          if (reply) {
+            wizardLate = false;
+            wizardPending = wizard.consider({ request: currentRequest, answer: reply });
+          }
           return {
             content: [
               { type: "text" as const, text: reply || "(they said nothing - ask again)" },
@@ -233,6 +291,7 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
         },
         async (args) => {
           pause();
+          await drainWizard();
           lesson(args);
           return {
             content: [
@@ -250,6 +309,7 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
         { spec: z.string().describe("The spec, as markdown") },
         async (args) => {
           pause();
+          await drainWizard();
           box(c.green, "spec", args.spec);
           const go = (await input.ask(`  ${c.bold("build this?")} ${c.dim("[y/N]")} `))
             .trim()
@@ -306,38 +366,46 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
     },
   });
 
-  for await (const msg of session as AsyncIterable<any>) {
-    if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
-      remember(repo, msg.session_id);
-      continue;
-    }
-    if (msg.type === "assistant") {
-      for (const b of msg.message?.content ?? []) {
-        if (b.type === "text" && b.text?.trim()) {
-          pause();
-          say(b.text.trim());
-        }
-        // Tool calls are NOT rendered here. They are rendered from canUseTool,
-        // which is the only place that knows whether the call was allowed or
-        // refused - printing at this point shows a denied write exactly like a
-        // successful one, which is a terminal that lies about what happened.
+  try {
+    for await (const msg of session as AsyncIterable<any>) {
+      if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
+        remember(repo, msg.session_id);
+        continue;
       }
-      continue;
-    }
-    if (msg.type === "result") {
-      pause();
-      for (const why of blocked) console.log(`  ${c.red("✗")} ${c.dim("refused: " + why)}`);
-      blocked.length = 0;
-      if (!approved) console.log(`  ${c.dim("spec not approved - nothing was built.")}`);
+      if (msg.type === "assistant") {
+        for (const b of msg.message?.content ?? []) {
+          if (b.type === "text" && b.text?.trim()) {
+            pause();
+            say(b.text.trim());
+          }
+          // Tool calls are NOT rendered here. They are rendered from canUseTool,
+          // which is the only place that knows whether the call was allowed or
+          // refused - printing at this point shows a denied write exactly like a
+          // successful one, which is a terminal that lies about what happened.
+        }
+        continue;
+      }
+      if (msg.type === "result") {
+        pause();
+        await drainWizard();
+        for (const why of blocked) console.log(`  ${c.red("✗")} ${c.dim("refused: " + why)}`);
+        blocked.length = 0;
+        if (!approved) console.log(`  ${c.dim("spec not approved - nothing was built.")}`);
 
-      // The turn is over, not the session. Ask what's next and hand it back to
-      // the generator; an empty line or `exit` ends the query.
-      const next = (await input.ask(`  ${c.dim("›")} `)).trim();
-      console.log();
-      pending.deliver?.(next);
-      if (!next || QUIT.has(next.toLowerCase())) return;
-      continue;
+        // The turn is over, not the session. Ask what's next and hand it back to
+        // the generator; an empty line or `exit` ends the query.
+        const next = (await input.ask(`  ${c.dim("›")} `)).trim();
+        console.log();
+        pending.deliver?.(next);
+        if (!next || QUIT.has(next.toLowerCase())) return;
+        continue;
+      }
     }
+  } finally {
+    // The wizard holds a second process open. Nothing else in this program ends
+    // it, so a session that exits without closing it leaves an idle agent
+    // behind on every single run.
+    wizard.close();
   }
 }
 
