@@ -34,6 +34,8 @@ export type Entry =
   | { kind: "quip"; id: number; text: string; about: string }
   | { kind: "spec"; id: number; spec: string; approved: boolean | null }
   | { kind: "tool"; id: number; name: string; detail: string; outcome: Outcome }
+  | { kind: "answer"; id: number; question: string; body: string }
+  | { kind: "review"; id: number; text: string }
   | { kind: "note"; id: number; text: string };
 
 /** What the agent is currently blocked on, if anything. */
@@ -71,6 +73,7 @@ export type CodeView = {
  */
 export type Stage =
   | { kind: "code" }
+  | { kind: "answer"; question: string; body: string; pending: boolean }
   | { kind: "spec"; spec: string }
   | { kind: "lesson"; lesson: Lesson }
   | { kind: "transcript" };
@@ -115,6 +118,9 @@ export class Store {
    */
   private typedAhead: string[] = [];
 
+  /** Set by the runner: where a `?` question goes. */
+  onAsk: ((question: string) => void) | null = null;
+
   constructor(repo: string, mode: Mode, root = "", files: string[] = []) {
     this.state = {
       repo,
@@ -148,6 +154,14 @@ export class Store {
    * the worst bug available to it.
    */
   submit(text: string) {
+    // A `?` line is not an answer. It must never be routed to whatever dum is
+    // waiting on, or asking a question would silently cost you your turn and
+    // dum would be handed "? is this slow" as a decision.
+    if (text.startsWith("?")) {
+      const question = text.slice(1).trim();
+      if (question) this.onAsk?.(question);
+      return;
+    }
     const w = this.waiting;
     if (!w) {
       this.typedAhead.push(text);
@@ -231,6 +245,27 @@ export class Store {
     this.patch({
       stage: this.state.stage.kind === "transcript" ? { kind: "code" } : { kind: "transcript" },
     });
+  }
+
+  /**
+   * Show a question being answered, then its answer.
+   *
+   * Rendered unattributed. It is a reference, not somebody talking - dum did
+   * not say it and neither did the wizard, and putting it in either mouth
+   * would mean one of them claiming knowledge that is not theirs.
+   */
+  asking(question: string) {
+    this.patch({ stage: { kind: "answer", question, body: "", pending: true } });
+  }
+
+  answered(question: string, body: string) {
+    this.append({ kind: "answer", question, body });
+    this.patch({ stage: { kind: "answer", question, body, pending: false } });
+  }
+
+  /** The wizard caught something in what dum just built. */
+  review(text: string) {
+    this.append({ kind: "review", text });
   }
 
   /** How much the intern trusts you here, recomputed whenever it changes. */

@@ -27,6 +27,19 @@ export function Stage({
 }) {
   if (stage.kind === "code") return <Code code={code} width={width} height={height} />;
 
+  if (stage.kind === "answer") {
+    return (
+      <Reading
+        title={stage.question}
+        subtitle={stage.pending ? "looking it up…" : "nobody said this - it is a reference"}
+        color="#b0b0b0"
+        lines={stage.pending ? [] : wrapAt(stage.body, width - 4)}
+        width={width}
+        height={height}
+      />
+    );
+  }
+
   if (stage.kind === "spec") {
     return (
       <Reading
@@ -119,13 +132,21 @@ function Reading({
 
 function wrapAt(text: string, width: number): string[] {
   const out: string[] = [];
-  let line = "";
-  for (const w of text.split(/\s+/).filter(Boolean)) {
-    if ((line + " " + w).trim().length > width) {
-      out.push(line.trim());
-      line = w;
-    } else line += " " + w;
+  // Paragraph by paragraph, so an answer with a list or a blank line between
+  // thoughts does not arrive as one wall.
+  for (const para of text.split("\n")) {
+    if (!para.trim()) {
+      out.push("");
+      continue;
+    }
+    let line = "";
+    for (const w of para.split(/\s+/).filter(Boolean)) {
+      if ((line + " " + w).trim().length > width) {
+        out.push(line.trim());
+        line = w;
+      } else line += " " + w;
+    }
+    if (line.trim()) out.push(line.trim());
   }
-  if (line.trim()) out.push(line.trim());
   return out;
 }

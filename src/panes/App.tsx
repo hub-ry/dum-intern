@@ -89,7 +89,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         )}
         <Box flexGrow={1} />
         <Text dimColor>
-          {focus === "tree" ? "tab: back   j/k   h/l   ⏎ open" : "tab: files   ctrl-t: transcript"}
+          {focus === "tree" ? "tab: back   j/k   h/l   ⏎ open" : "tab: files   ? asks anything   ctrl-t: transcript"}
         </Text>
       </Box>
 

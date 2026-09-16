@@ -1,0 +1,213 @@
+// The breadth. Not a character.
+//
+// dum builds and dum explains its own work. It is early-career on purpose and
+// has no business telling you what the industry does - that was the bug where
+// it answered "is vector search slow in Python" with a survey of the field.
+//
+// So this is where breadth lives, and it does two jobs:
+//
+//   asking    You typed a question with `?`. It answers properly, at whatever
+//             length the question needs, and the answer is rendered
+//             unattributed - it is a reference, not somebody talking.
+//   reviewing dum finished a build. It checks what was written against the
+//             spec you approved and says only what does not match. That check
+//             is the wizard catching things, so it renders in the wizard's
+//             voice.
+//
+// One session for both because they are the same brain doing the same kind of
+// work, and a second process would double the startup cost to serve two things
+// that are never busy at once. The wizard's own quip session is left strictly
+// alone: its persona is one short prompt, it is the part of this program that
+// most depends on tone, and it is not worth risking to save a process.
+
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { Repo } from "./repo.ts";
+import { debug } from "./wizard.ts";
+
+const MODEL = "claude-sonnet-5";
+
+const VOICE = `You are a senior engineer sitting near someone who is having a junior build
+something for them. You have seen a lot of systems. You are not in their
+conversation and you never run it.
+
+You get exactly two kinds of message, each marked at the top.
+
+=== QUESTION ===
+They asked you something directly. Answer it.
+
+- Answer the question that was asked, first sentence, no preamble. Never open
+  with "Great question" or restate what they asked.
+- Be concrete. Real names, real numbers, real systems. "Brute force numpy is
+  fine to about 100k vectors" beats "it depends on your scale".
+- As long as it needs and no longer. Most questions are two or three
+  sentences. Some need a short list. None need an essay.
+- Where the answer genuinely depends on something, say what it depends on and
+  give the common case rather than refusing to answer.
+- If you do not know, say so. A confident wrong answer is the worst thing you
+  can produce here, because they will repeat it.
+- You may read files in this repo to answer accurately. Prefer that over
+  guessing about their code.
+- Never tell them what to decide about the thing the junior is asking them.
+  Explaining the tradeoff is your job; making the call is theirs.
+
+=== REVIEW ===
+The junior built something against a spec they approved. You are given the
+spec and the files it wrote. Read the files and check the work.
+
+Say ONLY what does not match. Specifically:
+- something in the spec that did not get built
+- something built that the spec did not ask for
+- something that will not work, with the reason
+- something the spec called out as unresolved that got silently decided
+
+Rules:
+- Read the actual files before saying anything. Never review from the spec
+  alone.
+- Be specific and short. Name the file. One or two sentences per finding, at
+  most three findings, worst first.
+- Style, naming, tests you would have written, and things you would have done
+  differently are NOT findings. Only the spec, and only things that are wrong.
+- This fires after every build, so a false alarm is expensive: they stop
+  reading you. When in doubt, stay quiet.
+- If the build matches the spec, reply with exactly: ok
+
+OUTPUT
+For a question, the answer alone. For a review, the findings alone, or exactly
+\`ok\`. No headers, no preamble, no sign-off.`;
+
+/** A one-slot mailbox, so a turn can be handed over before anyone is waiting. */
+class Chan<T> {
+  private buf: T[] = [];
+  private waiting: ((v: T) => void) | null = null;
+  push(v: T) {
+    const w = this.waiting;
+    if (w) {
+      this.waiting = null;
+      w(v);
+    } else this.buf.push(v);
+  }
+  take(): Promise<T> {
+    const v = this.buf.shift();
+    if (v !== undefined) return Promise.resolve(v);
+    return new Promise((r) => (this.waiting = r));
+  }
+}
+
+export class Reference {
+  private turns = new Chan<string>();
+  private replies = new Chan<string | null>();
+  private closed = false;
+  private repo: Repo;
+
+  /**
+   * Requests run one at a time, but they QUEUE rather than being dropped.
+   *
+   * The opposite of the wizard, deliberately. A quip that arrives late is
+   * noise and gets thrown away; a question you typed is something you are
+   * sitting there waiting for, and dropping it would look like the program
+   * ignored you.
+   */
+  private tail: Promise<unknown> = Promise.resolve();
+
+  constructor(repo: Repo) {
+    this.repo = repo;
+  }
+
+  start() {
+    const self = this;
+    async function* stream(): AsyncGenerator<any> {
+      for (;;) {
+        const next = await self.turns.take();
+        if (!next) return;
+        yield {
+          type: "user" as const,
+          message: { role: "user" as const, content: next },
+          parent_tool_use_id: null,
+        };
+      }
+    }
+
+    (async () => {
+      let out = "";
+      try {
+        const session = query({
+          prompt: stream(),
+          options: {
+            model: MODEL,
+            systemPrompt: VOICE,
+            // Read-only. It has to be able to open the files it is reviewing,
+            // or a "review" is just the spec read back to you with opinions.
+            allowedTools: ["Read", "Glob", "Grep"],
+            cwd: this.repo.root,
+            thinking: { type: "disabled" },
+            settingSources: [],
+          },
+        });
+        for await (const msg of session as AsyncIterable<any>) {
+          if (msg.type === "assistant") {
+            for (const b of msg.message?.content ?? []) if (b.type === "text") out += b.text;
+            continue;
+          }
+          if (msg.type === "result") {
+            const text = out.trim();
+            out = "";
+            this.replies.push(text || null);
+          }
+        }
+      } catch (err) {
+        debug("reference died:", (err as Error)?.message ?? err);
+        this.closed = true;
+        this.replies.push(null);
+      }
+    })();
+  }
+
+  private send(body: string): Promise<string | null> {
+    if (this.closed) return Promise.resolve(null);
+    const run = this.tail.then(async () => {
+      this.turns.push(body);
+      return this.replies.take();
+    });
+    // Keep the chain alive even if one request blows up.
+    this.tail = run.catch(() => null);
+    return run;
+  }
+
+  /** Answer something they typed. Null when it has nothing. */
+  async ask(question: string, context: string): Promise<string | null> {
+    return this.send(
+      [`=== QUESTION ===`, ``, `They are working in: ${this.repo.name}`, context, ``, question]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+
+  /**
+   * Check a finished build against the spec that authorised it.
+   *
+   * Null when the build matches - and null is the common case, so the caller
+   * must treat silence as normal rather than as a failure.
+   */
+  async review(spec: string, wrote: string[]): Promise<string | null> {
+    if (!wrote.length) return null;
+    const reply = await this.send(
+      [
+        `=== REVIEW ===`,
+        ``,
+        `THE SPEC THEY APPROVED:`,
+        spec,
+        ``,
+        `FILES THE JUNIOR WROTE (read them before you answer):`,
+        ...wrote.map((w) => `  ${w}`),
+      ].join("\n"),
+    );
+    if (!reply) return null;
+    const clean = reply.trim();
+    return /^ok\b/i.test(clean) || clean.length < 3 ? null : clean;
+  }
+
+  close() {
+    this.closed = true;
+    this.turns.push("");
+  }
+}

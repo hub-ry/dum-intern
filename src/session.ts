@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
 import { peekString, WATCHED } from "./stream.ts";
 import * as know from "./knowledge.ts";
+import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
 import { Wizard, debug as wdebug, debugTo, log as logQuip, type Quip } from "./wizard.ts";
 
@@ -302,6 +303,22 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   }
   const wizard = new Wizard(repo);
   wizard.start();
+
+  // Breadth: answers `?` questions and reviews finished builds. Started here
+  // with the wizard so its process spawn overlaps the interrogation rather
+  // than being charged to the first question you ask it.
+  const reference = new Reference(repo);
+  reference.start();
+
+  store.onAsk = (question: string) => {
+    store.asking(question);
+    void reference
+      .ask(question, describe(repo))
+      .then((answer) =>
+        store.answered(question, answer ?? "no answer - the reference is not available."),
+      )
+      .catch(() => store.answered(question, "no answer - the reference is not available."));
+  };
   let wizardPending: Promise<Quip | null> | null = null;
   let wizardLate = false;
   let currentRequest = request;
@@ -452,6 +469,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         async (args) => {
           await drainWizard();
           approved = await store.proposeSpec(args.spec);
+          if (!approved) gateEngaged = true;
+          if (approved) {
+            approvedSpec = args.spec;
+            wrote.length = 0;
+          }
           return {
             content: [
               {
@@ -469,6 +491,23 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
 
   const resume = recall(repo);
   const blocked: string[] = [];
+
+  /** The spec currently in force, and what got written under it. */
+  let approvedSpec = "";
+  const wrote: string[] = [];
+
+  /**
+   * Whether the gate was engaged at all this turn - a write held, or a spec
+   * shown and turned down.
+   *
+   * Both directions matter. Without it, every turn ending without an approved
+   * spec claims "nothing was built", including turns where nothing was
+   * attempted, so the line lands directly under the intern saying it already
+   * built the thing. But a declined spec DOES deserve the confirmation, even
+   * though the intern obediently wrote nothing afterwards and so nothing was
+   * ever held.
+   */
+  let gateEngaged = false;
 
   /**
    * Tool inputs still being generated, by content-block index.
@@ -517,6 +556,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       ...(resume ? { resume } : {}),
       canUseTool: async (name: string, args: Record<string, unknown>) => {
         if (!approved && MUTATING.has(name)) {
+          gateEngaged = true;
           store.toolEvent(name, detail(repo.root, args), "held");
           return {
             behavior: "deny" as const,
@@ -532,7 +572,20 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
             return { behavior: "deny" as const, message: `Refused: ${why}` };
           }
         }
-        store.toolEvent(name, detail(repo.root, args), "ran");
+        const what = detail(repo.root, args);
+        // Only things with a real path field. `detail` falls back to the
+        // command for Bash, and handing the reviewer a shell one-liner as a
+        // "file it wrote" makes the review read a file that does not exist.
+        if (MUTATING.has(name)) {
+          for (const f of PATH_FIELDS) {
+            const v = args[f];
+            if (typeof v === "string" && v) {
+              wrote.push(rel(repo.root, v));
+              break;
+            }
+          }
+        }
+        store.toolEvent(name, what, "ran");
         return { behavior: "allow" as const, updatedInput: args };
       },
     },
@@ -564,7 +617,20 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         await drainWizard();
         for (const why of blocked) store.note(`refused: ${why}`);
         blocked.length = 0;
-        if (!approved) store.note("spec not approved - nothing was built.");
+        if (!approved && gateEngaged) store.note("spec not approved - nothing was built.");
+        gateEngaged = false;
+
+        // The wizard catches. Fires after every build and says nothing unless
+        // the work actually departs from the spec that authorised it - silence
+        // here means it looked, which is why a false alarm is so expensive.
+        if (approved && wrote.length) {
+          const files = [...new Set(wrote)];
+          wrote.length = 0;
+          wdebug("review: checking", files.join(", "));
+          const found = await reference.review(approvedSpec, files);
+          wdebug(found ? `review: found "${found.slice(0, 80)}"` : "review: ok");
+          if (found) store.review(found);
+        }
 
         // The turn is over, not the session. Ask what's next and hand it back to
         // the generator; an empty line or `exit` ends the query.
@@ -575,10 +641,10 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       }
     }
   } finally {
-    // The wizard holds a second process open. Nothing else in this program ends
-    // it, so a session that exits without closing it leaves an idle agent
-    // behind on every single run.
+    // Both hold a process open. Nothing else in this program ends them, so a
+    // session that exits without closing leaves idle agents behind every run.
     wizard.close();
+    reference.close();
   }
 }
 

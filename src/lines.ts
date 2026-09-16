@@ -211,6 +211,16 @@ export function format(e: Entry, width: number): string[] {
       return quipLines(e.text, e.about, width);
     case "tool":
       return [toolLine(e.name, e.detail, e.outcome)];
+    case "answer":
+      // Unattributed on purpose: nobody said this. It is looked up, not
+      // spoken, so it gets no name and no colour of its own.
+      return [c.dim(`? ${e.question}`), ...wrap(e.body, "", width), ""];
+    case "review":
+      return [
+        `${c.amber("⚖")} ${c.amber("wizard")} ${c.dim("on what was just built")}`,
+        ...wrap(e.text, "  ", width - 2),
+        "",
+      ];
     case "spec":
       return [
         "",
