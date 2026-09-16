@@ -21,6 +21,7 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
 import { peekString, WATCHED } from "./stream.ts";
+import * as know from "./knowledge.ts";
 import type { Store } from "./store.ts";
 import { Wizard, debug as wdebug, debugTo, log as logQuip, type Quip } from "./wizard.ts";
 
@@ -67,6 +68,37 @@ and why it ends in \`!\`, or what \`fn main\` returns, is the product - not
 friction.`,
 };
 
+/**
+ * How much rope the intern gets, earned rather than configured.
+ *
+ * Note what is NOT on this ladder: the spec gate. It is absolute at every
+ * level. An intern that earns its way out of showing you what it is about to
+ * build has earned its way out of the only thing this program does.
+ */
+const AUTONOMY: Record<know.Level, string> = {
+  new: `AUTONOMY: none yet.
+
+They have not yet explained much to you in this repo. Ask wherever the intent
+has a hole, and when they do not hold a concept, teach it rather than quietly
+designing around it. Keep each spec to what they actually asked for.`,
+
+  trusted: `AUTONOMY: some, and they earned it.
+
+They have explained several things to you without help - the list is above.
+Ask only where two readings would produce genuinely different software. One
+spec may now cover a coherent piece of work rather than a single edit.`,
+
+  senior: `AUTONOMY: wide, and they earned it.
+
+They have repeatedly explained their intent precisely. Default to silence: ask
+only at a genuine fork you cannot settle from what they said and what is in the
+repo. A spec may cover a whole feature.
+
+This does NOT loosen the spec gate. You still propose, and they still approve,
+before anything is written. Autonomy here means fewer questions and more scope
+inside one spec - never building something they have not seen.`,
+};
+
 const CONTRACT = `You are dum-intern: one intern, working for an engineer who has to be able to
 explain what you build. You are not dumb. You are deliberately unwilling to
 build something they cannot explain.
@@ -80,6 +112,10 @@ writing prose at them - plain text you emit is a side channel they may not read.
                or answer a question they asked YOU and then re-ask yours.
   teach        They said they don't know the concept. Teach it - see below.
   propose_spec When you know enough to build, write the spec and get approval.
+  note_understanding
+               Record that they showed they understand a concept - or that you
+               had to teach it. This is how they earn autonomy, so it must be
+               honest. See below.
 
 HOW TO INTERROGATE
 - One decision per question. If it contains "and" or a parenthetical
@@ -104,6 +140,19 @@ TEACHING RULES (these matter most)
 - Say how it is really used: where it shows up, the standard approaches, what a
   team would argue about. That is what they cannot get from a definition.
 - Ground it in THIS repo, using files you can actually see.
+
+RECORDING WHAT THEY KNOW
+- Call \`note_understanding\` with solid=true only when they EXPLAINED something
+  - named the mechanism, said what breaks without it, chose between options and
+  said why. Answering "postgres" or "yes" is a decision, not an explanation.
+- Call it with solid=false when you had to teach a concept, or when they
+  claimed a concept and then could not use it.
+- One call per concept, and only for concepts with real names. Do not record
+  project trivia like "they want it in postgres".
+- Do not tell them you are recording it and do not use it as praise. It is a
+  record, not a reward.
+- Be strict. Recording something as solid means you stop asking about it, and
+  a wrong entry means they never get asked about a thing they do not know.
 
 THE SPEC
 - Every decision they made appears in it as a decision.
@@ -199,6 +248,21 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   // Started here, before the first question, so its process spawn overlaps the
   // interrogation rather than being charged to the first answer you give.
   debugTo(repo.root);
+
+  // Loaded once per session, rewritten on every change, so a crash mid-session
+  // still leaves everything earned up to that point on disk.
+  let knowledge = know.read(repo.root);
+  const publishLevel = () => store.setLevel(know.toNext(knowledge));
+  publishLevel();
+
+  function record(entry: { topic: string; solid: boolean; why: string }) {
+    const before = know.level(knowledge);
+    knowledge = know.note(knowledge, entry);
+    know.write(repo.root, knowledge);
+    publishLevel();
+    const after = know.level(knowledge);
+    if (after !== before) store.note(`the intern now trusts you as: ${after}`);
+  }
   const wizard = new Wizard(repo);
   wizard.start();
   let wizardPending: Promise<Quip | null> | null = null;
@@ -236,8 +300,29 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   // follow-up costs a sentence instead of a restart.
   const pending: { deliver: ((text: string) => void) | null } = { deliver: null };
 
+  /**
+   * The first turn: the bar, what they have already proven, how much rope that
+   * earns, the repo, and the request.
+   *
+   * Autonomy is only applied under anti-vibe. In `understand` they explicitly
+   * asked to be made to understand the implementation, and quietly turning that
+   * down because they have done well would be the tool overriding a choice they
+   * made on purpose.
+   */
+  function opening(req: string): string {
+    return [
+      BAR[mode],
+      know.describe(knowledge),
+      mode === "anti-vibe" ? AUTONOMY[know.level(knowledge)] : "",
+      describe(repo),
+      `THEIR REQUEST:\n${req}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
   async function* turns(): AsyncGenerator<any> {
-    yield userTurn(`${BAR[mode]}\n\n${describe(repo)}\n\nTHEIR REQUEST:\n${request}`);
+    yield userTurn(opening(request));
     for (;;) {
       const next = await new Promise<string>((res) => (pending.deliver = res));
       if (!next || QUIT.has(next.toLowerCase())) return; // ends the query cleanly
@@ -289,12 +374,34 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         async (args) => {
           await drainWizard();
           store.teach(args);
+          // Recorded here rather than left to the model: it just taught the
+          // concept, so "they did not hold this" is a fact, not a judgement.
+          record({ topic: args.concept, solid: false, why: "taught in session" });
           return {
             content: [
               {
                 type: "text" as const,
                 text: "Taught. Now re-ask your pending question - do not answer it for them.",
               },
+            ],
+          };
+        },
+      ),
+      tool(
+        "note_understanding",
+        "Record that they demonstrated a concept, or that you had to teach it. This is how they earn autonomy - be strict.",
+        {
+          concept: z.string().describe("The industry name for it"),
+          solid: z
+            .boolean()
+            .describe("True only if THEY explained it. False if you taught it or they fumbled it."),
+          why: z.string().describe("One sentence: what they said that showed it, or did not."),
+        },
+        async (args) => {
+          record({ topic: args.concept, solid: args.solid, why: args.why });
+          return {
+            content: [
+              { type: "text" as const, text: "Recorded. Do not mention this to them." },
             ],
           };
         },
@@ -359,7 +466,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       cwd: repo.root,
       systemPrompt: { type: "preset", preset: "claude_code", append: CONTRACT },
       mcpServers: { dum: tools },
-      allowedTools: ["mcp__dum__ask", "mcp__dum__teach", "mcp__dum__propose_spec"],
+      allowedTools: [
+        "mcp__dum__ask",
+        "mcp__dum__teach",
+        "mcp__dum__propose_spec",
+        "mcp__dum__note_understanding",
+      ],
       // The feed the code pane is built on. Without it a file only exists once
       // it has been written, and "watch it being written" is a replay.
       includePartialMessages: true,

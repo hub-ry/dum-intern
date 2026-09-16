@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import type { Mode } from "./session.ts";
+import type { Level } from "./knowledge.ts";
 
 export type Outcome = "ran" | "held" | "refused";
 
@@ -59,6 +60,21 @@ export type CodeView = {
   outcome: Outcome | null;
 };
 
+/**
+ * What the wide pane is showing.
+ *
+ * With the chat column gone, this pane is "the thing you are meant to be
+ * reading right now": the file being written, a file you opened, the spec you
+ * are being asked to approve, or a lesson. The spec especially needs the room
+ * - it is the one screen in this program that gates anything, and it was never
+ * going to fit under a sprite.
+ */
+export type Stage =
+  | { kind: "code" }
+  | { kind: "spec"; spec: string }
+  | { kind: "lesson"; lesson: Lesson }
+  | { kind: "transcript" };
+
 export type State = {
   repo: string;
   root: string;
@@ -70,6 +86,9 @@ export type State = {
   busy: boolean;
   status: string;
   code: CodeView | null;
+  stage: Stage;
+  /** How much the intern trusts you here, and how far off the next step is. */
+  standing: { level: Level; have: number; need: number };
 };
 
 export class Store {
@@ -107,6 +126,8 @@ export class Store {
       busy: false,
       status: "",
       code: null,
+      stage: { kind: "code" },
+      standing: { level: "new", have: 0, need: 2 },
     };
   }
 
@@ -152,6 +173,7 @@ export class Store {
 
   teach(lesson: Lesson) {
     this.append({ kind: "lesson", lesson });
+    this.patch({ stage: { kind: "lesson", lesson } });
   }
 
   quip(text: string, about: string) {
@@ -171,7 +193,9 @@ export class Store {
   streaming(tool: string, path: string, body: string) {
     const code = this.state.code;
     if (code?.live && code.tool === tool && code.body === body && code.path === path) return;
-    this.patch({ code: { tool, path, body, live: true, outcome: null } });
+    // Writing pulls the stage back to the code: whatever you were reading, the
+    // intern putting a file on screen is the more urgent thing.
+    this.patch({ code: { tool, path, body, live: true, outcome: null }, stage: { kind: "code" } });
   }
 
   /**
@@ -189,7 +213,29 @@ export class Store {
     } catch (err) {
       body = `could not read ${path}\n${(err as Error).message}`;
     }
-    this.patch({ code: { tool: "open", path, body, live: false, outcome: null } });
+    this.patch({
+      code: { tool: "open", path, body, live: false, outcome: null },
+      stage: { kind: "code" },
+    });
+  }
+
+  /**
+   * Swap the stage to the transcript and back.
+   *
+   * The conversation no longer has a pane of its own, so this is where "what
+   * did I already say" lives. On a key rather than always-on, because the
+   * point of dropping the column was to stop having two things competing to be
+   * read at once.
+   */
+  toggleTranscript() {
+    this.patch({
+      stage: this.state.stage.kind === "transcript" ? { kind: "code" } : { kind: "transcript" },
+    });
+  }
+
+  /** How much the intern trusts you here, recomputed whenever it changes. */
+  setLevel(standing: { level: Level; have: number; need: number }) {
+    this.patch({ standing });
   }
 
   /** Ask one question and park until it is answered. */
@@ -207,8 +253,10 @@ export class Store {
   /** Show the spec and park until it is approved or declined. */
   async proposeSpec(spec: string): Promise<boolean> {
     const id = this.append({ kind: "spec", spec, approved: null });
+    this.patch({ stage: { kind: "spec", spec } });
     const reply = (await this.park<string>({ type: "spec", spec }, id)).trim().toLowerCase();
     const approved = reply === "y" || reply === "yes";
+    this.patch({ stage: { kind: "code" } });
     this.patch({
       transcript: this.state.transcript.map((e) =>
         e.id === id && e.kind === "spec" ? { ...e, approved } : e,
