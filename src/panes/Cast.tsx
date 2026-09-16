@@ -48,7 +48,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         sprite={sprites.wizard}
         state={wizardSaid.typing ? "talking" : "idle"}
         speaking={wizardSaid.typing}
-        name="the wizard"
+        name="wizard"
         nameColor="#d7a55f"
         text={wizardSaid.shown}
         width={inner}
@@ -59,7 +59,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         sprite={sprites.intern}
         state={internState(state, internSaid.typing)}
         speaking={internSaid.typing}
-        name="the intern"
+        name="dum"
         nameColor="#87afd7"
         text={internSaid.shown}
         width={inner}

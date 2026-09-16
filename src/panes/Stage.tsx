@@ -55,8 +55,8 @@ export function Stage({
     section("here", l.here);
     return (
       <Reading
-        title="the wizard explains"
-        subtitle="then the intern will ask again - it will not answer for you"
+        title="wizard"
+        subtitle="dum will ask again - it will not answer for you"
         color="#d7a55f"
         lines={lines}
         width={width}
