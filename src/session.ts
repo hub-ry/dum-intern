@@ -1,10 +1,15 @@
 // One intern, one conversation.
 //
-// The interrogation is not a form. The intern calls `ask`, that tool blocks on
-// your terminal, and your reply comes back as the tool result inside the same
-// session - so it can push back, follow up, or answer a question you asked it,
-// all with full memory of everything said so far. A text-box-to-output design
-// cannot do any of that, because every exchange starts from nothing.
+// The interrogation is not a form. The intern calls `ask`, that tool parks on a
+// promise the renderer resolves, and your reply comes back as the tool result
+// inside the same session - so it can push back, follow up, or answer a
+// question you asked it, all with full memory of everything said so far. A
+// text-box-to-output design cannot do any of that, because every exchange
+// starts from nothing.
+//
+// Nothing in this file renders. It publishes to the store and waits; whether
+// that is drawn as panes or as lines is decided elsewhere, and deliberately
+// cannot be seen from here.
 //
 // It also means there is no spec handoff. By the time the intern builds, the
 // decisions are already in its context; the spec is a checkpoint you approve,
@@ -15,8 +20,9 @@ import { z } from "zod";
 import { resolve, relative, isAbsolute } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
-import { c, box, lesson, say, quip as renderQuip, tool as renderTool, Input } from "./ui.ts";
-import { Wizard, debug as wdebug, log as logQuip, type Quip } from "./wizard.ts";
+import { peekString, WATCHED } from "./stream.ts";
+import type { Store } from "./store.ts";
+import { Wizard, debug as wdebug, debugTo, log as logQuip, type Quip } from "./wizard.ts";
 
 /**
  * How high the bar is - the level of abstraction you must explain yourself at.
@@ -180,7 +186,7 @@ const QUIT = new Set(["exit", "quit", ":q", "bye"]);
  */
 const WIZARD_WAIT = 2500;
 
-export async function run(request: string, repo: Repo, mode: Mode, input: Input) {
+export async function run(request: string, repo: Repo, mode: Mode, store: Store) {
   let approved = false;
 
   // The wizard runs beside the session, never inside it.
@@ -192,6 +198,7 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
   //
   // Started here, before the first question, so its process spawn overlaps the
   // interrogation rather than being charged to the first answer you give.
+  debugTo(repo.root);
   const wizard = new Wizard(repo);
   wizard.start();
   let wizardPending: Promise<Quip | null> | null = null;
@@ -217,14 +224,8 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
     wizardLate = false;
     if (!settled.q) return;
     logQuip(repo, settled.q);
-    renderQuip(settled.q.text, late ? settled.q.about : undefined);
+    store.quip(settled.q.text, late ? settled.q.about : "");
   }
-
-  let stopSpinner: (() => void) | null = null;
-  const pause = () => {
-    stopSpinner?.();
-    stopSpinner = null;
-  };
 
   // The session outlives a single request.
   //
@@ -262,12 +263,8 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
             .describe("One sentence: what changes depending on their answer."),
         },
         async (args) => {
-          pause();
           await drainWizard();
-          console.log(`  ${c.bold(args.question)}`);
-          console.log(`  ${c.dim(args.why_it_matters)}`);
-          const reply = (await input.ask(`  ${c.dim(">")} `)).trim();
-          console.log();
+          const reply = (await store.askQuestion(args.question, args.why_it_matters)).trim();
           if (reply) {
             wizardLate = false;
             wizardPending = wizard.consider({ request: currentRequest, answer: reply });
@@ -290,9 +287,8 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
           here: z.string().describe("What it would mean in this specific repo"),
         },
         async (args) => {
-          pause();
           await drainWizard();
-          lesson(args);
+          store.teach(args);
           return {
             content: [
               {
@@ -308,14 +304,8 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
         "Show the engineer the build spec and ask whether to build it. Call this once you know enough.",
         { spec: z.string().describe("The spec, as markdown") },
         async (args) => {
-          pause();
           await drainWizard();
-          box(c.green, "spec", args.spec);
-          const go = (await input.ask(`  ${c.bold("build this?")} ${c.dim("[y/N]")} `))
-            .trim()
-            .toLowerCase();
-          console.log();
-          approved = go === "y" || go === "yes";
+          approved = await store.proposeSpec(args.spec);
           return {
             content: [
               {
@@ -334,6 +324,35 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
   const resume = recall(repo);
   const blocked: string[] = [];
 
+  /**
+   * Tool inputs still being generated, by content-block index.
+   *
+   * Indexed rather than kept as a single current block because one assistant
+   * message can open several, and the deltas for them are interleaved.
+   */
+  const openBlocks = new Map<number, { name: string; buf: string }>();
+
+  function onStreamEvent(ev: any) {
+    if (ev?.type === "content_block_start" && ev.content_block?.type === "tool_use") {
+      openBlocks.set(ev.index, { name: ev.content_block.name, buf: "" });
+      return;
+    }
+    if (ev?.type === "content_block_stop") {
+      openBlocks.delete(ev.index);
+      return;
+    }
+    if (ev?.type !== "content_block_delta" || ev.delta?.type !== "input_json_delta") return;
+    const block = openBlocks.get(ev.index);
+    if (!block) return;
+    block.buf += ev.delta.partial_json ?? "";
+    const field = WATCHED[block.name];
+    if (!field) return;
+    const body = peekString(block.buf, field);
+    if (body === null) return;
+    const path = peekString(block.buf, "file_path") ?? peekString(block.buf, "notebook_path");
+    store.streaming(block.name, path ? rel(repo.root, path) : "", body);
+  }
+
   const session = query({
     prompt: turns(),
     options: {
@@ -341,11 +360,13 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
       systemPrompt: { type: "preset", preset: "claude_code", append: CONTRACT },
       mcpServers: { dum: tools },
       allowedTools: ["mcp__dum__ask", "mcp__dum__teach", "mcp__dum__propose_spec"],
+      // The feed the code pane is built on. Without it a file only exists once
+      // it has been written, and "watch it being written" is a replay.
+      includePartialMessages: true,
       ...(resume ? { resume } : {}),
       canUseTool: async (name: string, args: Record<string, unknown>) => {
-        pause();
         if (!approved && MUTATING.has(name)) {
-          renderTool(name, detail(args), "held");
+          store.toolEvent(name, detail(repo.root, args), "held");
           return {
             behavior: "deny" as const,
             message:
@@ -356,11 +377,11 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
           if (escapes(repo.root, args[f])) {
             const why = `${args[f]} is outside ${repo.name}`;
             blocked.push(why);
-            renderTool(name, detail(args), "refused");
+            store.toolEvent(name, detail(repo.root, args), "refused");
             return { behavior: "deny" as const, message: `Refused: ${why}` };
           }
         }
-        renderTool(name, detail(args), "ran");
+        store.toolEvent(name, detail(repo.root, args), "ran");
         return { behavior: "allow" as const, updatedInput: args };
       },
     },
@@ -372,11 +393,14 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
         remember(repo, msg.session_id);
         continue;
       }
+      if (msg.type === "stream_event") {
+        onStreamEvent(msg.event);
+        continue;
+      }
       if (msg.type === "assistant") {
         for (const b of msg.message?.content ?? []) {
           if (b.type === "text" && b.text?.trim()) {
-            pause();
-            say(b.text.trim());
+            store.say(b.text.trim());
           }
           // Tool calls are NOT rendered here. They are rendered from canUseTool,
           // which is the only place that knows whether the call was allowed or
@@ -386,16 +410,14 @@ export async function run(request: string, repo: Repo, mode: Mode, input: Input)
         continue;
       }
       if (msg.type === "result") {
-        pause();
         await drainWizard();
-        for (const why of blocked) console.log(`  ${c.red("✗")} ${c.dim("refused: " + why)}`);
+        for (const why of blocked) store.note(`refused: ${why}`);
         blocked.length = 0;
-        if (!approved) console.log(`  ${c.dim("spec not approved - nothing was built.")}`);
+        if (!approved) store.note("spec not approved - nothing was built.");
 
         // The turn is over, not the session. Ask what's next and hand it back to
         // the generator; an empty line or `exit` ends the query.
-        const next = (await input.ask(`  ${c.dim("›")} `)).trim();
-        console.log();
+        const next = (await store.askNext()).trim();
         pending.deliver?.(next);
         if (!next || QUIT.has(next.toLowerCase())) return;
         continue;
@@ -418,13 +440,28 @@ function userTurn(text: string) {
   };
 }
 
-/** One short line about what a tool call is doing. */
-function detail(input: unknown): string {
+/**
+ * One short line about what a tool call is doing.
+ *
+ * Paths are shown relative to the repo. An absolute path is mostly the part
+ * you already know, and once it is truncated to fit a pane what survives is
+ * the prefix every line shares rather than the file that was touched.
+ */
+function rel(root: string, p: string): string {
+  const r = relative(root, isAbsolute(p) ? p : resolve(root, p));
+  return r && !r.startsWith("..") ? r : p;
+}
+
+function detail(root: string, input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const i = input as Record<string, unknown>;
-  for (const f of [...PATH_FIELDS, "pattern", "command"]) {
+  for (const f of PATH_FIELDS) {
     const v = i[f];
-    if (typeof v === "string" && v) return v.length > 68 ? v.slice(0, 67) + "…" : v;
+    if (typeof v === "string" && v) return rel(root, v);
+  }
+  for (const f of ["pattern", "command"]) {
+    const v = i[f];
+    if (typeof v === "string" && v) return v;
   }
   return "";
 }

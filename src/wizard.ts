@@ -23,8 +23,34 @@ import type { Repo } from "./repo.ts";
  * is the seam between those two.
  */
 const DEBUG = !!process.env.DUM_DEBUG;
+
+/**
+ * Goes to a file, not to stderr.
+ *
+ * Under the panes there is no stderr to write to: Ink owns the screen, and a
+ * line printed behind its back sits there until the next full redraw. A log
+ * you can `tail -f` in another window is also just better for a thing that
+ * fires once per answer.
+ */
 export function debug(...a: unknown[]) {
-  if (DEBUG) console.error("  [wizard]", ...a);
+  if (!DEBUG) return;
+  const line = a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+  try {
+    appendFileSync(`${DEBUG_LOG}`, `${new Date().toISOString()} [wizard] ${line}\n`);
+  } catch {
+    /* debugging must never be the thing that breaks the run */
+  }
+}
+
+let DEBUG_LOG = "/dev/null";
+/** Pointed at the repo once one is known - `debug` is called before that. */
+export function debugTo(root: string) {
+  try {
+    mkdirSync(`${root}/.dum`, { recursive: true });
+    DEBUG_LOG = `${root}/.dum/debug.log`;
+  } catch {
+    /* leave it at /dev/null */
+  }
 }
 
 /**

@@ -1,0 +1,63 @@
+// A one-line text field.
+//
+// Hand-rolled rather than pulled in, because the input is where the whole
+// program is used and it should not look like a generic widget. It keeps a
+// cursor rather than being append-only: answers here are sentences, and a
+// sentence you cannot fix a typo in the middle of is a sentence you retype.
+
+import React, { useState } from "react";
+import { Text, useInput } from "ink";
+
+export function Field({
+  prompt,
+  onSubmit,
+  color,
+  active = true,
+}: {
+  prompt: string;
+  onSubmit: (value: string) => void;
+  color?: string;
+  active?: boolean;
+}) {
+  const [value, setValue] = useState("");
+  const [at, setAt] = useState(0);
+
+  useInput(
+    (ch, key) => {
+    if (key.return) {
+      onSubmit(value);
+      setValue("");
+      setAt(0);
+      return;
+    }
+    if (key.leftArrow) return setAt(Math.max(0, at - 1));
+    if (key.rightArrow) return setAt(Math.min(value.length, at + 1));
+    if (key.backspace || key.delete) {
+      if (!at) return;
+      setValue(value.slice(0, at - 1) + value.slice(at));
+      return setAt(at - 1);
+    }
+    // ctrl/meta chords belong to the app (focus, quit), never to the text.
+    if (key.ctrl || key.meta || key.escape || key.tab || key.upArrow || key.downArrow) return;
+    if (!ch) return;
+    setValue(value.slice(0, at) + ch + value.slice(at));
+    setAt(at + ch.length);
+    },
+    { isActive: active },
+  );
+
+  const before = value.slice(0, at);
+  const under = value[at] ?? " ";
+  const after = value.slice(at + 1);
+
+  return (
+    <Text>
+      <Text color={color} bold dimColor={!active}>
+        {prompt}
+      </Text>
+      {before}
+      {active ? <Text inverse>{under}</Text> : <Text dimColor>{under}</Text>}
+      {after}
+    </Text>
+  );
+}

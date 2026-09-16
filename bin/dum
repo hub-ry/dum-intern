@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# dum-intern launcher: Node strips the TypeScript types at load, so there is no build step.
+# dum-intern launcher.
+#
+# Loaded through tsx rather than Node's --experimental-strip-types, because the
+# panes are JSX and Node strips types without transforming JSX. tsx is a loader,
+# not a compiler, so there is still no build step and no dist/ - but it must be
+# the package's own tsx, not whatever the current directory happens to have.
 #
 # Resolve symlinks before locating src/. `npm link` installs this as a symlink
 # on PATH, so $BASH_SOURCE is the link, not the file - and macOS ships BSD
@@ -14,5 +19,11 @@ while [ -L "$target" ]; do
 done
 root="$(cd -P "$(dirname "$target")/.." && pwd)"
 
-exec node --experimental-strip-types --no-warnings=ExperimentalWarning \
-  "$root/src/cli.ts" "$@"
+# Anything written to stderr lands on top of the panes and stays there - Ink
+# owns the screen and does not know the line arrived. Node's warnings are the
+# usual source (the SDK warns that bare allowedTools entries shadow canUseTool,
+# which for the intern's own three tools is exactly what we want). DUM_DEBUG
+# puts them back, same seam the wizard uses.
+[ -n "${DUM_DEBUG:-}" ] || export NODE_NO_WARNINGS=1
+
+exec "$root/node_modules/.bin/tsx" "$root/src/cli.tsx" "$@"

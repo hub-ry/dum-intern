@@ -1,0 +1,91 @@
+# the intern: 7x8 - four terminal rows. A small amber thing with two antennae,
+# eyes set wide, and a mouth that is mostly an afterthought.
+# `.` is transparent - the pane background shows through.
+
+palette
+. none
+o 2a1d10
+y d99a3c
+Y f0c266
+d 8a6326
+end
+
+frame idle
+.y...y.
+..y.y..
+.yYYYy.
+yYYYYYy
+yoYYYoy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
+frame idle.blink
+.y...y.
+..y.y..
+.yYYYy.
+yYYYYYy
+yYYYYYy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
+frame asking
+.y...y.
+..y.y..
+.yYYYy.
+yYYYYYy
+yoYYYoy
+yYYYYYy
+yYoooYy
+.yyyyy.
+
+frame thinking
+.y...y.
+..y.y..
+.yYYYy.
+yoYYYoy
+yYYYYYy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
+frame thinking.up
+.y...y.
+..y.y..
+.yoYoy.
+yYYYYYy
+yYYYYYy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
+frame building
+.y...y.
+..y.y..
+.yYYYy.
+yYYYYYy
+yoYYYoy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
+frame building.pulse
+.......
+..y.y..
+.yYYYy.
+yYYYYYy
+yoYYYoy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
+frame blocked
+..d.d..
+.d...d.
+.dyyyd.
+dyyyyyd
+doyyyod
+dyyyyyd
+dyoooyd
+.ddddd.
