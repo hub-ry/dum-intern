@@ -72,26 +72,6 @@ store.quip(
   "that's a visibility timeout - the mechanism SQS and most job queues use for exactly this failure case.",
   "",
 );
-void store.askQuestion(
-  "Is it worse for a job to run twice, or to never run at all?",
-  "Decides at-least-once versus at-most-once delivery.",
-);
-store.submit("idk");
-store.teach({
-  concept: "delivery semantics",
-  what_it_is:
-    "The guarantee a queue makes about how many times a job is handed to a worker: at-most-once, at-least-once, or exactly-once.",
-  why_it_exists:
-    "A worker can die after doing the work but before acknowledging it. The queue cannot tell that apart from dying before doing the work, so it has to choose which mistake to make.",
-  in_industry:
-    "SQS and most brokers are at-least-once and push idempotency onto you. Kafka sells exactly-once inside a transaction boundary.",
-  here: "Nothing here writes to an external system yet, so at-least-once costs you a dedupe key on the jobs table and nothing more.",
-});
-store.quip("the usual fix is an idempotency key on the job row - stripe's API is the canonical example.", "idk");
-void store.proposeSpec(
-  "## build\n\nA durable job queue backed by postgres.\n\n## decisions\n\n- lease-based reclaim: a job is leased for 30s and renewed by a heartbeat, so a dead worker's job returns to the queue on its own\n- at-least-once delivery, deduped on an idempotency key\n\n## explicitly out of scope\n\n- priorities, delayed jobs, a web dashboard\n\n## still unresolved\n\n- what happens after N failed attempts (you said `probably just log it`)",
-);
-store.submit("y");
 store.toolEvent("Read", "src/queue.ts", "ran");
 store.toolEvent("Write", "src/lease.ts", "ran");
 store.toolEvent("Bash", "npm test", "held");
@@ -118,6 +98,40 @@ store.streaming(
   ].join("\n"),
 );
 
+// Which screen to draw. The stage shows a different thing in each case and
+// they are the states most worth eyeballing before shipping a change.
+const scene = process.argv[5] ?? "ask";
+if (scene === "spec") {
+  void store.proposeSpec(
+    [
+      "## build",
+      "",
+      "A durable job queue backed by postgres.",
+      "",
+      "## decisions",
+      "",
+      "- lease-based reclaim: a job is leased for 30s and renewed by a heartbeat, so a dead worker's job returns to the queue on its own",
+      "- at-least-once delivery, deduped on an idempotency key",
+      "",
+      "## explicitly out of scope",
+      "",
+      "- priorities, delayed jobs, a web dashboard",
+      "",
+      "## still unresolved",
+      "",
+      "- what happens after N failed attempts (you said `probably just log it`)",
+    ].join("\n"),
+  );
+} else if (scene === "transcript") {
+  void store.askQuestion("what next?", "");
+  store.toggleTranscript();
+} else if (scene !== "lesson") {
+  void store.askQuestion(
+    "Is it worse for a job to run twice, or to never run at all?",
+    "Decides at-least-once versus at-most-once delivery.",
+  );
+}
+
 const app = render(React.createElement(App, { store, layout: DEFAULT }), {
   stdout: stdout as never,
   stdin: stdin as never,
@@ -129,4 +143,4 @@ setTimeout(() => {
   const frames = frame.split("\x1b[2J");
   process.stderr.write(frames[frames.length - 1] ?? frame);
   process.exit(0);
-}, 150);
+}, Number(process.argv[4]) || 1500);

@@ -39,15 +39,22 @@ const Node: z.ZodType<Node> = z.lazy(() =>
   ]),
 );
 
+/**
+ * Three columns, not four.
+ *
+ * The conversation used to have a pane of its own next to the code. It reads
+ * better as the characters saying one thing at a time, with the wide pane
+ * showing whatever is being discussed - so `chat` is still a pane you can put
+ * back in this file, but it is no longer the default.
+ */
 export const DEFAULT: Node = {
   direction: "row",
   children: [
     { pane: "tree", size: 22 },
-    { pane: "chat", flex: 3 },
-    { pane: "code", flex: 3 },
-    // The characters are pixels and cannot reflow, so they take exactly what
-    // the art needs and never a share of the terminal.
-    { pane: "cast", size: 14 },
+    { pane: "code", flex: 1 },
+    // Wide enough to hold a sentence under a face. The sprites themselves are
+    // 12 columns and cannot reflow; the rest is the text.
+    { pane: "cast", size: 38 },
   ],
 };
 

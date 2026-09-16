@@ -8,7 +8,7 @@
 import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { Chat } from "./Chat.tsx";
-import { Code } from "./Code.tsx";
+import { Stage } from "./Stage.tsx";
 import { Tree } from "./Tree.tsx";
 import { Cast } from "./Cast.tsx";
 import { Panes } from "./Panes.tsx";
@@ -26,8 +26,10 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   // whole focus model, which is as much as four panes should need.
   const [focus, setFocus] = useState<"input" | "tree">("input");
 
-  useInput((_ch, key) => {
-    if (key.tab) setFocus((f) => (f === "input" ? "tree" : "input"));
+  useInput((ch, key) => {
+    if (key.tab) return setFocus((f) => (f === "input" ? "tree" : "input"));
+    // A chord, because the field owns every plain key while you are typing.
+    if (key.ctrl && ch === "t") return store.toggleTranscript();
   });
 
   useEffect(() => {
@@ -57,7 +59,15 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       case "chat":
         return <Chat transcript={state.transcript} width={at.width} height={at.height} />;
       case "code":
-        return <Code code={state.code} width={at.width} height={at.height} />;
+        return (
+          <Stage
+            stage={state.stage}
+            code={state.code}
+            transcript={state.transcript}
+            width={at.width}
+            height={at.height}
+          />
+        );
       case "cast":
         return <Cast state={state} width={at.width} />;
     }
@@ -72,8 +82,15 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         <Text bold>dum-intern</Text>
         <Text dimColor>{"  " + state.repo + "  "}</Text>
         <Text color="#87afd7">{state.mode}</Text>
+        <Text dimColor>{"  "}</Text>
+        <Text color={standingColor(state.standing.level)}>{state.standing.level}</Text>
+        {state.standing.level === "senior" ? null : (
+          <Text dimColor>{`  ${state.standing.have}/${state.standing.need} explained`}</Text>
+        )}
         <Box flexGrow={1} />
-        <Text dimColor>{focus === "tree" ? "tab: back   j/k move   h/l fold   ⏎ open" : "tab: files"}</Text>
+        <Text dimColor>
+          {focus === "tree" ? "tab: back   j/k   h/l   ⏎ open" : "tab: files   ctrl-t: transcript"}
+        </Text>
       </Box>
 
       <Box height={body}>
@@ -97,6 +114,13 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       </Box>
     </Box>
   );
+}
+
+/** Earned standing, coloured so a change is visible without reading it. */
+function standingColor(level: string): string {
+  if (level === "senior") return "#87af87";
+  if (level === "trusted") return "#87afd7";
+  return "#8a8a8a";
 }
 
 function promptFor(p: Prompt): string {

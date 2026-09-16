@@ -60,6 +60,16 @@ yYYYYYy
 yYYoYYy
 .yyyyy.
 
+frame asking.talk
+..y.y..
+.y...y.
+.yYYYy.
+yYYYYYy
+yoYYYoy
+yYYYYYy
+yYYoYYy
+.yyyyy.
+
 frame building
 .y...y.
 ..y.y..

@@ -26,8 +26,16 @@ test("uneven shares still fill the row exactly", () => {
 
 test("panes are placed left to right in order", () => {
   const p = allocate(DEFAULT, box);
-  assert.deepEqual(p.map((x) => x.pane), ["tree", "chat", "code", "cast"]);
+  assert.deepEqual(p.map((x) => x.pane), ["tree", "code", "cast"]);
   for (let i = 1; i < p.length; i++) assert.ok(p[i]!.x > p[i - 1]!.x);
+});
+
+test("the default fills the terminal exactly", () => {
+  for (const width of [80, 100, 133, 200]) {
+    const p = allocate(DEFAULT, { ...box, width });
+    const used = p.reduce((a, x) => a + x.width, 0) + (p.length - 1);
+    assert.equal(used, width, `default layout leaves dead space at ${width} columns`);
+  }
 });
 
 test("a column splits height instead of width", () => {
