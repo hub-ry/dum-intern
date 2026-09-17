@@ -2,6 +2,8 @@
 
 One intern. It builds what you can explain.
 
+![dum-intern: file tree on the left, what's being written in the middle, the wizard and dum on the right](docs/screenshot.png)
+
 It interrogates me before it builds anything. Nothing gets written until I approve a spec made out of my own answers.
 
 
