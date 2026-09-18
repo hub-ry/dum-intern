@@ -1,6 +1,6 @@
 # dum-intern
 
-One intern. It builds what you can explain.
+My custom agentic environment with a tighter development leash.
 
 ![dum-intern: file tree on the left, what's being written in the middle, the wizard and dum on the right](docs/screenshot.png)
 
