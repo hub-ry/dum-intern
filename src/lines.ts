@@ -26,7 +26,9 @@ export function wrap(text: string, indent = "", width = 74): string[] {
   for (const para of text.split("\n")) {
     let line = "";
     for (const w of para.split(/\s+/).filter(Boolean)) {
-      if ((line + " " + w).trim().length > width) {
+      // Measured without escape codes. Counting them wrapped any line with
+      // inline code in it a word or three early.
+      if (printable((line + " " + w).trim()).length > width) {
         out.push(indent + line.trim());
         line = w;
       } else line += " " + w;
@@ -46,8 +48,21 @@ export function wrap(text: string, indent = "", width = 74): string[] {
  */
 export function markdown(md: string, width: number): string[] {
   const out: string[] = [];
+  let fenced = false;
   for (const raw of md.split("\n")) {
-    const line = raw.replace(/`([^`]+)`/g, (_, t) => c.blue(t));
+    // Code keeps its own line breaks and indentation. Word-wrapping it is how
+    // a four-space body ended up flush left.
+    if (/^\s*```/.test(raw)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) {
+      out.push("  " + c.blue(raw));
+      continue;
+    }
+    const line = raw
+      .replace(/`([^`]+)`/g, (_, t) => c.blue(t))
+      .replace(/\*\*([^*]+)\*\*/g, (_, t) => c.bold(t));
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) {
       if (out.length) out.push("");
@@ -202,7 +217,7 @@ export function collapse(lines: string[]): string[] {
 export function format(e: Entry, width: number): string[] {
   switch (e.kind) {
     case "say":
-      return [...wrap(e.text, "", width), ""];
+      return [...markdown(e.text, width), ""];
     case "note":
       return [c.dim(e.text), ""];
     case "lesson":
