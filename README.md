@@ -50,6 +50,10 @@ There's no level. It used to be a ladder: prove 2 topics and you're "trusted", 6
 
 A wrong "known" is the worst bug this thing can have. It's a question that never gets asked again. So every new one shows up as `+ skill: <name>` while it's fresh, and `dum --forget "<name>"` takes it back off.
 
+Skills go a bit stale. Something general I proved over a year ago, or something niche over two months ago, gets one quick check if a build leans on it. Explaining it again resets the clock.
+
+One idea should be one node. "Leases" and "lease", or "Rust macros (macro_rules!)" and "rust macros", land on the same skill. Near-misses like "SQS visibility timeout" next to "visibility timeout" get caught before they're recorded, and the intern has to say whether it's the same idea. It's deliberately not a merge: "rust macros" and "rust procedural macros" pass the same word test and are different things.
+
 It doesn't buy skipping the spec. Nothing does.
 
 
@@ -58,6 +62,23 @@ It doesn't buy skipping the spec. Nothing does.
 The intern used to over-ask. Now it's told most requests need zero to three questions, and that plain words count as an explanation. I don't need the jargon, I need to clearly get it.
 
 It still holds me to it. A vague answer gets re-asked. A wrong one gets called out in one line and goes on the tree as shaky.
+
+Two `idk`s in a row on one request and it stops asking. It writes the spec and explains the rest after the build. A third question at that point is a wall, not a check.
+
+
+### First sessions
+
+An empty tree is the worst moment for this tool. Everything is new, so everything is a question, and a first session that feels like an exam is the last one.
+
+So while the tree has fewer than five skills, the intern changes how it asks. The bar doesn't move.
+
+- It asks to be taught. "how does print get the text onto the screen?" instead of "explain print". The intern is a junior, and I'm the one teaching it. Students put more effort in for a teachable agent than for themselves, and the gain was biggest for the ones who started furthest behind ([Chase et al., 2009](https://doi.org/10.1007/s10956-009-9180-4)).
+- It opens with the real question I'm most likely to get right.
+- It prefers questions I can answer by predicting. "does `1..=10` stop at 9 or 10?" A wrong guess followed by the answer sticks better than being told outright ([Kornell, Hays & Bjork, 2009](https://pubmed.ncbi.nlm.nih.gov/19586265/)).
+- One or two questions on a first request. The rest waits for the next one.
+- The first question says `idk` is a fine answer, once.
+
+On a fresh tree, "add a done command" to a tiny todo CLI got exactly one question: "`list` prints todos as 1., 2., 3. If you run `todo done 2`, which array index does that need to touch?" That's the one real trap in the build, asked as a prediction.
 
 
 ### The intern asks, the wizard tells
@@ -97,13 +118,24 @@ I built the wizard as a critic first. It was worse. Criticism makes you stop and
 The question has to come first. Opening with the answer does the thinking for me. Asked nicely in the prompt, it still opened most corrections with the answer. So now the wizard tags every line `fact:` or `nudge:`, and a nudge whose first sentence isn't a question gets dropped in code. Dropping one is cheap, since the intern pushes back on wrong answers by itself.
 
 
+### A second opinion on every line
+
+The wizard's value is being right, and asking it harder to be right stopped working. In a real session it told me `println!` was "monomorphization" right after I'd explained it was a macro. In evals it said "yeah, `..=` is inclusive" to someone who'd just called it exclusive, which reads as agreeing with the mistake.
+
+So a second session reads every line against what I actually said before I see it. It doesn't write lines and has no stake in them. It first decides whether I was right, then checks the line: accurate claims, the standard name for exactly what I described, and no orders aimed at me. A `fact:` about a wrong answer gets dropped in code, since it's either agreement or a correction with the wrong tag.
+
+`npm run eval:checker` runs it over lines with known verdicts: real bad lines from sessions and evals, plus the near-miss names the wizard is prone to (dead letter queue for a lease, throttling for debouncing). The last run dropped 45/45 bad lines and kept 45/45 good ones over five runs each. A quip takes about 4s with the check, and the intern takes longer than that to form its next question.
+
+Lines the wizard searched for skip the check. The checker would veto them for being newer than it knows about, which is the failure search exists to fix.
+
+
 ### It looks things up
 
 Ask a model about something released after its training cutoff and it'll tell you it doesn't exist. In a coding tool that's a real problem. Questions about a library version from last month come up all the time.
 
 The wizard and `?` answers get today's date and web search, with one rule: not recognizing something is a reason to search, not an answer. `? what's new in claude opus 5.5 compared to 4.5` searches, answers, and names the announcement it came from.
 
-Search costs time. That `?` answer took 23s. The wizard only searches when I name something it doesn't recognize, so most quips still land in a few seconds.
+Search costs time. That `?` answer took 23s. The wizard only searches when I name something it doesn't recognize, so most quips still land in a few seconds. When it does search, what it finds is the line: "opus 5.5 dropped yesterday and thinking can't be disabled anymore, so calls that hardcode a no-thinking mode from opus 5 will break." I checked that against Anthropic's announcement. It's right.
 
 
 ### It doesn't know what the intern asked
@@ -131,7 +163,9 @@ npm run eval:wizard              # every case, 3 runs each
 npm run eval:wizard -- 5 nudge   # 5 runs of the nudge cases
 ```
 
-Fixed exchanges, a fresh wizard per run, every line printed. It covers naming a lease, nudging a wrong Rust range and float money, the idempotency practice line, a model newer than its training, and passing on a bare "yes". A prompt change isn't done until this reads right.
+Fixed exchanges, a fresh wizard per run, every line printed with its kind. It covers naming (lease, debounce, write-ahead log, and the macro exchange that produced "monomorphization"), nudging (a wrong Rust range, float money, sha256 passwords), correct statements that must never get nudged, the idempotency practice line, a stale Node version, a model newer than its training, and passing on a bare "yes". `DUM_DEBUG=1` logs every pass and every veto with its reason. A prompt change isn't done until this reads right.
+
+Two things I learned tuning it. Quoting a bad example in the prompt gets it said back: listing "backwards actually" as a thing not to say produced "backwards actually". And an example that matches an eval case gets parroted, so the eval stops measuring the voice.
 
 
 ### idk
@@ -156,11 +190,7 @@ Quips render inline, not in a real second pane. Every quip gets written to `.dum
 
 The tree is a printout. It should be a pane.
 
-Nothing decays. A general skill I proved a year ago still counts as known.
-
-Near-duplicates can still happen. The intern is told to reuse the tree's names, but "visibility timeout" and "SQS visibility timeout" could still end up as two nodes.
-
-When the wizard searches, it mostly ends up passing. It doesn't deny new things anymore, but it doesn't say much about them either.
+The intern runs on the Claude Code bundled with the Agent SDK, but it uses my default model. Switch to a model newer than that bundle and every request fails. dum says so and tells me to `npm update @anthropic-ai/claude-agent-sdk` in its own folder, but it can't fix it for me.
 
 
 ### Keys
@@ -199,12 +229,15 @@ dum
 | `-s`, `--skills` | print the skill tree |
 | `--forget <name>` | take a skill off the tree |
 
+`--skills` and `--forget` work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
+
 
 ### Where things live
 
 ```
 ~/.dum/
   skills.json      the skill tree, shared by every repo (DUM_HOME moves it)
+  skills.json.corrupt-<time>   a file that stopped parsing, kept instead of overwritten
 
 <repo>/.dum/
   session          so the next `dum` resumes the same intern

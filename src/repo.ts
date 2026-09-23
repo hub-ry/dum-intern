@@ -30,7 +30,7 @@ export function readRepo(cwd: string): Repo {
   try {
     root = git(["rev-parse", "--show-toplevel"], cwd);
   } catch {
-    throw new Error("not a git repository - dum-intern works inside a repo");
+    throw new Error("not a git repository - dum works inside one. `git init` here, or cd into a repo");
   }
 
   // Tracked files only. Untracked build output and node_modules would drown

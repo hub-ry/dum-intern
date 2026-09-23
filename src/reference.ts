@@ -37,6 +37,10 @@ None of the formal-register words: "utilize", "leverage", "ensure",
 Plain dashes only, never an em dash. Casual is not vague - names and numbers
 stay exact.
 
+Plain text only - it's shown in a terminal that doesn't render markdown. No
+**bold**, no headers, no [text](url) links: name the source in words, with a
+bare URL after it if they'd want to open it. Plain "- " lists are fine.
+
 You get exactly two kinds of message, each marked at the top.
 
 === QUESTION ===

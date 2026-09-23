@@ -56,7 +56,62 @@ function file(dir: string) {
   return `${dir}/skills.json`;
 }
 
-const key = (name: string) => name.trim().toLowerCase();
+/**
+ * The identity of a skill name, loose enough that obvious respellings of one
+ * idea land on one node.
+ *
+ * "Leases" and "lease", "Idempotency-Keys" and "idempotency keys", "Rust
+ * macros (macro_rules!)" and "rust macros": same skill. Casing alone was the
+ * old rule, and the tree grew near-duplicates next to each other. Kept
+ * deliberately dumb - no stemming library, no embeddings - because merging two
+ * different skills is worse than keeping two copies of one: "c" and "c++"
+ * must never collapse, so + and # are part of a word.
+ */
+export function key(name: string): string {
+  return words(name).join(" ");
+}
+
+function words(name: string): string[] {
+  return name
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9+#.]+/g, " ")
+    .split(" ")
+    .map((w) => w.replace(/^\.+|\.+$/g, ""))
+    .filter(Boolean)
+    .map(singular);
+}
+
+/** Plural to singular for the obvious cases only. "status" and "redis" stay put. */
+function singular(w: string): string {
+  if (w.length <= 3 || /(ss|us|is)$/.test(w)) return w;
+  if (/ies$/.test(w)) return w.slice(0, -3) + "y";
+  if (/(ch|sh|x|z)es$/.test(w)) return w.slice(0, -2);
+  return w.endsWith("s") ? w.slice(0, -1) : w;
+}
+
+const MINOR = new Set(["a", "an", "the", "of", "in", "on", "for", "to", "and", "with"]);
+
+/**
+ * A skill already on the tree that might be this one under another name, or
+ * undefined.
+ *
+ * "visibility timeout" and "sqs visibility timeout" share every word of the
+ * shorter one. That is not proof they are the same skill - "rust macros" and
+ * "rust procedural macros" pass the same test and are different - so this
+ * only finds the candidate. Deciding is the intern's job.
+ */
+export function similar(t: Tree, name: string): Skill | undefined {
+  const mine = new Set(words(name).filter((w) => !MINOR.has(w)));
+  if (!mine.size) return undefined;
+  return t.skills.find((s) => {
+    if (key(s.name) === key(name)) return false;
+    const theirs = new Set(words(s.name).filter((w) => !MINOR.has(w)));
+    if (!theirs.size) return false;
+    const [small, big] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
+    return [...small].every((w) => big.has(w));
+  });
+}
 
 const str = (v: unknown): v is string => typeof v === "string";
 
@@ -96,11 +151,35 @@ export function read(dir = home()): Tree {
 export function write(t: Tree, dir = home()) {
   try {
     mkdirSync(dir, { recursive: true });
+    keepIfCorrupt(dir);
     const tmp = `${file(dir)}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(t, null, 2) + "\n");
     renameSync(tmp, file(dir));
   } catch {
     /* losing the record is bad, crashing over it is worse */
+  }
+}
+
+/**
+ * Move an unreadable skills.json aside before anything overwrites it.
+ *
+ * A file that does not parse reads as an empty tree, which is the safe
+ * direction for asking questions - but the next skill recorded would then
+ * write a one-skill tree over months of history. Usually the damage is one
+ * stray comma from a hand edit, so the original is kept next to it.
+ */
+function keepIfCorrupt(dir: string) {
+  let raw: string;
+  try {
+    raw = readFileSync(file(dir), "utf8");
+  } catch {
+    return; // no file yet
+  }
+  try {
+    JSON.parse(raw);
+  } catch {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    renameSync(file(dir), `${file(dir)}.corrupt-${stamp}`);
   }
 }
 
@@ -162,6 +241,24 @@ export function find(t: Tree, name: string): Skill | undefined {
 /** Take a skill off the tree. How you dispute something the intern got wrong. */
 export function forget(t: Tree, name: string): Tree {
   return { skills: t.skills.filter((s) => key(s.name) !== key(name)) };
+}
+
+/**
+ * How long a skill counts as known before it earns one quick re-check.
+ *
+ * Long for general skills, because the rule is that something general you
+ * have done before is worth trusting - a year is a gap, not a lapse. Shorter
+ * for niche ones, because one-off knowledge is exactly what fades. Either way
+ * the cost of being stale is a single short question, and explaining it again
+ * resets the clock.
+ */
+const FRESH_DAYS: Record<Breadth, number> = { general: 365, niche: 60 };
+
+/** Known, but long enough ago that one quick check is fair. */
+export function stale(s: Skill, now = new Date()): boolean {
+  if (!s.solid || !s.at) return false;
+  const age = (now.getTime() - new Date(s.at).getTime()) / 86_400_000;
+  return Number.isFinite(age) && age > FRESH_DAYS[s.breadth];
 }
 
 /** Solid and trusted in this repo: general anywhere, niche only where shown. */
@@ -228,13 +325,23 @@ export function describe(t: Tree, root: string): string {
     "Everything they have shown you or been taught, across every project. Use",
     "these exact names when you record something that is the same idea.",
   ];
-  const k = known(t, root);
+  const now = new Date();
+  const k = known(t, root).filter((s) => !stale(s, now));
   if (k.length) {
     out.push(
       "",
       "KNOWN. They explained these. Build on them without asking, and never",
       "re-teach them:",
       ...k.map(line),
+    );
+  }
+  const old = known(t, root).filter((s) => stale(s, now));
+  if (old.length) {
+    out.push(
+      "",
+      "KNOWN, BUT A WHILE AGO. If this build leans on one, ONE short check is fair",
+      "- never a re-teach:",
+      ...old.map(line),
     );
   }
   const e = elsewhere(t, root);

@@ -6,7 +6,8 @@
 // sentence you cannot fix a typo in the middle of is a sentence you retype.
 
 import React, { useState } from "react";
-import { Text, useInput } from "ink";
+import { Text, useInput, usePaste } from "ink";
+import { typed, pasted } from "../typing.ts";
 
 export function Field({
   prompt,
@@ -40,8 +41,20 @@ export function Field({
     // ctrl/meta chords belong to the app (focus, quit), never to the text.
     if (key.ctrl || key.meta || key.escape || key.tab || key.upArrow || key.downArrow) return;
     if (!ch) return;
-    setValue(value.slice(0, at) + ch + value.slice(at));
-    setAt(at + ch.length);
+    // A chunk can carry an Enter inside it - see typing.ts.
+    const r = typed({ value, at }, ch);
+    for (const line of r.submit) onSubmit(line);
+    setValue(r.field.value);
+    setAt(r.field.at);
+    },
+    { isActive: active },
+  );
+
+  usePaste(
+    (text) => {
+      const f = pasted({ value, at }, text);
+      setValue(f.value);
+      setAt(f.at);
     },
     { isActive: active },
   );

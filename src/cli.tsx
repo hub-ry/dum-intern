@@ -55,6 +55,7 @@ function printSkills(root: string) {
     return;
   }
   const { known, shaky } = skills.summary(t, root);
+  const here = root ? `${known} known in ${repo(root)}` : `${t.skills.filter((s) => s.solid).length} known`;
   console.log();
   for (const r of skills.rows(t)) {
     const mark =
@@ -68,18 +69,32 @@ function printSkills(root: string) {
   console.log();
   const where = `${skills.home()}/skills.json`.replace(homedir(), "~");
   console.log(`  ${c.green("●")} ${c.dim("known")}   ${c.amber("○")} ${c.dim("shaky")}   ${c.dim("· not shown yet")}`);
-  console.log(`  ${c.dim(`${known} known in ${repo(root)}, ${shaky} shaky.  ${where}`)}`);
+  console.log(`  ${c.dim(`${here}, ${shaky} shaky.  ${where}`)}`);
   console.log();
+}
+
+/** The repo root, or "" outside one. */
+function repoRoot(): string {
+  try {
+    return readRepo(cwd()).root;
+  } catch {
+    return "";
+  }
 }
 
 async function main() {
   const { mode, plain, request: fromArgs, show, forget } = parse(argv.slice(2));
-  const repo = readRepo(cwd());
 
-  if (show) return printSkills(repo.root);
+  // The tree is yours, not the repo's, so looking at it or editing it works
+  // from anywhere - only "known here" needs a repo.
+  if (show) return printSkills(repoRoot());
   if (forget !== null) {
+    if (!forget) {
+      console.error(`\n  usage: dum --forget <skill name>   (\`dum --skills\` lists them)\n`);
+      exit(1);
+    }
     const t = skills.read();
-    const hit = forget && skills.find(t, forget);
+    const hit = skills.find(t, forget);
     if (!hit) {
       console.error(`\n  ${c.red("✗")} no skill called "${forget}". \`dum --skills\` lists them.\n`);
       exit(1);
@@ -89,6 +104,7 @@ async function main() {
     return;
   }
 
+  const repo = readRepo(cwd());
   const store = new Store(repo.name, mode, repo.root, repo.files);
 
   // A pane layout needs a terminal it can own. Without one - a pipe, a CI log,

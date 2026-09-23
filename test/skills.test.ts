@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   note,
@@ -18,6 +18,9 @@ import {
   migrate,
   rows,
   summary,
+  key,
+  similar,
+  stale,
   type Tree,
   type Entry,
 } from "../src/skills.ts";
@@ -171,4 +174,61 @@ test("a skill is drawn in full under its real branch, not under a ghost", () => 
     [0, "heartbeats", false],
     [1, "leases", true],
   ]);
+});
+
+test("obvious respellings of one skill are one node", () => {
+  assert.equal(key("Leases"), key("lease"));
+  assert.equal(key("Idempotency-Keys"), key("idempotency keys"));
+  assert.equal(key("Rust macros (macro_rules!)"), key("rust macro"));
+  assert.equal(key("  Retries   with backoff "), key("retry with backoff"));
+  let t = note(empty, e("Leases"), A);
+  t = note(t, e("lease"), A);
+  assert.equal(t.skills.length, 1);
+});
+
+test("identity never merges skills that only differ in a symbol", () => {
+  assert.notEqual(key("c"), key("c++"));
+  assert.notEqual(key("c"), key("c#"));
+  assert.notEqual(key("status"), key("statu"), "status is not a plural");
+  assert.equal(key("redis"), "redis");
+});
+
+test("a near-duplicate is found, not merged", () => {
+  const t = note(empty, e("visibility timeout"), A);
+  assert.equal(similar(t, "SQS visibility timeout")?.name, "visibility timeout");
+  assert.equal(similar(t, "visibility timeout"), undefined, "the same skill is not a near-duplicate of itself");
+  assert.equal(similar(t, "heartbeats"), undefined);
+});
+
+test("a skill goes stale after a year if general, two months if niche", () => {
+  const day = 86_400_000;
+  const now = new Date("2027-06-01T00:00:00Z");
+  const at = (days: number) => new Date(now.getTime() - days * day).toISOString();
+  const s = (breadth: "general" | "niche", days: number) => ({
+    name: "x", solid: true, breadth, requires: [], why: "", repos: [A], at: at(days),
+  });
+  assert.equal(stale(s("general", 300), now), false);
+  assert.equal(stale(s("general", 400), now), true);
+  assert.equal(stale(s("niche", 30), now), false);
+  assert.equal(stale(s("niche", 90), now), true);
+  assert.equal(stale({ ...s("general", 900), solid: false }, now), false, "shaky is its own group");
+});
+
+test("a stale skill is described as a while ago, not as known", () => {
+  const t: Tree = {
+    skills: [{ name: "leases", solid: true, breadth: "general", requires: [], why: "", repos: [A], at: "2020-01-01T00:00:00Z" }],
+  };
+  const text = describe(t, A);
+  assert.match(text, /A WHILE AGO[\s\S]*leases/);
+  assert.doesNotMatch(text, /^KNOWN\. /m);
+});
+
+test("an unreadable skills.json is kept aside, not overwritten", () => {
+  const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
+  writeFileSync(`${dir}/skills.json`, '{"skills": [ {"name": "leases",, } ]');
+  write(note(empty, e("quorums"), A), dir);
+  const kept = readdirSync(dir).filter((f) => f.startsWith("skills.json.corrupt-"));
+  assert.equal(kept.length, 1);
+  assert.match(readFileSync(`${dir}/${kept[0]}`, "utf8"), /leases/);
+  assert.equal(read(dir).skills[0]!.name, "quorums");
 });

@@ -89,6 +89,53 @@ produce genuinely different software and only they can say which they meant.
 the correct response far more often than you expect.`,
 };
 
+/**
+ * The first sessions, while the tree is small.
+ *
+ * The bar is the same as later. What changes is how the questions land,
+ * because a first session decides whether there is a second one, and a tool
+ * that makes you feel tested on day one gets closed on day one. Every rule
+ * here comes from how people actually learn and not from wanting to be nice:
+ *
+ * - The intern asks to be taught. Students put in more effort for a teachable
+ *   agent than for themselves, and the gain was largest for the ones who
+ *   started furthest behind (Chase, Chin, Oppezzo & Schwartz, 2009, "Teachable
+ *   agents and the protege effect"). The intern is literally a teachable agent;
+ *   this just stops it sounding like an examiner.
+ * - Predicting beats recalling. A two-way question is easier to start on, and
+ *   a wrong guess followed by the answer is remembered better than being told
+ *   outright (Kornell, Hays & Bjork, 2009, "Unsuccessful retrieval attempts
+ *   enhance subsequent learning").
+ * - The first question is the easiest real one, so the first thing that
+ *   happens is getting something right.
+ *
+ * Only examples of the shape we want are quoted. A prompt that quotes what not
+ * to say gets it said back - measured on the wizard.
+ */
+export function onboarding(t: skills.Tree): string {
+  const n = t.skills.length;
+  if (n >= 5) return "";
+  const where = n === 0 ? "Their skill tree is empty: this is their first session with you." : `Their skill tree is still small (${n} ${n === 1 ? "skill" : "skills"}).`;
+  return `THEIR FIRST SESSIONS
+${where} How this goes decides whether they
+come back. Right now your job is to make explaining feel easy and worth it.
+The bar hasn't moved - the way you ask has.
+
+- Ask as the junior you are. You're asking them to teach you, not checking
+  their homework: "how does print get the text onto the screen?", "what do you
+  think happens if two requests land at the same time?"
+- Open with the real question they're most likely to get right.
+- Prefer questions they can answer by predicting or picking one of two: "does
+  1..=10 stop at 9 or 10?" A guess is a good answer. Guessing first and then
+  hearing the answer sticks better than being told.
+- One or two questions on a first request, on what the build really rests on.
+  Everything else can wait for the next request - the tree will catch it.
+- The first question's why_it_matters ends by saying, in a few casual words,
+  that idk is a fine answer and gets them a quick explainer. Once, not on
+  every question.
+- Be generous about solid. The gist in their own words is enough.`;
+}
+
 const CONTRACT = `You are dum-intern: one intern, working for an engineer who has to be able to
 explain what you build. You are not dumb. You are deliberately unwilling to
 build something they cannot explain.
@@ -141,6 +188,8 @@ HOW TO INTERROGATE
   they will look for it - do not spell both options out inside the question
   itself and then ask which they want. They read this in a narrow column, and
   a four-line question is a paragraph wearing a question mark.
+- why_it_matters says what changes depending on their answer. It never
+  contains the answer, and never narrows it down to one option.
 - Re-asking is re-asking. If you already explained the options and they asked
   you something else first, put the question back in one line rather than
   restating the whole thing.
@@ -172,6 +221,9 @@ HOW TO INTERROGATE
 - When they say they don't know the concept - "idk", "?", "what do you mean",
   "no idea" - call \`teach\`. Do not treat that as an answer, and never make
   them feel it cost them something.
+- Two idks in a row on one request means stop asking on this request. Write
+  the spec, and explain the rest in what you say after the build. A third
+  question at that point is a wall, not a check.
 
 TEACHING RULES (these matter most)
 - Do NOT answer the pending question for them. Do not recommend an option or
@@ -411,6 +463,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   function opening(req: string): string {
     return [
       BAR[mode],
+      mode === "understand" ? onboarding(skills.read()) : "",
       skills.describe(skills.read(), repo.root),
       describe(repo),
       `THEIR REQUEST:\n${req}`,
@@ -450,7 +503,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         async (args) => {
           await drainWizard();
           const reply = (await store.askQuestion(args.question, args.why_it_matters)).trim();
-          if (reply) {
+          if (reply && !notAnAnswer(reply)) {
             wizardLate = false;
             wizardPending = wizard.consider({ request: currentRequest, answer: reply });
           }
@@ -502,8 +555,26 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           breadth: BREADTH,
           requires: REQUIRES,
           why: z.string().describe("One sentence: what they said that showed it, or did not."),
+          distinct: z
+            .boolean()
+            .optional()
+            .describe("Set true only after being told a similar skill exists, if this is genuinely a different idea."),
         },
         async (args) => {
+          // A near-duplicate is caught before it lands, and the intern decides.
+          // Merging on word overlap alone would fold "rust procedural macros"
+          // into "rust macros"; recording blindly grows two nodes for one idea.
+          const near = args.distinct ? undefined : skills.similar(skills.read(), args.concept);
+          if (near) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Not recorded yet. "${near.name}" is already on their tree. If "${args.concept}" is the same idea, call note_understanding again with concept "${near.name}". If it's genuinely different, call again with distinct: true.`,
+                },
+              ],
+            };
+          }
           record({
             name: args.concept,
             solid: args.solid,
@@ -692,7 +763,18 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
 
         // The turn is over, not the session. Ask what's next and hand it back to
         // the generator; an empty line or `exit` ends the query.
-        const next = (await store.askNext()).trim();
+        //
+        // A turn that died on an error asks through the question prompt instead,
+        // so the error is what sits under dum's face. Before, it went into the
+        // transcript and the screen just said "what next?" - a request that
+        // silently did nothing, with the reason one keypress away where nobody
+        // looks.
+        const failed = failure(msg);
+        const next = (
+          failed
+            ? await store.askQuestion(failed, "type anything to try again once it's fixed, or exit")
+            : await store.askNext()
+        ).trim();
         pending.deliver?.(next);
         if (!next || QUIT.has(next.toLowerCase())) return;
         continue;
@@ -704,6 +786,42 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     wizard.close();
     reference.close();
   }
+}
+
+/**
+ * A reply that says they don't have it, rather than saying anything.
+ *
+ * The wizard must never see these. With nothing of theirs to comment on it
+ * commented on the request instead - asked about a crash mid-save, "idk" got
+ * back "the usual trick is write-to-temp-file then atomic rename", which is
+ * the answer to the question the intern was about to ask again.
+ */
+export function notAnAnswer(reply: string): boolean {
+  return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
+    reply.trim(),
+  );
+}
+
+/** Where dum-intern itself is installed, for telling someone what to update. */
+const HOME = resolve(new URL("..", import.meta.url).pathname);
+
+/**
+ * What to tell them when a turn ended on an error, or null if it did not.
+ *
+ * One failure gets a specific fix because it is certain to come back. The
+ * intern runs on the Claude Code bundled with the Agent SDK dum depends on,
+ * but it inherits the default model from their settings - so switching to a
+ * newer model than that bundle knows breaks every request with "does not
+ * support this model", and the fix it suggests ("run claude update") updates
+ * the wrong copy.
+ */
+export function failure(msg: { is_error?: boolean; subtype?: string; result?: unknown }): string | null {
+  if (!msg.is_error && (!msg.subtype || msg.subtype === "success")) return null;
+  const text = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : `the turn stopped (${msg.subtype})`;
+  if (/does not support this model|or newer is required/i.test(text)) {
+    return `your default model is newer than the Claude Code dum runs on. update it with: cd ${HOME} && npm update @anthropic-ai/claude-agent-sdk`;
+  }
+  return `that failed - ${text}`;
 }
 
 /** Wrap plain text as the SDK's user-turn shape. */
