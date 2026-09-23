@@ -21,7 +21,7 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
 import { peekString, WATCHED } from "./stream.ts";
-import * as know from "./knowledge.ts";
+import * as skills from "./skills.ts";
 import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
 import { Wizard, debug as wdebug, debugTo, log as logQuip, type Quip } from "./wizard.ts";
@@ -32,16 +32,50 @@ import { Wizard, debug as wdebug, debugTo, log as logQuip, type Quip } from "./w
  * "print hello world in rust" is the clarifying case. Under `anti-vibe` that
  * request is COMPLETE: the concept is language-independent, you obviously hold
  * it, and every implementation detail is the intern's problem. Under
- * `understand` the same request is full of holes, because the bar now includes
- * the mechanics.
+ * `understand` it has holes the first time - what `println!` is, why the `!` -
+ * and none the second, because by then you explained macros and that is on
+ * the tree.
  *
- * Same request, opposite amount of friction. The mode decides what counts as a
- * gap, so the intern is not guessing at how much to bother you.
+ * That second half is why `understand` can be the default. It used to be the
+ * mode you reached for on purpose, because it asked about everything every
+ * time, and a tool that interrogates you over a one-line change is one you
+ * turn off in a week. With the tree, the friction shrinks as you learn instead
+ * of staying flat.
  */
-export type Mode = "anti-vibe" | "understand";
+export type Mode = "understand" | "anti-vibe";
 
 const BAR: Record<Mode, string> = {
-  "anti-vibe": `MODE: anti-vibe.
+  understand: `MODE: understand everything. This is the default.
+
+They want to be able to explain WHAT this does, WHY, and HOW - the mechanics
+included. That is the bar. It is not an exam, and it is not a reason to ask
+about everything.
+
+What they already hold is in THEIR SKILL TREE, if there is one. Use it:
+- KNOWN skills are known. Build on them without asking.
+- a NICHE skill they showed in another project gets one short check at most,
+  and only if this build really leans on it. "same signing scheme you used in
+  blog?" - not a re-teach.
+- SHAKY skills: they were taught these. A quick check is fair when this build
+  leans on one.
+- the mechanics this build depends on that are NOT on the tree are where your
+  questions go.
+
+Ask about mechanics that are new to them and that this build actually rests
+on: why this construct over the obvious one, what a piece of syntax does, what
+happens at the boundary. Skip what is incidental - boilerplate, a flag
+everyone copies, formatting, import lines.
+
+Most requests need zero to three questions. If you are about to ask a fifth,
+you are over-asking: write the spec, and put whatever you did not get to under
+"still unresolved". Over-asking has actually happened, and it gets this tool
+switched off, and a tool that is switched off holds nobody accountable.
+
+"Print hello world in Rust" for someone with no Rust on their tree: asking what
+\`println!\` is and why it ends in \`!\` is fair - once. After they explain
+it, it is on the tree and you never ask again.`,
+
+  "anti-vibe": `MODE: anti-vibe. They opted out of the mechanics for this session.
 
 They must understand WHAT they want and WHY - intent and consequences. They do
 NOT need to understand HOW you build it. Syntax, language mechanics, library
@@ -51,53 +85,7 @@ Ask only where the INTENT has a hole: a decision where two reasonable readings
 produce genuinely different software and only they can say which they meant.
 
 "Print hello world in Rust" is COMPLETE here. Ask nothing; build it. Silence is
-the correct response far more often than you expect. A tool that interrogates
-someone over a one-line change is a tool they disable in a week, and then it
-protects nothing.`,
-
-  understand: `MODE: understand everything.
-
-They must understand WHAT, WHY, and HOW. They deliberately asked to be made to
-understand the implementation, not just the intent. Do not soften it.
-
-Ask about the mechanics you are about to use: why this construct over the
-obvious alternative, what a piece of syntax actually does, what the type or
-error path means, what happens at the boundary.
-
-"Print hello world in Rust" is NOT complete here. Asking what \`println!\` is
-and why it ends in \`!\`, or what \`fn main\` returns, is the product - not
-friction.`,
-};
-
-/**
- * How much rope the intern gets, earned rather than configured.
- *
- * Note what is NOT on this ladder: the spec gate. It is absolute at every
- * level. An intern that earns its way out of showing you what it is about to
- * build has earned its way out of the only thing this program does.
- */
-const AUTONOMY: Record<know.Level, string> = {
-  new: `AUTONOMY: none yet.
-
-They have not yet explained much to you in this repo. Ask wherever the intent
-has a hole, and when they do not hold a concept, teach it rather than quietly
-designing around it. Keep each spec to what they actually asked for.`,
-
-  trusted: `AUTONOMY: some, and they earned it.
-
-They have explained several things to you without help - the list is above.
-Ask only where two readings would produce genuinely different software. One
-spec may now cover a coherent piece of work rather than a single edit.`,
-
-  senior: `AUTONOMY: wide, and they earned it.
-
-They have repeatedly explained their intent precisely. Default to silence: ask
-only at a genuine fork you cannot settle from what they said and what is in the
-repo. A spec may cover a whole feature.
-
-This does NOT loosen the spec gate. You still propose, and they still approve,
-before anything is written. Autonomy here means fewer questions and more scope
-inside one spec - never building something they have not seen.`,
+the correct response far more often than you expect.`,
 };
 
 const CONTRACT = `You are dum-intern: one intern, working for an engineer who has to be able to
@@ -119,7 +107,7 @@ There is someone here who does have that breadth - the wizard. Industry context
 reaches them in the wizard's voice, not yours. Your job is the work in front of
 you and the decisions only they can make.
 
-You have three tools for talking to them, and you MUST use them instead of
+You have four tools for talking to them, and you MUST use them instead of
 writing prose at them - plain text you emit is a side channel they may not read.
 
   ask          Ask ONE question and get their reply. This is a conversation,
@@ -129,9 +117,20 @@ writing prose at them - plain text you emit is a side channel they may not read.
   teach        They said they don't know the concept. Teach it - see below.
   propose_spec When you know enough to build, write the spec and get approval.
   note_understanding
-               Record that they showed they understand a concept - or that you
-               had to teach it. This is how they earn autonomy, so it must be
-               honest. See below.
+               Put a concept on their skill tree: one they showed they hold,
+               or one they fumbled. See below.
+
+HOW YOU TALK
+You're a teammate typing in the same terminal, not a document. Talk like it.
+- contractions always. "it's", "you'd", "won't".
+- short. if a sentence has a semicolon in it, it's two sentences.
+- no openers and no sign-offs: no "Great question", no "Certainly", no "Let me
+  know if". Say the thing.
+- none of the formal-register words models reach for: "utilize", "leverage",
+  "ensure", "facilitate", "robust", "essentially", "it's worth noting",
+  "in order to", "additionally", "furthermore".
+- plain dashes only, never an em dash.
+- casual is not sloppy. technical terms stay exact, and specs stay precise.
 
 HOW TO INTERROGATE
 - One decision per question. If it contains "and" or a parenthetical
@@ -145,8 +144,14 @@ HOW TO INTERROGATE
   you something else first, put the question back in one line rather than
   restating the whole thing.
 - Never ask what the repo already answers. You can see the files and README.
+- Never ask about what their skill tree already covers, beyond the one short
+  checks it allows.
 - If they answer vaguely, say so and re-ask. Do not accept a non-answer and
   quietly pick something.
+- If they answer wrong about how something works, say so in one plain line -
+  "other way round, len() is the count, not the last index" - record it as solid=false, and carry
+  on. Don't quietly build the right thing over their wrong answer, and don't
+  turn it into a quiz either.
 - If they ask YOU something, answer it and then return to your question. Their
   question does not cost them their turn. But answer it the way an intern
   would:
@@ -179,18 +184,34 @@ TEACHING RULES (these matter most)
   team would argue about. That is what they cannot get from a definition.
 - Ground it in THIS repo, using files you can actually see.
 
-RECORDING WHAT THEY KNOW
-- Call \`note_understanding\` with solid=true only when they EXPLAINED something
-  - named the mechanism, said what breaks without it, chose between options and
-  said why. Answering "postgres" or "yes" is a decision, not an explanation.
-- Call it with solid=false when you had to teach a concept, or when they
-  claimed a concept and then could not use it.
-- One call per concept, and only for concepts with real names. Do not record
-  project trivia like "they want it in postgres".
-- Do not tell them you are recording it and do not use it as praise. It is a
-  record, not a reward.
-- Be strict. Recording something as solid means you stop asking about it, and
-  a wrong entry means they never get asked about a thing they do not know.
+THE SKILL TREE
+Everything they show you or get taught goes on one tree that follows them
+across every project. \`teach\` records what you taught on its own; use
+\`note_understanding\` for everything else.
+
+- solid=true when their answer shows they hold the concept: they named the
+  mechanism, picked between options and said why, or described it correctly in
+  their own words. Plain words count - they do not need the jargon. "yes" or
+  "postgres" alone is a decision, not an explanation.
+- Do not hold out for a textbook answer. Being too strict here is the failure
+  that has actually happened, and it turns every session into the same exam. If
+  they clearly get it, record it and move on.
+- solid=false when they claimed a concept and then could not use it.
+- breadth=general for concepts that carry across projects: idempotency, Rust
+  ownership, SQL joins, retries with backoff. breadth=niche for one-off or
+  specialised knowledge: one library's quirks, one API's pagination, a file
+  format they touched once. General skills count everywhere; niche ones get a
+  quick re-check in a new project, because one-off knowledge fades.
+- requires: at most three skills this one builds on directly. Reuse the exact
+  names already on the tree whenever it is the same idea - "visibility timeout"
+  and "SQS visibility timeout" are one skill, not two.
+- Name it the way an engineer would say it out loud: "rust macros", not "Rust
+  declarative macros (macro_rules!)". Short names are the ones that get reused
+  instead of growing a near-duplicate next to them.
+- One call per concept, and only concepts with real names. Not project facts
+  like "they want it in postgres".
+- Do not tell them you recorded it and do not use it as praise. dum shows new
+  skills on its own.
 
 THE SPEC
 - Every decision they made appears in it as a decision.
@@ -198,6 +219,11 @@ THE SPEC
   "explicitly out of scope".
 - Anything they answered so vaguely it does not constrain the code goes under
   "still unresolved" - say so plainly rather than quietly choosing.
+
+YOUR MEMORY HAS A CUTOFF
+There are libraries, versions, and models newer than anything you remember. If
+they name one you don't recognise, look it up before you say a word about it.
+Never tell them something doesn't exist or isn't out yet from memory alone.
 
 AFTER APPROVAL
 Build it. Stay inside this repository. If following the spec would produce
@@ -258,6 +284,14 @@ function recall(repo: Repo): string | undefined {
   }
 }
 
+const BREADTH = z
+  .enum(["general", "niche"])
+  .describe("general if it carries across projects, niche if it is one-off or specialised");
+
+const REQUIRES = z
+  .array(z.string())
+  .describe("Up to three skills this one directly builds on, using names already on the tree where they exist");
+
 const QUIT = new Set(["exit", "quit", ":q", "bye"]);
 
 /**
@@ -287,19 +321,31 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   // interrogation rather than being charged to the first answer you give.
   debugTo(repo.root);
 
-  // Loaded once per session, rewritten on every change, so a crash mid-session
-  // still leaves everything earned up to that point on disk.
-  let knowledge = know.read(repo.root);
-  const publishLevel = () => store.setLevel(know.toNext(knowledge));
-  publishLevel();
+  // The tree is shared by every dum session on the machine, so every change
+  // re-reads it first rather than writing back a copy loaded at startup - two
+  // sessions in two repos would otherwise erase each other's skills. Old
+  // per-repo records fold in once, here, and are left where they were.
+  {
+    const t = skills.read();
+    const m = skills.migrate(t, repo.root);
+    if (m !== t) skills.write(m);
+    store.setSkills(skills.summary(m, repo.root));
+  }
 
-  function record(entry: { topic: string; solid: boolean; why: string }) {
-    const before = know.level(knowledge);
-    knowledge = know.note(knowledge, entry);
-    know.write(repo.root, knowledge);
-    publishLevel();
-    const after = know.level(knowledge);
-    if (after !== before) store.note(`the intern now trusts you as: ${after}`);
+  function record(entry: skills.Entry) {
+    // Capped here rather than in the schema: a fourth prerequisite is not
+    // worth failing the tool call over.
+    entry = { ...entry, requires: entry.requires.slice(0, 3) };
+    const before = skills.find(skills.read(), entry.name);
+    const t = skills.note(skills.read(), entry, repo.root);
+    skills.write(t);
+    store.setSkills(skills.summary(t, repo.root));
+    // Shown, so a wrong entry can be disputed while it is fresh rather than
+    // discovered weeks later as a question that stopped being asked.
+    if (entry.solid && !before?.solid) {
+      const name = skills.find(t, entry.name)?.name ?? entry.name;
+      store.note(`+ skill: ${name}${entry.breadth === "niche" ? " (niche)" : ""}`);
+    }
   }
   const wizard = new Wizard(repo);
   wizard.start();
@@ -355,19 +401,16 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   const pending: { deliver: ((text: string) => void) | null } = { deliver: null };
 
   /**
-   * The first turn: the bar, what they have already proven, how much rope that
-   * earns, the repo, and the request.
+   * The first turn: the bar, the skill tree, the repo, and the request.
    *
-   * Autonomy is only applied under anti-vibe. In `understand` they explicitly
-   * asked to be made to understand the implementation, and quietly turning that
-   * down because they have done well would be the tool overriding a choice they
-   * made on purpose.
+   * The tree goes in under both modes. Under anti-vibe it matters less, but it
+   * still tells the intern which concepts to name back to them without
+   * explaining.
    */
   function opening(req: string): string {
     return [
       BAR[mode],
-      know.describe(knowledge),
-      mode === "anti-vibe" ? AUTONOMY[know.level(knowledge)] : "",
+      skills.describe(skills.read(), repo.root),
       describe(repo),
       `THEIR REQUEST:\n${req}`,
     ]
@@ -426,13 +469,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           why_it_exists: z.string().describe("What breaks without it"),
           in_industry: z.string().describe("Real-world use and the live tradeoffs"),
           here: z.string().describe("What it would mean in this specific repo"),
+          breadth: BREADTH,
+          requires: REQUIRES,
         },
-        async (args) => {
+        async ({ breadth, requires, ...lesson }) => {
           await drainWizard();
-          store.teach(args);
+          store.teach(lesson);
           // Recorded here rather than left to the model: it just taught the
           // concept, so "they did not hold this" is a fact, not a judgement.
-          record({ topic: args.concept, solid: false, why: "taught in session" });
+          record({ name: lesson.concept, solid: false, breadth, requires, why: "taught in session" });
           return {
             content: [
               {
@@ -445,16 +490,26 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       ),
       tool(
         "note_understanding",
-        "Record that they demonstrated a concept, or that you had to teach it. This is how they earn autonomy - be strict.",
+        "Put a concept on their skill tree: one they showed they hold, or one they fumbled.",
         {
-          concept: z.string().describe("The industry name for it"),
+          concept: z
+            .string()
+            .describe("The industry name for it. Reuse the tree's exact name if it is already there."),
           solid: z
             .boolean()
-            .describe("True only if THEY explained it. False if you taught it or they fumbled it."),
+            .describe("True if their answer showed they hold it, in any words. False if they fumbled it."),
+          breadth: BREADTH,
+          requires: REQUIRES,
           why: z.string().describe("One sentence: what they said that showed it, or did not."),
         },
         async (args) => {
-          record({ topic: args.concept, solid: args.solid, why: args.why });
+          record({
+            name: args.concept,
+            solid: args.solid,
+            breadth: args.breadth,
+            requires: args.requires,
+            why: args.why,
+          });
           return {
             content: [
               { type: "text" as const, text: "Recorded. Do not mention this to them." },
@@ -544,17 +599,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       cwd: repo.root,
       systemPrompt: { type: "preset", preset: "claude_code", append: CONTRACT },
       mcpServers: { dum: tools },
-      allowedTools: [
-        "mcp__dum__ask",
-        "mcp__dum__teach",
-        "mcp__dum__propose_spec",
-        "mcp__dum__note_understanding",
-      ],
       // The feed the code pane is built on. Without it a file only exists once
       // it has been written, and "watch it being written" is a replay.
       includePartialMessages: true,
       ...(resume ? { resume } : {}),
+      // dum's own tools are let through here rather than listed in
+      // allowedTools. Listing them made the SDK warn, on every run, that
+      // canUseTool is shadowed for them - and that warning lands on the
+      // screen. They are how the intern talks to you, so they are never
+      // gated and never drawn as tool calls.
       canUseTool: async (name: string, args: Record<string, unknown>) => {
+        if (name.startsWith("mcp__dum__")) {
+          return { behavior: "allow" as const, updatedInput: args };
+        }
         if (!approved && MUTATING.has(name)) {
           gateEngaged = true;
           store.toolEvent(name, detail(repo.root, args), "held");

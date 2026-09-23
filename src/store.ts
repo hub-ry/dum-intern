@@ -14,7 +14,6 @@
 
 import { readFileSync } from "node:fs";
 import type { Mode } from "./session.ts";
-import type { Level } from "./knowledge.ts";
 
 export type Outcome = "ran" | "held" | "refused";
 
@@ -90,8 +89,8 @@ export type State = {
   status: string;
   code: CodeView | null;
   stage: Stage;
-  /** How much the intern trusts you here, and how far off the next step is. */
-  standing: { level: Level; have: number; need: number };
+  /** Skills on the tree that count in this repo, and how many are still shaky. */
+  skills: { known: number; shaky: number };
 };
 
 export class Store {
@@ -133,7 +132,7 @@ export class Store {
       status: "",
       code: null,
       stage: { kind: "code" },
-      standing: { level: "new", have: 0, need: 2 },
+      skills: { known: 0, shaky: 0 },
     };
   }
 
@@ -268,9 +267,9 @@ export class Store {
     this.append({ kind: "review", text });
   }
 
-  /** How much the intern trusts you here, recomputed whenever it changes. */
-  setLevel(standing: { level: Level; have: number; need: number }) {
-    this.patch({ standing });
+  /** The skill tree changed. */
+  setSkills(skills: { known: number; shaky: number }) {
+    this.patch({ skills });
   }
 
   /** Ask one question and park until it is answered. */

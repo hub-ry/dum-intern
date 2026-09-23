@@ -83,10 +83,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         <Text dimColor>{"  " + state.repo + "  "}</Text>
         <Text color="#87afd7">{state.mode}</Text>
         <Text dimColor>{"  "}</Text>
-        <Text color={standingColor(state.standing.level)}>{state.standing.level}</Text>
-        {state.standing.level === "senior" ? null : (
-          <Text dimColor>{`  ${state.standing.have}/${state.standing.need} explained`}</Text>
-        )}
+        <Text color="#87af87">{`${state.skills.known} known`}</Text>
+        {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
         <Box flexGrow={1} />
         <Text dimColor>
           {focus === "tree" ? "tab: back   j/k   h/l   ⏎ open" : "tab: files   ? asks anything   ctrl-t: transcript"}
@@ -114,13 +112,6 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       </Box>
     </Box>
   );
-}
-
-/** Earned standing, coloured so a change is visible without reading it. */
-function standingColor(level: string): string {
-  if (level === "senior") return "#87af87";
-  if (level === "trusted") return "#87afd7";
-  return "#8a8a8a";
 }
 
 function promptFor(p: Prompt): string {
