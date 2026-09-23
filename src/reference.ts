@@ -20,9 +20,8 @@
 // alone: its persona is one short prompt, it is the part of this program that
 // most depends on tone, and it is not worth risking to save a process.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Repo } from "./repo.ts";
-import { debug, lastText } from "./wizard.ts";
+import { Channel } from "./channel.ts";
 
 const MODEL = "claude-sonnet-5";
 
@@ -107,109 +106,43 @@ Today is ${today}. Your memory stops well before that.
 - don't search what doesn't change. how a hash map works hasn't moved.`;
 }
 
-/** A one-slot mailbox, so a turn can be handed over before anyone is waiting. */
-class Chan<T> {
-  private buf: T[] = [];
-  private waiting: ((v: T) => void) | null = null;
-  push(v: T) {
-    const w = this.waiting;
-    if (w) {
-      this.waiting = null;
-      w(v);
-    } else this.buf.push(v);
-  }
-  take(): Promise<T> {
-    const v = this.buf.shift();
-    if (v !== undefined) return Promise.resolve(v);
-    return new Promise((r) => (this.waiting = r));
-  }
-}
-
 export class Reference {
-  private turns = new Chan<string>();
-  private replies = new Chan<string | null>();
-  private closed = false;
-  private repo: Repo;
-
   /**
    * Requests run one at a time, but they QUEUE rather than being dropped.
    *
    * The opposite of the wizard, deliberately. A quip that arrives late is
    * noise and gets thrown away; a question you typed is something you are
    * sitting there waiting for, and dropping it would look like the program
-   * ignored you.
+   * ignored you. Queueing is what the channel does on its own.
    */
-  private tail: Promise<unknown> = Promise.resolve();
+  private channel: Channel;
+  private repo: Repo;
 
   constructor(repo: Repo) {
     this.repo = repo;
+    this.channel = new Channel("reference", {
+      model: MODEL,
+      systemPrompt: `${VOICE}\n\n${lookup()}`,
+      // Read-only, plus the web. It has to be able to open the files it is
+      // reviewing, or a "review" is just the spec read back to you with
+      // opinions - and it has to be able to look past its training cutoff, or
+      // a question about anything recent gets "that doesn't exist" as an
+      // answer.
+      tools: TOOLS,
+      allowedTools: TOOLS,
+      cwd: repo.root,
+      thinking: { type: "disabled" },
+      settingSources: [],
+    });
   }
 
   start() {
-    const self = this;
-    async function* stream(): AsyncGenerator<any> {
-      for (;;) {
-        const next = await self.turns.take();
-        if (!next) return;
-        yield {
-          type: "user" as const,
-          message: { role: "user" as const, content: next },
-          parent_tool_use_id: null,
-        };
-      }
-    }
-
-    (async () => {
-      let out = "";
-      try {
-        const session = query({
-          prompt: stream(),
-          options: {
-            model: MODEL,
-            systemPrompt: `${VOICE}\n\n${lookup()}`,
-            // Read-only, plus the web. It has to be able to open the files it
-            // is reviewing, or a "review" is just the spec read back to you
-            // with opinions - and it has to be able to look past its training
-            // cutoff, or a question about anything recent gets "that doesn't
-            // exist" as an answer.
-            tools: TOOLS,
-            allowedTools: TOOLS,
-            cwd: this.repo.root,
-            thinking: { type: "disabled" },
-            settingSources: [],
-          },
-        });
-        for await (const msg of session as AsyncIterable<any>) {
-          if (msg.type === "assistant") {
-            // The answer is the last message. "Let me look that up" before a
-            // search is narration, not part of it.
-            const text = lastText(msg);
-            if (text) out = text;
-            continue;
-          }
-          if (msg.type === "result") {
-            const text = out.trim();
-            out = "";
-            this.replies.push(text || null);
-          }
-        }
-      } catch (err) {
-        debug("reference died:", (err as Error)?.message ?? err);
-        this.closed = true;
-        this.replies.push(null);
-      }
-    })();
+    this.channel.start();
   }
 
-  private send(body: string): Promise<string | null> {
-    if (this.closed) return Promise.resolve(null);
-    const run = this.tail.then(async () => {
-      this.turns.push(body);
-      return this.replies.take();
-    });
-    // Keep the chain alive even if one request blows up.
-    this.tail = run.catch(() => null);
-    return run;
+  private async send(body: string): Promise<string | null> {
+    const reply = await this.channel.send(body);
+    return reply?.text || null;
   }
 
   /** Answer something they typed. Null when it has nothing. */
@@ -246,7 +179,6 @@ export class Reference {
   }
 
   close() {
-    this.closed = true;
-    this.turns.push("");
+    this.channel.close();
   }
 }

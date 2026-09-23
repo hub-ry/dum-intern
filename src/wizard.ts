@@ -14,46 +14,11 @@
 // said, never something they were asked, and the timing enforces what a prompt
 // could only request.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync } from "node:fs";
 import type { Repo } from "./repo.ts";
-
-/**
- * The wizard fails silently by design - garnish that apologises is worse than
- * garnish that is absent. But silent failure is indistinguishable from a wizard
- * that simply had nothing to say, which makes it undebuggable. `DUM_DEBUG=1`
- * is the seam between those two.
- */
-const DEBUG = !!process.env.DUM_DEBUG;
-
-/**
- * Goes to a file, not to stderr.
- *
- * Under the panes there is no stderr to write to: Ink owns the screen, and a
- * line printed behind its back sits there until the next full redraw. A log
- * you can `tail -f` in another window is also just better for a thing that
- * fires once per answer.
- */
-export function debug(...a: unknown[]) {
-  if (!DEBUG) return;
-  const line = a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
-  try {
-    appendFileSync(`${DEBUG_LOG}`, `${new Date().toISOString()} [wizard] ${line}\n`);
-  } catch {
-    /* debugging must never be the thing that breaks the run */
-  }
-}
-
-let DEBUG_LOG = "/dev/null";
-/** Pointed at the repo once one is known - `debug` is called before that. */
-export function debugTo(root: string) {
-  try {
-    mkdirSync(`${root}/.dum`, { recursive: true });
-    DEBUG_LOG = `${root}/.dum/debug.log`;
-  } catch {
-    /* leave it at /dev/null */
-  }
-}
+import { Channel } from "./channel.ts";
+import { Checker } from "./checker.ts";
+import { debug } from "./debug.ts";
 
 /**
  * Sonnet, not Haiku, and this was measured rather than assumed.
@@ -102,9 +67,10 @@ YOUR MOVES
   client always shows up."
   This is a suggestion wearing a fact. Never phrase it as advice to them.
 - a nudge, when what they said is actually wrong. Not a different taste - a
-  wrong claim about how something works, or something that will break. The
-  shape is fixed: a question that makes them run the case in their head, then
-  one short pointer to where the answer lives.
+  wrong claim about how something works, or something that will break. A line
+  that says their approach has a problem is always a nudge, never a fact,
+  however you'd phrase it. The shape is fixed: a question that makes them run
+  the case in their head, then one short pointer to where the answer lives.
     "<question>? <pointer>."
   "what's in that map after the process restarts? state that has to survive a
   deploy usually lives in redis or the db."
@@ -117,7 +83,8 @@ YOUR MOVES
   never bare: a question with no pointer is just a riddle.
 
 HOW YOU SOUND
-- one sentence, or two short ones for a nudge. 35 words at the most.
+- one sentence, or two short ones for a nudge. aim for 20 words, never past
+  35 - it's read in a narrow column while they're typing.
 - lowercase, casual, warm. a friend leaning over and muttering it, not a
   lecture and not documentation. "yeah that's a lease" beats "this pattern is
   known as a lease".
@@ -126,10 +93,11 @@ HOW YOU SOUND
   "facilitate", "robust", "essentially", "it's worth noting", "in order to",
   "additionally", "furthermore".
 - plain dashes only. never use an em dash.
-- never "you should", "consider", "make sure", "be careful", "I'd recommend",
-  "note that", "worth doing", "drop the", "before locking that in". Say what
-  engineers do, or ask the question that shows the gap.
-  Telling them what to do is the intern's job and the spec's, not yours.
+- never tell them to do something. no "you should", "consider", "make sure",
+  "be careful", "I'd recommend", "note that", and no imperatives aimed at
+  them - "check...", "use...", "add...". say what engineers do, or ask the
+  question that shows the gap. telling them what to do is the intern's job
+  and the spec's, not yours.
 - never flatter, never judge the idea, never hedge.
 
 ACCURACY OUTRANKS EVERYTHING ELSE HERE
@@ -170,7 +138,9 @@ Exactly one of:
   pass
 No quotes, no preamble, no explanation of why you passed.`;
 
-export type Quip = { text: string; about: string };
+export type Kind = "fact" | "nudge";
+
+export type Quip = { text: string; about: string; kind: Kind };
 
 /**
  * Everything the wizard is allowed to know: what they are building, and the
@@ -178,24 +148,6 @@ export type Quip = { text: string; about: string };
  * `consider` for why that matters more than it looks.
  */
 export type Exchange = { request: string; answer: string };
-
-/** A one-slot mailbox, so a turn can be handed over before anyone is waiting. */
-class Chan<T> {
-  private buf: T[] = [];
-  private waiting: ((v: T) => void) | null = null;
-  push(v: T) {
-    const w = this.waiting;
-    if (w) {
-      this.waiting = null;
-      w(v);
-    } else this.buf.push(v);
-  }
-  take(): Promise<T> {
-    const v = this.buf.shift();
-    if (v !== undefined) return Promise.resolve(v);
-    return new Promise((r) => (this.waiting = r));
-  }
-}
 
 /**
  * Strip quotes the model wrapped the whole line in, and nothing else.
@@ -208,13 +160,6 @@ function clean(s: string): string {
   const t = s.trim();
   const m = /^(["'`])([\s\S]*)\1$/.exec(t);
   return (m && !m[2]!.includes(m[1]!) ? m[2]! : t).trim();
-}
-
-/** The text of one assistant message, or "" if it was only tool calls. */
-export function lastText(msg: any): string {
-  let text = "";
-  for (const b of msg?.message?.content ?? []) if (b?.type === "text") text += b.text;
-  return text.trim();
 }
 
 /**
@@ -234,7 +179,11 @@ libraries, versions, models, and releases you've never heard of.
   before you say anything about it. one quick search, then your line.
 - never say or hint that something doesn't exist or isn't out yet from memory.
   not recognising it isn't evidence. if the search turns up nothing, pass.
-- don't search what you know cold. the name for a lease hasn't changed.`;
+- don't search what you know cold. the name for a lease hasn't changed.
+- after a search, still one line: no sources list, no links. if it matters
+  where it's from, say it in a few words ("per the release notes").
+- when a search turns up something current that bears on what they said - a
+  release date, a price, a breaking change, a deprecation - that's your line.`;
 }
 
 /**
@@ -258,8 +207,16 @@ export function opensWithQuestion(text: string): boolean {
  * with a paragraph break, because a quip is never two paragraphs. Dropping a
  * real line now and then is cheap; showing the wizard thinking out loud is not.
  */
-export function parse(raw: string): string | null {
-  let text = clean(raw);
+export function parseLine(raw: string): { kind: Kind; text: string } | null {
+  // After a search the model appends a "Sources:" list, because the search
+  // tool tells it to. That turned every searched line into two paragraphs and
+  // got it dropped - which is why a wizard that searched well looked like one
+  // that always passed. The list goes; a link inside the line keeps its words.
+  let text = clean(
+    raw
+      .replace(/\n\s*(?:\*\*)?(?:sources?|references?)(?:\*\*)?\s*:[\s\S]*$/i, "")
+      .replace(/\[([^\]]+)\]\((?:https?:)?[^)]*\)/g, "$1"),
+  );
   if (!text || /^pass\b/i.test(text) || /\bpass\W*$/i.test(text)) return null;
 
   // A nudge must open with its question, and that is checked here rather than
@@ -273,13 +230,19 @@ export function parse(raw: string): string | null {
   // that opened with the answer - exactly what the tag exists to catch.
   const tag = /^(fact|nudge)\s*:\s*/i.exec(text);
   if (!tag) return null;
+  const kind = tag[1]!.toLowerCase() as Kind;
   text = clean(text.slice(tag[0].length));
   if (!text) return null;
-  if (tag[1]!.toLowerCase() === "nudge" && !opensWithQuestion(text)) return null;
+  if (kind === "nudge" && !opensWithQuestion(text)) return null;
   if (/\n\s*\n/.test(text) || text.length > 320) return null;
   // Asked for in the prompt, enforced here, because the prompt alone missed
   // one in the first eval run.
-  return text.replace(/\s*\u2014\s*/g, " - ");
+  return { kind, text: text.replace(/\s*\u2014\s*/g, " - ") };
+}
+
+/** Just the text, for callers that do not care which kind of line it was. */
+export function parse(raw: string): string | null {
+  return parseLine(raw)?.text ?? null;
 }
 
 /**
@@ -288,100 +251,50 @@ export function parse(raw: string): string | null {
  * Measured before writing this: a fresh `query` per exchange cost 13-50 seconds,
  * almost none of it generation - it is the CLI process starting up. At that
  * latency the quip lands two exchanges after the thing it is about, and a margin
- * note about something you already stopped thinking about is just noise. It is
- * the same lesson this repo learned once already, when the intern went from
- * three stateless calls to one session.
+ * note about something you already stopped thinking about is just noise.
  *
  * Keeping the session also gets the no-repeat rule for free: the wizard can see
  * what it has already said, which no stateless call could.
  */
 export class Wizard {
-  private turns = new Chan<string>();
-  private replies = new Chan<Quip | null>();
+  private channel: Channel;
+  private checker: Checker;
   private busy = false;
-  private closed = false;
-  private repo: Repo;
 
-  // Written out rather than a parameter property: Node strips types, it does
-  // not compile them, and `constructor(private repo: Repo)` is syntax that
-  // needs compiling. tsc accepts it happily, so only running the thing finds it.
   constructor(repo: Repo) {
-    this.repo = repo;
+    this.channel = new Channel("wizard", {
+      model: MODEL,
+      systemPrompt: `${VOICE}\n\n${lookup()}`,
+      // Search and nothing else. Most quips never touch it; it is there for
+      // the thing it does not recognise, which is exactly where a model with a
+      // training cutoff says "that doesn't exist".
+      tools: ["WebSearch"],
+      allowedTools: ["WebSearch"],
+      cwd: repo.root,
+      // Every one of these is latency, and latency is the whole ballgame: a
+      // margin note that arrives after you have moved on is not a margin note.
+      // Measured at ~25s per quip with the defaults, which is slower than the
+      // person typing the next answer.
+      //
+      // `effort` defaults to high and thinking is on - both are for work, and
+      // this is one sentence. `settingSources: []` keeps the wizard out of the
+      // user's CLAUDE.md and project settings too, which it has no business
+      // reading: its whole character is one short system prompt, and a
+      // personal instructions file would quietly rewrite it.
+      effort: "medium",
+      thinking: { type: "disabled" },
+      settingSources: [],
+    });
+    this.checker = new Checker(repo);
   }
 
   /**
-   * Started before the first question is even asked, so the process spawn
-   * overlaps the interrogation instead of being charged to the first answer.
+   * Started before the first question is even asked, so the process spawns
+   * overlap the interrogation instead of being charged to the first answer.
    */
   start() {
-    const self = this;
-    async function* stream(): AsyncGenerator<any> {
-      for (;;) {
-        const next = await self.turns.take();
-        if (!next) return;
-        yield {
-          type: "user" as const,
-          message: { role: "user" as const, content: next },
-          parent_tool_use_id: null,
-        };
-      }
-    }
-
-    (async () => {
-      let out = "";
-      try {
-        const session = query({
-          prompt: stream(),
-          options: {
-            model: MODEL,
-            systemPrompt: `${VOICE}\n\n${lookup()}`,
-            // Search and nothing else. Most quips never touch it; it is there
-            // for the thing it does not recognise, which is exactly where a
-            // model with a training cutoff says "that doesn't exist".
-            tools: ["WebSearch"],
-            allowedTools: ["WebSearch"],
-            cwd: this.repo.root,
-            // Every one of these is latency, and latency is the whole ballgame:
-            // a margin note that arrives after you have moved on is not a margin
-            // note. Measured at ~25s per quip with the defaults, which is slower
-            // than the person typing the next answer.
-            //
-            // `effort` defaults to high and thinking is on - both are for work,
-            // and this is one sentence of trivia. `settingSources: []` keeps the
-            // wizard out of the user's CLAUDE.md and project settings too, which
-            // it has no business reading: its whole character is one short
-            // system prompt, and a personal instructions file would quietly
-            // rewrite it.
-            effort: "medium",
-            thinking: { type: "disabled" },
-            settingSources: [],
-          },
-        });
-        for await (const msg of session as AsyncIterable<any>) {
-          if (msg.type === "assistant") {
-            // Only the last message counts. With search in play the model can
-            // say "let me check" before the tool call, and that must never be
-            // glued onto the front of the line it lands on afterwards.
-            const text = lastText(msg);
-            if (text) out = text;
-            continue;
-          }
-          if (msg.type === "result") {
-            const text = parse(out);
-            debug(text ? `quip: ${text}` : `pass (raw: ${JSON.stringify(out.trim()).slice(0, 160)})`);
-            out = "";
-            this.replies.push(text ? { text, about: "" } : null);
-          }
-        }
-      } catch (err) {
-        // The wizard is garnish. It never takes the session down with it, and
-        // it never explains itself to the engineer - a margin note that
-        // apologises is worse than one that simply is not there.
-        debug("died:", (err as Error)?.message ?? err);
-        this.closed = true;
-        this.replies.push(null);
-      }
-    })();
+    this.channel.start();
+    this.checker.start();
   }
 
   /**
@@ -393,8 +306,8 @@ export class Wizard {
    * subject would be two answers stale.
    */
   async consider(ex: Exchange): Promise<Quip | null> {
-    if (this.busy || this.closed) {
-      debug(`skipped (${this.closed ? "closed" : "busy"})`);
+    if (this.busy || !this.channel.alive) {
+      debug(`wizard skipped (${this.channel.alive ? "busy" : "closed"})`);
       return null;
     }
     this.busy = true;
@@ -413,19 +326,27 @@ export class Wizard {
       // answer that means nothing on its own - "yes", "option A", "postgres" -
       // now has nothing for the wizard to grab, which is exactly when it should
       // have stayed quiet anyway.
-      this.turns.push(
+      const reply = await this.channel.send(
         [`they are building: ${ex.request}`, ``, `they just said: ${ex.answer}`].join("\n"),
       );
-      const quip = await this.replies.take();
-      return quip ? { ...quip, about: ex.answer.slice(0, 80) } : null;
+      if (!reply) return null;
+      const line = parseLine(reply.text);
+      debug(
+        line
+          ? `wizard ${line.kind}${reply.searched ? " (searched)" : ""}: ${line.text}`
+          : `wizard pass (raw: ${JSON.stringify(reply.text).slice(0, 160)})`,
+      );
+      if (!line) return null;
+      if (!reply.searched && !(await this.checker.allows(ex, line))) return null;
+      return { ...line, about: ex.answer.slice(0, 80) };
     } finally {
       this.busy = false;
     }
   }
 
   close() {
-    this.closed = true;
-    this.turns.push(""); // ends the generator, which ends the query
+    this.channel.close();
+    this.checker.close();
   }
 }
 

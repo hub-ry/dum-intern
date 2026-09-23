@@ -15,7 +15,8 @@
     "preview": "tsx tools/preview.tsx",
     "hysa": "tsx tools/hysa.ts",
     "test": "tsx --test test/*.test.ts",
-    "eval:wizard": "tsx tools/wizard-eval.ts"
+    "eval:wizard": "tsx tools/wizard-eval.ts",
+    "eval:checker": "tsx tools/checker-eval.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

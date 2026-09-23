@@ -24,7 +24,8 @@ import { peekString, WATCHED } from "./stream.ts";
 import * as skills from "./skills.ts";
 import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
-import { Wizard, debug as wdebug, debugTo, log as logQuip, type Quip } from "./wizard.ts";
+import { Wizard, log as logQuip, type Quip } from "./wizard.ts";
+import { debug as wdebug, debugTo } from "./debug.ts";
 
 /**
  * How high the bar is - the level of abstraction you must explain yourself at.

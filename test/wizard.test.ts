@@ -71,3 +71,53 @@ test("a dot inside a number does not end the first sentence", () => {
   assert.ok(!opensWithQuestion("floats drift. what does 0.1 + 0.2 give you?"));
   assert.ok(!opensWithQuestion("no question here at all"));
 });
+
+test("a sources list after a searched line is stripped, not a reason to drop it", () => {
+  // Verbatim shape from a real run: the search tool asks for sources.
+  const raw =
+    "fact: opus 5.5 came out september 22 - $4/$20 per million tokens, cheaper than opus 5.\n\nSources:\n- [Introducing Claude Opus 5.5](https://www.anthropic.com/claude-opus-5-5)";
+  assert.equal(parse(raw), "opus 5.5 came out september 22 - $4/$20 per million tokens, cheaper than opus 5.");
+});
+
+test("a markdown link inside a line keeps its words", () => {
+  assert.equal(
+    parse("fact: that's a lease - [sqs](https://aws.amazon.com/sqs/) calls it a visibility timeout."),
+    "that's a lease - sqs calls it a visibility timeout.",
+  );
+});
+
+test("a line that mentions sources mid-sentence is left alone", () => {
+  assert.equal(parse("fact: kafka keeps sources of truth in a log."), "kafka keeps sources of truth in a log.");
+});
+
+// The checker's reply is parsed in code, and two of its rules live here rather
+// than in its prompt.
+import { judge } from "../src/checker.ts";
+
+test("a clean ok passes", () => {
+  assert.equal(judge("said: right\nline: ok", "fact").ok, true);
+});
+
+test("a drop carries its reason", () => {
+  const j = judge("said: no claim\nline: drop: wrong name, that's a lease", "fact");
+  assert.equal(j.ok, false);
+  assert.equal(j.reason, "wrong name, that's a lease");
+});
+
+test("a fact on a wrong answer is dropped even if the checker says ok", () => {
+  assert.equal(judge("said: wrong\nline: ok", "fact").ok, false);
+});
+
+test("a nudge on a choice the checker calls right still passes", () => {
+  // "i'll store the amounts as floats" contains no false claim, so the checker
+  // says right - and the nudge about it is the whole point.
+  assert.equal(judge("said: right\nline: ok", "nudge").ok, true);
+});
+
+test("a nudge on a wrong answer can pass", () => {
+  assert.equal(judge("said: wrong\nline: ok", "nudge").ok, true);
+});
+
+test("a reply that is neither ok nor drop is a drop", () => {
+  assert.equal(judge("hmm, hard to say", "fact").ok, false);
+});
