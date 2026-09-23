@@ -22,13 +22,21 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Repo } from "./repo.ts";
-import { debug } from "./wizard.ts";
+import { debug, lastText } from "./wizard.ts";
 
 const MODEL = "claude-sonnet-5";
 
 const VOICE = `You are a senior engineer sitting near someone who is having a junior build
 something for them. You have seen a lot of systems. You are not in their
 conversation and you never run it.
+
+You talk the way you would at their desk, not the way documentation reads:
+contractions, short sentences, no semicolons, no "Great question", no sign-off.
+None of the formal-register words: "utilize", "leverage", "ensure",
+"facilitate", "robust", "essentially", "it's worth noting", "in order to",
+"additionally", "furthermore".
+Plain dashes only, never an em dash. Casual is not vague - names and numbers
+stay exact.
 
 You get exactly two kinds of message, each marked at the top.
 
@@ -74,6 +82,30 @@ Rules:
 OUTPUT
 For a question, the answer alone. For a review, the findings alone, or exactly
 \`ok\`. No headers, no preamble, no sign-off.`;
+
+const TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
+
+/**
+ * Today, and the rule that comes with it.
+ *
+ * Stricter than the wizard's version because this is where you ask about
+ * things directly. "what changed in X 5.5" answered from memory is either
+ * stale or a denial that X 5.5 exists, and neither is acceptable in a coding
+ * tool.
+ */
+function lookup(now = new Date()): string {
+  const today = now.toISOString().slice(0, 10);
+  return `LOOKING THINGS UP
+Today is ${today}. Your memory stops well before that.
+- anything that changes over time - versions, releases, model names, pricing,
+  api signatures, deprecations, "what's the current way to" - search first and
+  answer from what you find. don't wait to be asked twice.
+- never say something doesn't exist or isn't released from memory alone. not
+  recognising it is a reason to search, not an answer.
+- say where it came from in a few words when you searched ("per the release
+  notes", "the docs say"), so they know it's fresh and not remembered.
+- don't search what doesn't change. how a hash map works hasn't moved.`;
+}
 
 /** A one-slot mailbox, so a turn can be handed over before anyone is waiting. */
 class Chan<T> {
@@ -134,10 +166,14 @@ export class Reference {
           prompt: stream(),
           options: {
             model: MODEL,
-            systemPrompt: VOICE,
-            // Read-only. It has to be able to open the files it is reviewing,
-            // or a "review" is just the spec read back to you with opinions.
-            allowedTools: ["Read", "Glob", "Grep"],
+            systemPrompt: `${VOICE}\n\n${lookup()}`,
+            // Read-only, plus the web. It has to be able to open the files it
+            // is reviewing, or a "review" is just the spec read back to you
+            // with opinions - and it has to be able to look past its training
+            // cutoff, or a question about anything recent gets "that doesn't
+            // exist" as an answer.
+            tools: TOOLS,
+            allowedTools: TOOLS,
             cwd: this.repo.root,
             thinking: { type: "disabled" },
             settingSources: [],
@@ -145,7 +181,10 @@ export class Reference {
         });
         for await (const msg of session as AsyncIterable<any>) {
           if (msg.type === "assistant") {
-            for (const b of msg.message?.content ?? []) if (b.type === "text") out += b.text;
+            // The answer is the last message. "Let me look that up" before a
+            // search is narration, not part of it.
+            const text = lastText(msg);
+            if (text) out = text;
             continue;
           }
           if (msg.type === "result") {
