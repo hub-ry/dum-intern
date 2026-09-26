@@ -17,6 +17,7 @@ import * as learn from "./learn.ts";
 import * as taste from "./taste.ts";
 import * as shell from "./shell.ts";
 import { debugTo } from "./debug.ts";
+import { shell as pty } from "./pty.ts";
 import { filtered, ON as MOUSE_ON, OFF as MOUSE_OFF } from "./mouse.ts";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
@@ -535,15 +536,22 @@ async function main() {
   const ui = tui ? await startInk(store, readLayout(repo.root)) : null;
   const stop = ui ? ui.stop : startPlain(store, repo.name, mode);
   // `!cmd`: the panes step aside while it runs, and come back after.
+  // In the panes, `!cmd` types into the shell page. Plain mode has no pages,
+  // so it runs the command in the terminal directly.
   let shelling = false;
   store.onShell = (cmd) => {
+    if (ui) {
+      pty.setCwd(repo.root);
+      store.openShell();
+      if (cmd) pty.write(cmd + "\r");
+      return;
+    }
     if (shelling) return;
     shelling = true;
-    const go = async () => {
-      const code = await shell.run(cmd, repo.root, !!ui);
-      store.note(cmd ? `$ ${cmd}  (exit ${code})` : "back from the shell.");
-    };
-    void (ui ? ui.suspend(go) : go()).finally(() => (shelling = false));
+    void shell
+      .run(cmd, repo.root, false)
+      .then((code) => store.note(cmd ? `$ ${cmd}  (exit ${code})` : "back from the shell."))
+      .finally(() => (shelling = false));
   };
   try {
     // An unfinished hole is the first thing you see on the way back in.
@@ -616,7 +624,7 @@ async function main() {
   }
 }
 
-async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () => void; suspend: (fn: () => Promise<void>) => Promise<void> }> {
+async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () => void }> {
   // Imported lazily so the plain path never pays to load React and Ink, which matters for `dum`
   // in a pipe and for the startup cost of `--plain`.
   const [{ render }, React, { App }] = await Promise.all([
@@ -633,28 +641,13 @@ async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () =>
     mouseOn();
     return render(React.createElement(App, { store, layout }), { exitOnCtrlC: true, stdin: input.stdin as never });
   };
-  let app = mount();
+  const app = mount();
   return {
     stop: () => {
       app.unmount();
       input.close();
       mouseOff();
-    },
-    // Unmounting releases stdin and Node would exit mid-prompt; `hold` keeps it alive.
-    suspend: async (fn) => {
-      const hold = setInterval(() => {}, 1 << 30);
-      app.unmount();
-      mouseOff();
-      await app.waitUntilExit().catch(() => {});
-      stdin.ref();
-      stdout.write("\x1b[2J\x1b[H");
-      try {
-        await fn();
-      } finally {
-        stdout.write("\x1b[2J\x1b[H");
-        app = mount();
-        clearInterval(hold);
-      }
+      pty.kill();
     },
   };
 }

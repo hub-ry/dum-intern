@@ -118,9 +118,11 @@ test("the stage flips back like alt-tab, and a long reply opens on it", async ()
   s.pageStage(1);
   assert.equal(s.getSnapshot().stage.kind, "transcript");
   s.pageStage(1);
+  assert.equal(s.getSnapshot().stage.kind, "shell");
+  s.pageStage(1);
   assert.equal(s.getSnapshot().stage.kind, "code");
   s.pageStage(-1);
-  assert.equal(s.getSnapshot().stage.kind, "transcript");
+  assert.equal(s.getSnapshot().stage.kind, "shell");
 });
 
 test("holes a write would add are counted, not the ones already there", async () => {

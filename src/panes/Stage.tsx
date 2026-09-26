@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { Code } from "./Code.tsx";
+import { Shell } from "./Shell.tsx";
 import { collapse, format, markdown, c } from "../lines.ts";
 import { scrolls } from "../mouse.ts";
 import type { Entry, Stage as StageT, CodeView } from "../store.ts";
@@ -40,7 +41,7 @@ export function Stage({
   const tabs = (
     <PageBar
       width={width}
-      on={stage.kind === "code" ? "file" : stage.kind === "transcript" ? "log" : "reply"}
+      on={stage.kind === "code" ? "file" : stage.kind === "transcript" ? "log" : stage.kind === "shell" ? "shell" : "reply"}
       has={{ file: !!code, reply: !!reply }}
       focused={focused}
     />
@@ -65,6 +66,15 @@ export function Stage({
     );
   }
 
+  if (stage.kind === "shell") {
+    return (
+      <Box flexDirection="column" width={width}>
+        {tabs}
+        <Shell width={width} height={body} focused={focused} />
+      </Box>
+    );
+  }
+
   const page = pageFor(stage, transcript, width);
   return (
     <Box flexDirection="column" width={width}>
@@ -85,7 +95,7 @@ type Page = {
   tail?: boolean;
 };
 
-function pageFor(stage: Exclude<StageT, { kind: "code" }>, transcript: Entry[], width: number): Page {
+function pageFor(stage: Exclude<StageT, { kind: "code" | "shell" }>, transcript: Entry[], width: number): Page {
   switch (stage.kind) {
     case "answer":
       return {
@@ -139,11 +149,11 @@ function PageBar({
   focused,
 }: {
   width: number;
-  on: "file" | "reply" | "log";
+  on: "file" | "reply" | "log" | "shell";
   has: { file: boolean; reply: boolean };
   focused: boolean;
 }) {
-  const tab = (name: "file" | "reply" | "log", there: boolean) =>
+  const tab = (name: "file" | "reply" | "log" | "shell", there: boolean) =>
     name === on ? (
       <Text key={name} bold inverse={focused} color={focused ? undefined : "#87afd7"}>
         {` ${name} `}
@@ -157,7 +167,8 @@ function PageBar({
         {tab("file", has.file)}
         {tab("reply", has.reply)}
         {tab("log", true)}
-        <Text dimColor>{"   ⇧tab back" + (focused ? "  ←/→ pages" : "")}</Text>
+        {tab("shell", true)}
+        <Text dimColor>{"   ⇧tab back" + (focused && on !== "shell" ? "  ←/→ pages" : "")}</Text>
       </Text>
     </Box>
   );

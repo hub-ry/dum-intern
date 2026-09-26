@@ -315,6 +315,12 @@ language:
   TODO(dum) block, and fill_todo decides off their tree what you may fill.
 At every level, the gap is the concept being learned, never boilerplate. The
 gate measures the code you hand fill_todo and refuses a gap over their limit.
+A gap must be workable from what's on screen plus the basics (variables,
+strings, ints, printing - never explain those). An idiom they haven't seen -
+\`while (in >> x)\`, a list comprehension, a range-for - is not a gap on first
+sight: show it working once in the code you write, then let a gap use it
+again. Worked example first, then the gap. And keep a novice's program
+small: one screen, one idea.
 The description under a hole fades too: a novice gets the exact steps
 ("allocate newCap ints, copy size_ of them, free the old block"), developing
 gets what it must do ("grow the buffer, keeping the elements"), fluent gets

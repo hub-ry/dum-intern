@@ -30,7 +30,20 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   const hasCode = state.stage.kind === "code" && state.code !== null;
   const ring: Focus[] = ["input", "stage", "tree"];
 
+  const inShell = focus === "stage" && state.stage.kind === "shell";
+
   useInput((ch, key) => {
+    // In the shell every key is the shell's (it reads them raw), except
+    // shift-tab, which is the way back out.
+    if (inShell) {
+      // Out of the shell lands you in the input, never in whatever page is
+      // underneath - a file there would take your next keystrokes as vim.
+      if (key.tab && key.shift) {
+        store.flipStage();
+        setFocus("input");
+      }
+      return;
+    }
     if (key.tab && !typing) {
       if (key.shift) return store.flipStage();
       return setFocus((f) => ring[(ring.indexOf(f) + 1) % ring.length]!);
@@ -42,6 +55,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     store.onEditorCommand = (cmd) => void scrolls.emit("code-cmd", cmd);
     return () => void (store.onEditorCommand = null);
   }, [store]);
+
+  // Opening the shell means you're about to type into it.
+  useEffect(() => {
+    if (state.stage.kind === "shell") setFocus("stage");
+  }, [state.stage.kind]);
 
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
   const cols = stdout?.columns ?? 80;
@@ -153,7 +171,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         </Box>
         <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" marginLeft={2}>
           <Text dimColor wrap="truncate-end">
-            {hint(focus, typing, hasCode)}
+            {hint(focus, typing, hasCode, inShell)}
           </Text>
         </Box>
       </Box>
@@ -181,7 +199,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   );
 }
 
-function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
+function hint(focus: Focus, typing: boolean, hasCode: boolean, inShell = false): string {
+  if (inShell) return "every key goes to the shell   ⇧tab: back";
   if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
   if (focus === "stage" && !hasCode) return "tab: files   j/k   space/b   ←/→ pages   ⇧tab back";
   if (focus === "stage" && hasCode) {

@@ -72,6 +72,7 @@ export type Stage =
   | { kind: "lesson"; lesson: Lesson }
   | { kind: "info"; title: string; body: string }
   | { kind: "reply"; text: string }
+  | { kind: "shell" }
   | { kind: "transcript" };
 
 export type State = {
@@ -106,7 +107,7 @@ export type State = {
 /** Past this, what dum says opens on the stage too. About six narrow lines. */
 const LONG_SAY = 170;
 
-const isReply = (s: Stage) => s.kind !== "code" && s.kind !== "transcript";
+const isReply = (s: Stage) => s.kind !== "code" && s.kind !== "transcript" && s.kind !== "shell";
 
 export class Store {
   private state: State;
@@ -177,7 +178,7 @@ export class Store {
       return;
     }
     // `:run`, `:graph`, `:log`, `:help` - dum's commands, vim's ex line.
-    const ex = /^:\s*(run|graph|log|help)\s*$/i.exec(text.trim());
+    const ex = /^:\s*(run|graph|log|help|shell)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
       return;
@@ -337,8 +338,14 @@ export class Store {
     this.patch({ skills });
   }
 
+  /** The shell page. Renderers that have one set `onShell` to type into it. */
+  openShell() {
+    if (this.state.stage.kind !== "shell") this.patch({ stage: { kind: "shell" } });
+  }
+
   /** One of dum's `:` commands, from the input or the file's `:` line. */
   command(name: string) {
+    if (name === "shell") return this.onShell?.("");
     if (name === "run") return this.runFile();
     if (name === "graph") return this.onGraph?.();
     if (name === "log") return this.toggleTranscript();
@@ -346,7 +353,7 @@ export class Store {
       return this.show(
         "dum commands",
         [
-          "!cmd      run it in a real shell. ! alone is your own shell until exit",
+          "!cmd      run it on the shell page. ! or :shell opens it",
           "?text     ask anything, answered off to the side",
           ":run      run the file on screen (compiled languages: the line to type)",
           ":graph    the skill graph, in your browser",
@@ -484,8 +491,10 @@ export class Store {
       ...(this.state.code ? [{ kind: "code" as const }] : []),
       ...(this.state.reply ? [this.state.reply] : []),
       { kind: "transcript" as const },
+      { kind: "shell" as const },
     ];
-    const at = pages.findIndex((p) => (p.kind === "code" || p.kind === "transcript" ? p.kind === this.state.stage.kind : p === this.state.stage));
+    const fixed = (k: string) => k === "code" || k === "transcript" || k === "shell";
+    const at = pages.findIndex((p) => (fixed(p.kind) ? p.kind === this.state.stage.kind : p === this.state.stage));
     this.patch({ stage: pages[(Math.max(0, at) + step + pages.length) % pages.length]! });
   }
 

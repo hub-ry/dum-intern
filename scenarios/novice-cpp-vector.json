@@ -18,6 +18,7 @@
     "minHoles": 1,
     "maxHoles": 1,
     "minCodeLines": 10,
-    "maxReplyLines": 6
+    "maxReplyLines": 6,
+    "maxCodeLines": 40
   }
 }

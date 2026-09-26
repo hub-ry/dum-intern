@@ -12,6 +12,9 @@ export type Wheel = { x: number; y: number; delta: number };
 /** Wheel events, in terminal coordinates (1-based). */
 export const mouse = new EventEmitter();
 
+/** Every non-mouse byte from the terminal, as typed - for the shell page. */
+export const keys = new EventEmitter();
+
 /** Scrolls routed to a pane by name: `scrolls.on("code", (delta) => ...)`. */
 export const scrolls = new EventEmitter();
 
@@ -67,13 +70,17 @@ export function filtered(real: NodeJS.ReadStream): { stdin: NodeJS.ReadStream; c
     const r = strip(held + chunk.toString("utf8"));
     held = r.held;
     for (const w of r.wheels) mouse.emit("wheel", w);
-    if (r.rest) out.write(r.rest);
+    if (r.rest) {
+      keys.emit("data", r.rest);
+      out.write(r.rest);
+    }
     // Nothing came to finish it: it was the escape key (or alt-[), not a report.
     if (held) {
       timer = setTimeout(() => {
         const h = held;
         held = "";
         timer = null;
+        keys.emit("data", h);
         out.write(h);
       }, ESC_WAIT);
     }

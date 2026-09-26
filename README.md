@@ -106,7 +106,9 @@ Claimed isn't known. Nobody watched me write that code. The first build that lea
 
 ### A shell, and no chords to collide with
 
-Learning a language includes running it, and the panes used to make that awkward. `!g++ -std=c++17 -Wall -o lab lab.cpp && ./lab` runs in a real shell. The panes step aside, the program gets the whole terminal (input and ctrl-c included), and Enter brings them back with nothing lost. `!` alone is my own shell until I `exit`.
+Learning a language includes running it, so the stage has a shell page next to the file, the reply and the log. It's my own `$SHELL` with my own prompt, running in the repo, started the first time I open it and kept for the session, so `cd`, history and env stick. `!` or `:shell` opens it from anywhere, and `!g++ -std=c++17 -Wall -o lab lab.cpp && ./lab` typed into the input runs there. While it has focus every key is the shell's: Tab completes, ctrl-c interrupts, interactive programs read their input. `shift-tab` is the one key that isn't, and it takes me back to the input.
+
+It's [node-pty](https://github.com/microsoft/node-pty) running the shell and xterm's headless emulator keeping the screen, so it behaves like the terminal it's inside.
 
 `:run` runs the open file for languages where that's one obvious command: python, node, ruby, go. For C, C++ and Rust it doesn't compile anything. It shows the line to type, because typing the compiler line is part of learning the language.
 
@@ -513,8 +515,8 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `←` `→`, `[` `]` | the stage's pages: file, reply, log | stage |
 | `j` `k`, `space` `b`, `g` `G` | scroll a reply or the log | stage |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
-| `!` + command | run it in a real shell - the panes step aside, enter comes back | input, file's `:` line |
-| `!` | your own shell, until `exit` | input |
+| `!` + command | run it on the shell page | input, file's `:` line |
+| `!`, `:shell` | open the shell page | input |
 | `:run` | run the open file. Compiled languages get the line to type instead | input, file's `:` line |
 | `:graph` | the skill graph, in the browser | input, file's `:` line |
 | `:log` | the full transcript on the stage | input, file's `:` line |
