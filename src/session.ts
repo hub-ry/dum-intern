@@ -311,11 +311,13 @@ where it goes:
 - after the build, the hole goes on line 2 of KEEP IT SHORT's three. Nothing more.
 
 HOLES
-In understand mode, every piece of the build that rests on a concept - the
-same kind of thing you'd ask about, not boilerplate or glue - is built as a
-hole first, and it's dum that decides whether you fill it:
-- write the file with a TODO(dum) block (same shape as above) for each such
-  piece, and everything else as real code.
+In understand mode, ALL code goes in through holes - includes and imports,
+control flow, boilerplate, glue. The gate refuses a Write or Edit to a source
+file that adds any code outside a TODO(dum) block. dum decides, off their tree,
+which blocks you may fill:
+- write the file as comments and TODO(dum) blocks only. One block per piece
+  that stands on one concept; a whole small file can be a handful of blocks.
+  Put the file's header comment and the blocks in the order the code goes.
 - then call fill_todo for each block with the code that goes there, indented
   to fit. If the skill is known on their tree, dum writes it in. If it isn't,
   dum leaves the hole for them to type - don't try to write it another way,
@@ -692,6 +694,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   const tools = createSdkMcpServer({
     name: "dum",
     version: "1.0.0",
+    // Never behind tool search. Deferred, the intern loaded these one at a
+    // time as it happened to need them - and in a real session it never
+    // loaded fill_todo at all, so holes weren't an option it could see and it
+    // wrote a whole file instead.
+    alwaysLoad: true,
     tools: [
       tool(
         "ask",
@@ -1058,6 +1065,22 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         }
         // Filling a hole is dum's call, made off the tree in fill_todo. An
         // Edit that rewrites a block would be the intern making it instead.
+        // Understand mode: code only enters through a hole. The intern writes
+        // the shape - comments and TODO(dum) blocks - and fill_todo decides,
+        // off the tree, which blocks it may fill. Asked for in the prompt,
+        // the intern once wrote a whole C++ file for someone with an empty
+        // tree. This is the version that can't be skipped.
+        const leak = mode === "understand" ? looseCode(name, args) : [];
+        if (leak.length) {
+          store.toolEvent(name, detail(repo.root, args), "refused");
+          return {
+            behavior: "deny" as const,
+            message: `In understand mode, code only goes in through holes. These lines aren't in a ${todos.MARKER} block: ${leak
+              .slice(0, 3)
+              .map((l) => JSON.stringify(l.trim()))
+              .join(", ")}${leak.length > 3 ? ` (+${leak.length - 3} more)` : ""}. Write the file as comments and TODO(dum) blocks only - includes, imports and control flow too - then call fill_todo for each block. dum fills the ones on their tree; the rest are theirs to type or explain.`,
+          };
+        }
         if (erasesHole(repo.root, name, args)) {
           store.toolEvent(name, detail(repo.root, args), "refused");
           return {
@@ -1232,6 +1255,19 @@ export function notAnAnswer(reply: string): boolean {
   return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
     reply.trim(),
   );
+}
+
+/** Code lines a Write or Edit would add outside any hole, in a gated source file. */
+export function looseCode(name: string, args: Record<string, unknown>): string[] {
+  const path = typeof args.file_path === "string" ? args.file_path : "";
+  if (!path || !todos.gated(path)) return [];
+  if (name === "Write") return todos.loose(String(args.content ?? ""), path);
+  if (name === "Edit") return todos.loose(String(args.new_string ?? ""), path);
+  if (name === "MultiEdit") {
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    return edits.flatMap((e: any) => todos.loose(String(e?.new_string ?? ""), path));
+  }
+  return [];
 }
 
 /**

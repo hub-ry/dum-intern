@@ -97,6 +97,42 @@ export function fill(text: string, concept: string, code: string): string | null
   return [...lines.slice(0, s[0]), ...body, ...lines.slice(s[1] + 1)].join("\n");
 }
 
+/**
+ * How a language writes a line comment, by file extension. Only languages in
+ * here are gated: without knowing what a comment looks like, "only holes and
+ * comments" can't be checked, and `#include` would pass as one.
+ */
+const COMMENTS: Record<string, RegExp> = {};
+for (const ext of ["c", "h", "cc", "cpp", "cxx", "hpp", "hh", "js", "mjs", "cjs", "ts", "tsx", "jsx", "java", "go", "rs", "swift", "kt", "cs", "php", "scala", "zig", "dart"])
+  COMMENTS[ext] = /^(\/\/|\/\*|\*\/?)/;
+for (const ext of ["py", "sh", "bash", "zsh", "rb", "pl", "r", "makefile", "mk", "cmake"]) COMMENTS[ext] = /^#(?!include|define|if|else|endif|pragma|import)/;
+for (const ext of ["lua", "sql", "hs"]) COMMENTS[ext] = /^--/;
+
+function lang(path: string): string {
+  const base = path.split("/").pop()!.toLowerCase();
+  if (base === "makefile" || base === "gnumakefile") return "makefile";
+  return base.includes(".") ? base.split(".").pop()! : "";
+}
+
+/** Whether this is a source file the hole rule applies to. */
+export function gated(path: string): boolean {
+  return lang(path) in COMMENTS;
+}
+
+/**
+ * Lines in `text` that are code outside any hole - what "code just appearing"
+ * looks like. Blank lines, comments and TODO(dum) blocks (with their one-line
+ * stub) are fine; anything else is a line nobody typed or explained.
+ */
+export function loose(text: string, path: string): string[] {
+  const comment = COMMENTS[lang(path)];
+  if (!comment) return [];
+  const lines = text.split("\n");
+  const inHole = new Set<number>();
+  for (const [a, b] of spans(text)) for (let i = a; i <= b; i++) inHole.add(i);
+  return lines.filter((l, i) => l.trim() && !inHole.has(i) && !comment.test(l.trim()));
+}
+
 /** Holes whose file is exactly as the intern left it, or gone. */
 export function untouched(todos: Todo[], read: (path: string) => string | null): Todo[] {
   return todos.filter((t) => read(t.path) === t.before);

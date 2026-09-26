@@ -75,3 +75,34 @@ test("fill swaps the whole hole for the code and nothing else", () => {
   );
   assert.equal(fill("no holes", "x", "y"), null);
 });
+
+test("only holes and comments pass: #include is code, not a comment", async () => {
+  const { loose, gated } = await import("../src/todos.ts");
+  const skeleton = [
+    "// vector_lab - watch a std::vector grow",
+    "",
+    "// TODO(dum): c++ includes",
+    "// the headers this file needs for input, output and vectors",
+    "",
+    "// TODO(dum): main loop",
+    "// read commands until quit and run them on the vector",
+    "int main() { return 0; }",
+  ].join("\n");
+  assert.deepEqual(loose(skeleton, "cpp/vector_lab.cpp"), []);
+  const written = "#include <iostream>\n#include <vector>\n\nint main() {\n  std::vector<int> v;\n}\n";
+  assert.deepEqual(loose(written, "vector_lab.cpp"), ["#include <iostream>", "#include <vector>", "int main() {", "  std::vector<int> v;", "}"]);
+  // Python: a comment is a comment, an import is code.
+  assert.deepEqual(loose("# a comment\nimport re\n", "a.py"), ["import re"]);
+  assert.deepEqual(loose("# TODO(dum): regex search\n# find the ip\nraise NotImplementedError\n", "a.py"), []);
+  // Not source: not gated.
+  assert.ok(!gated("README.md") && !gated("notes.txt") && gated("Makefile") && gated("x.rs"));
+  assert.deepEqual(loose("anything goes", "README.md"), []);
+});
+
+test("the gate names the loose lines of any Write, Edit or MultiEdit to source", async () => {
+  const { looseCode } = await import("../src/session.ts");
+  assert.deepEqual(looseCode("Write", { file_path: "a.py", content: "print('hi')\n" }), ["print('hi')"]);
+  assert.deepEqual(looseCode("Edit", { file_path: "a.py", old_string: "x", new_string: "# just a comment" }), []);
+  assert.deepEqual(looseCode("MultiEdit", { file_path: "a.go", edits: [{ new_string: "// ok" }, { new_string: "fmt.Println(1)" }] }), ["fmt.Println(1)"]);
+  assert.deepEqual(looseCode("Write", { file_path: "notes.md", content: "print('hi')" }), []);
+});
