@@ -15,6 +15,8 @@ import * as rebuild from "./rebuild.ts";
 import * as graphs from "./graph.ts";
 import * as learn from "./learn.ts";
 import * as shell from "./shell.ts";
+import { debugTo } from "./debug.ts";
+import { filtered, ON as MOUSE_ON, OFF as MOUSE_OFF } from "./mouse.ts";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { c, wrap, voiceName, minutes, cap, bar } from "./lines.ts";
@@ -537,6 +539,8 @@ async function main() {
   }
 
   const repo = readRepo(cwd());
+  // From the first screen, not the first request: startup has bugs too.
+  debugTo(repo.root);
   const store = new Store(repo.name, mode, repo.root, repo.files);
   store.onGraph = () => {
     void showGraph(true).then((out) => store.note(out ? `graph opened in your browser: ${out.replace(homedir(), "~")}` : "couldn't draw the graph."));
@@ -632,10 +636,24 @@ async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () =>
     import("react"),
     import("./panes/App.tsx"),
   ]);
-  const mount = () => render(React.createElement(App, { store, layout }), { exitOnCtrlC: true });
+  // Mouse reports on, and a filtered stdin so Ink never sees them. Off again
+  // on every way out, or the shell afterwards prints "[<65;40;12M" whenever
+  // you touch the trackpad.
+  const input = filtered(stdin);
+  const mouseOn = () => stdout.write(MOUSE_ON);
+  const mouseOff = () => stdout.write(MOUSE_OFF);
+  process.on("exit", mouseOff);
+  const mount = () => {
+    mouseOn();
+    return render(React.createElement(App, { store, layout }), { exitOnCtrlC: true, stdin: input.stdin as never });
+  };
   let app = mount();
   return {
-    stop: () => app.unmount(),
+    stop: () => {
+      app.unmount();
+      input.close();
+      mouseOff();
+    },
     // Unmounting hands the terminal back - raw mode off, input released - so
     // the command gets it whole. The store keeps everything; the panes are
     // drawn fresh from it after.
@@ -647,6 +665,7 @@ async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () =>
     suspend: async (fn) => {
       const hold = setInterval(() => {}, 1 << 30);
       app.unmount();
+      mouseOff();
       await app.waitUntilExit().catch(() => {});
       stdin.ref();
       stdout.write("\x1b[2J\x1b[H");

@@ -89,3 +89,39 @@ test(": commands are dum's, and only the exact words", async () => {
   s.submit(":yes");
   assert.equal(await reply, ":yes");
 });
+
+test("mouse reports come out of the input, and nothing else does", async () => {
+  const { strip } = await import("../src/mouse.ts");
+  assert.deepEqual(strip("\x1b[<65;40;12M"), { rest: "", wheels: [{ x: 40, y: 12, delta: 3 }], held: "" });
+  assert.deepEqual(strip("ab\x1b[<64;1;2Mcd").wheels, [{ x: 1, y: 2, delta: -3 }]);
+  assert.equal(strip("ab\x1b[<64;1;2Mcd").rest, "abcd");
+  // Clicks and releases are dropped, not typed.
+  assert.deepEqual(strip("\x1b[<0;5;5M\x1b[<0;5;5m"), { rest: "", wheels: [], held: "" });
+  // A report cut in half waits for the rest; a lone escape never waits.
+  assert.deepEqual(strip("x\x1b[<65;4"), { rest: "x", wheels: [], held: "\x1b[<65;4" });
+  assert.deepEqual(strip("\x1b"), { rest: "", wheels: [], held: "\x1b" }, "held briefly - filtered() lets it go as a key");
+  assert.deepEqual(strip("a\x1b["), { rest: "a", wheels: [], held: "\x1b[" });
+  assert.equal(strip("\x1b[A").rest, "\x1b[A", "arrow keys pass through");
+});
+
+test("a split report is still a report, and a lone escape still arrives as a key", async () => {
+  const { filtered, mouse } = await import("../src/mouse.ts");
+  const { PassThrough } = await import("node:stream");
+  const real = Object.assign(new PassThrough(), { setRawMode() {}, isTTY: true }) as never as NodeJS.ReadStream;
+  const f = filtered(real);
+  let typed = "";
+  f.stdin.on("data", (d: Buffer) => (typed += d.toString()));
+  const wheels: unknown[] = [];
+  const onWheel = (w: unknown) => wheels.push(w);
+  mouse.on("wheel", onWheel);
+  (real as never as PassThrough).write("\x1b");
+  (real as never as PassThrough).write("[<65;60;12M");
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(wheels.length, 1);
+  assert.equal(typed, "");
+  (real as never as PassThrough).write("\x1b");
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(typed, "\x1b");
+  mouse.off("wheel", onWheel);
+  f.close();
+});

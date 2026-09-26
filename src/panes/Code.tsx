@@ -15,9 +15,10 @@ import React, { useEffect, useReducer, useRef } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
 import { printable, slice } from "../lines.ts";
 import { highlight } from "../highlight.ts";
-import { dirty, goto, open, paste, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
+import { dirty, goto, open, paste, scrollBy, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
 import type { CodeView } from "../store.ts";
 import { spans } from "../todos.ts";
+import { scrolls } from "../mouse.ts";
 
 type Entry = { source: string; buf: Buf; jump?: number };
 
@@ -68,6 +69,17 @@ export function Code({
   const typing = focused && buf?.mode === "insert";
 
   useEffect(() => onTyping(!!typing), [typing, onTyping]);
+
+  // The wheel scrolls the file under the pointer, focused or not.
+  useEffect(() => {
+    const f = (delta: number) => {
+      if (!entry) return;
+      entry.buf = scrollBy(entry.buf, delta, view);
+      bump();
+    };
+    scrolls.on("code", f);
+    return () => void scrolls.off("code", f);
+  });
 
   const commit = (next: Buf) => {
     entry!.buf = next;

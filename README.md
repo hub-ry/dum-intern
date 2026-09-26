@@ -115,6 +115,15 @@ dum's commands are typed, not chorded. `:run`, `:graph`, `:log`, `:help`, like v
 What runs in the shell is mine. The intern doesn't see it.
 
 
+### Pages, and a trackpad that scrolls
+
+The stage has pages, and a bar on top says which one you're on: the file, dum's latest reply, and the log. A reply too long for the six lines under dum's face opens as its own page, so a long answer doesn't hide behind `:log`. `shift-tab` goes back to the page you were just on, and again comes back, like alt-tab. With the stage focused, `←`/`→` walk the pages, and `j`/`k`, `space`/`b` and `g`/`G` scroll whichever one is up.
+
+The trackpad scrolls the pane under the pointer, focused or not. Full-screen programs don't get that for free: without mouse reports the wheel does nothing, and inside tmux it scrolls tmux's history instead. So dum turns on the terminal's standard mouse reporting and takes the reports out before Ink sees them, or they'd be typed into the input as `[<65;40;12M`. Ink 7 has no mouse support, and the one Ink mouse library targets Ink 5, so this piece is dum's own.
+
+The cost is plain drag-to-select. Option-drag (iTerm, Terminal.app) or shift-drag (most others) still selects text, and in tmux selection is tmux's anyway.
+
+
 ### Short, on purpose
 
 This is closer to a game than a document, and every long message is a turn I stop playing. The rules come from [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md), and they're kept in code wherever code can keep them:
@@ -455,13 +464,17 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 
 | Key | Action | Where |
 | :--- | :--- | :--- |
-| `tab` / `shift-tab` | input, file, file tree, and back around | anywhere |
+| `tab` | input, stage, file tree, and around | anywhere |
+| `shift-tab` | the stage's last page, and back - alt-tab for file, reply and log | anywhere |
+| trackpad / wheel | scroll whatever's under the pointer | stage, file tree |
+| `←` `→`, `[` `]` | the stage's pages: file, reply, log | stage |
+| `j` `k`, `space` `b`, `g` `G` | scroll a reply or the log | stage |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
 | `!` + command | run it in a real shell - the panes step aside, enter comes back | input, file's `:` line |
 | `!` | your own shell, until `exit` | input |
 | `:run` | run the open file. Compiled languages get the line to type instead | input, file's `:` line |
 | `:graph` | the skill graph, in the browser | input, file's `:` line |
-| `:log` | the full transcript on the stage, and back | input, file's `:` line |
+| `:log` | the full transcript on the stage | input, file's `:` line |
 | `:help` | all of this, on the stage | input |
 | `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |

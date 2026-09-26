@@ -232,3 +232,18 @@ test("a long line scrolls sideways under the cursor, tabs counting two", () => {
 test("tab in insert mode is two spaces", () => {
   assert.equal(text(type(open(""), "i<tab>x<esc>").buf), "  x");
 });
+
+test("the wheel scrolls and the view stays where it was scrolled to", async () => {
+  const { open, scrollBy, scroll } = await import("../src/editor.ts");
+  const view = { rows: 10, cols: 40 };
+  let b = open(Array.from({ length: 200 }, (_, i) => `print(${i + 1})`).join("\n"));
+  b = scroll(scrollBy(b, 12, view), view);
+  assert.equal(b.top, 12, "a render after the wheel keeps the view");
+  assert.ok(b.row >= 15 && b.row <= 18, "the cursor came along with a margin");
+  b = scroll(scrollBy(b, -3, view), view);
+  assert.equal(b.top, 9);
+  b = scroll(scrollBy(b, -100, view), view);
+  assert.equal(b.top, 0);
+  b = scroll(scrollBy(b, 1000, view), view);
+  assert.equal(b.top, 190);
+});

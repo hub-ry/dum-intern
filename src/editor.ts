@@ -135,6 +135,23 @@ export function vcol(line: string, col: number): number {
   return v + Math.max(0, col - line.length);
 }
 
+/**
+ * Scroll the window by `n` lines, the way a wheel does in vim: the view moves,
+ * and the cursor is dragged along only if it would fall off the screen.
+ */
+export function scrollBy(b: Buf, n: number, view: View): Buf {
+  const rows = Math.max(1, view.rows);
+  const top = clamp(b.top + n, 0, Math.max(0, b.lines.length - rows));
+  // The same margin `scroll` keeps, or the next render pulls the view back
+  // to the cursor and the wheel looks dead - which is what it did.
+  const off = Math.min(3, Math.floor((rows - 1) / 2));
+  const lo = top === 0 ? 0 : top + off;
+  const hi = top + rows - 1 >= b.lines.length - 1 ? b.lines.length - 1 : top + rows - 1 - off;
+  const row = clamp(b.row, lo, Math.max(lo, hi));
+  const col = row === b.row ? b.col : Math.min(b.want, b.lines[row]!.length);
+  return { ...b, top, row, col };
+}
+
 /** Put the cursor on a line, at its first character, as `:` number does. */
 export function goto(b: Buf, row: number): Buf {
   const r = clamp(row, 0, b.lines.length - 1);

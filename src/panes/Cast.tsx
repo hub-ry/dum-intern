@@ -119,7 +119,7 @@ function Speaker({
         </Text>
       ))}
       {why
-        ? wrap(why, "", width).map((line, i) => (
+        ? clamped(wrap(why, "", width), 3).map((line, i) => (
             <Text key={`w${i}`} dimColor>
               {line}
             </Text>
@@ -142,7 +142,7 @@ const SAY_LINES = 6;
 
 function clamped(lines: string[], n?: number): string[] {
   if (!n || lines.length <= n) return lines;
-  return [...lines.slice(0, n - 1), `… ${lines.length - n + 1} more - :log`];
+  return [...lines.slice(0, n - 1), `… ${lines.length - n + 1} more - all of it's on the stage`];
 }
 
 function Face({

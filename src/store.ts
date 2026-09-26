@@ -103,6 +103,7 @@ export type Stage =
   | { kind: "spec"; spec: string }
   | { kind: "lesson"; lesson: Lesson }
   | { kind: "info"; title: string; body: string }
+  | { kind: "reply"; text: string }
   | { kind: "transcript" };
 
 export type State = {
@@ -123,11 +124,21 @@ export type State = {
   todos: { concept: string; path: string }[];
   /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
   suggestion: string;
+  /**
+   * The last thing on the stage that wasn't the file or the log - a long
+   * reply, an answer, help, a lesson, a spec. The middle tab of the page bar.
+   */
+  reply: Stage | null;
   /** Where a milestone folder stands: done of total, and what a unit is called. */
   progress: { done: number; total: number; unit: string } | null;
   /** The model behind each voice and the effort it runs at, as the SDK reported them. "" until known. */
   models: { intern: Voice; wizard: Voice };
 };
+
+/** Past this, what dum says opens on the stage too. About six narrow lines. */
+const LONG_SAY = 170;
+
+const isReply = (s: Stage) => s.kind !== "code" && s.kind !== "transcript";
 
 export class Store {
   private state: State;
@@ -182,6 +193,7 @@ export class Store {
       todos: [],
       suggestion: "",
       progress: null,
+      reply: null,
       models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
   }
@@ -246,6 +258,9 @@ export class Store {
 
   say(text: string) {
     this.append({ kind: "say", text });
+    // Too long for the six lines under dum's face: it opens on the stage,
+    // where it scrolls, instead of hiding behind :log.
+    if (text.length > LONG_SAY || text.split("\n").length > 6) this.patch({ stage: { kind: "reply", text } });
   }
 
   note(text: string) {
@@ -529,8 +544,34 @@ export class Store {
     return id;
   }
 
+  /** The stage page before this one, for shift-tab. */
+  private previous: Stage | null = null;
+
+  /**
+   * shift-tab: back to the page you were just on, and again to come back -
+   * alt-tab for the stage. The file, a reply and the log are a keystroke apart.
+   */
+  flipStage() {
+    if (this.previous) this.patch({ stage: this.previous });
+  }
+
+  /** ←/→ on the stage: file, reply, log, whichever of them exist. */
+  pageStage(step: 1 | -1) {
+    const pages: Stage[] = [
+      ...(this.state.code ? [{ kind: "code" as const }] : []),
+      ...(this.state.reply ? [this.state.reply] : []),
+      { kind: "transcript" as const },
+    ];
+    const at = pages.findIndex((p) => (p.kind === "code" || p.kind === "transcript" ? p.kind === this.state.stage.kind : p === this.state.stage));
+    this.patch({ stage: pages[(Math.max(0, at) + step + pages.length) % pages.length]! });
+  }
+
   /** Every mutation goes through here, so the snapshot identity is the signal. */
   private patch(p: Partial<State>) {
+    if (p.stage && p.stage !== this.state.stage) {
+      this.previous = this.state.stage;
+      if (isReply(p.stage)) p = { ...p, reply: p.stage };
+    }
     this.state = { ...this.state, ...p };
     for (const fn of this.listeners) fn();
   }

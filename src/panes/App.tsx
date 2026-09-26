@@ -13,48 +13,65 @@ import { Tree } from "./Tree.tsx";
 import { Cast } from "./Cast.tsx";
 import { Panes } from "./Panes.tsx";
 import { Field } from "./Field.tsx";
-import type { Box as Rect, Node, Pane } from "../layout.ts";
+import { allocate, type Box as Rect, type Node, type Pane } from "../layout.ts";
+import { mouse, scrolls, type Wheel } from "../mouse.ts";
+import { debug } from "../debug.ts";
 import type { Prompt, Store } from "../store.ts";
 import { bar } from "../lines.ts";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-type Focus = "input" | "tree" | "code";
+type Focus = "input" | "tree" | "stage";
 
 export function App({ store, layout }: { store: Store; layout: Node }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { stdout } = useStdout();
   const [tick, setTick] = useState(0);
-  // Three things want the keyboard: the field, the tree, and the file. Tab
-  // walks them in a ring and shift-tab walks it backwards, which is the whole
-  // focus model and as much as four panes should need.
+  // Three things want the keyboard: the field, the stage, and the tree. Tab
+  // walks them in a ring. shift-tab doesn't walk it backwards - with three
+  // stops that's two tabs - it flips the stage back to the page you were on,
+  // alt-tab style, because that's the move you make ten times a session.
   const [focus, setFocus] = useState<Focus>("input");
   // While the editor is taking text, tab is two spaces and not a focus change.
   const [typing, setTyping] = useState(false);
 
-  // The file is only somewhere to go while the stage is showing one.
   const hasCode = state.stage.kind === "code" && state.code !== null;
-  const ring: Focus[] = hasCode ? ["input", "code", "tree"] : ["input", "tree"];
+  const ring: Focus[] = ["input", "stage", "tree"];
 
   useInput((ch, key) => {
     if (key.tab && !typing) {
-      const step = key.shift ? -1 : 1;
-      return setFocus((f) => ring[(ring.indexOf(f) + step + ring.length) % ring.length]!);
+      if (key.shift) return store.flipStage();
+      return setFocus((f) => ring[(ring.indexOf(f) + 1) % ring.length]!);
     }
     // No other global chords, on purpose. They collide: ctrl-g belongs to a
     // browser extension, ctrl-e to every shell's end-of-line. dum's commands
     // are typed instead - `:run`, `:graph`, `:log` - like vim's ex line.
   });
 
+  // The wheel scrolls whatever is under the pointer, not whatever has focus.
+  // Terminal rows and columns are 1-based, and the header takes row 1.
+  const cols = stdout?.columns ?? 80;
+  const rows = stdout?.rows ?? 24;
+  const body = Math.max(3, rows - 3);
   useEffect(() => {
-    if (focus === "code" && !hasCode) setFocus("input");
-  }, [focus, hasCode]);
+    const onWheel = (w: Wheel) => {
+      const x = w.x - 1;
+      const y = w.y - 2;
+      const hit = allocate(layout, { x: 0, y: 0, width: cols, height: body }).find(
+        (p) => x >= p.x && x < p.x + p.width && y >= p.y && y < p.y + p.height,
+      );
+      debug("wheel", w, "->", hit?.pane ?? "nothing", "listeners", hit ? scrolls.listenerCount(hit.pane) : 0);
+      if (hit) scrolls.emit(hit.pane, w.delta);
+    };
+    mouse.on("wheel", onWheel);
+    return () => void mouse.off("wheel", onWheel);
+  }, [layout, cols, body]);
 
   const toInput = useCallback(() => setFocus("input"), []);
   const openFile = useCallback(
     (p: string) => {
       store.openFile(p);
-      setFocus("code");
+      setFocus("stage");
     },
     [store],
   );
@@ -74,9 +91,6 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     return () => clearInterval(t);
   }, [state.busy]);
 
-  const cols = stdout?.columns ?? 80;
-  const rows = stdout?.rows ?? 24;
-  const body = Math.max(3, rows - 3);
   const box: Rect = { x: 0, y: 0, width: cols, height: body };
 
   const render = (pane: Pane, at: Rect): React.ReactNode => {
@@ -102,7 +116,9 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             transcript={state.transcript}
             width={at.width}
             height={at.height}
-            focused={focus === "code"}
+            focused={focus === "stage"}
+            reply={state.reply}
+            onPage={(step) => store.pageStage(step)}
             onSave={saveFile}
             onReload={reloadFile}
             onLeave={toInput}
@@ -173,10 +189,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
 
 function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
   if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
-  if (focus === "code") {
+  if (focus === "stage" && !hasCode) return "tab: files   j/k   space/b   ←/→ pages   ⇧tab back";
+  if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return `tab: ${hasCode ? "file" : "files"}   !shell   ?ask   :run   :graph   :log   :help`;
+  return `tab: stage   ⇧tab: last page   !shell   ?ask   :run   :graph   :help`;
 }
 
 function promptFor(p: Prompt): string {

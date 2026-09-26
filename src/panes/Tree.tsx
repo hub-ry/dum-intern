@@ -10,8 +10,9 @@
 // Keys follow neo-tree, because a file tree in a terminal is a solved problem
 // and nobody wants to learn a fourth set of bindings for one.
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import { scrolls } from "../mouse.ts";
 import { build, rows as visible, initialOpen, type Row } from "../tree.ts";
 import { clip } from "../lines.ts";
 
@@ -49,6 +50,13 @@ export function Tree({
   };
 
   const move = (to: number) => setAt(Math.max(0, Math.min(rows.length - 1, to)));
+
+  // The wheel moves the selection, focused or not - it's the pointer's pane.
+  useEffect(() => {
+    const f = (delta: number) => setAt((a) => Math.max(0, Math.min(rows.length - 1, a + delta)));
+    scrolls.on("tree", f);
+    return () => void scrolls.off("tree", f);
+  }, [rows.length]);
 
   /** Up to the containing directory, the way `h` behaves on a file in neo-tree. */
   const toParent = () => {

@@ -102,3 +102,23 @@ test("an init without effort never wipes an effort already read back", async () 
   s.setModel("intern", "claude-sonnet-5");
   assert.deepEqual(s.getSnapshot().models.intern, { model: "claude-sonnet-5", effort: "" });
 });
+
+test("the stage flips back like alt-tab, and a long reply opens on it", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand", process.cwd());
+  s.openFile("package.json");
+  s.say("short");
+  assert.equal(s.getSnapshot().stage.kind, "code");
+  s.say("x".repeat(400));
+  assert.equal(s.getSnapshot().stage.kind, "reply");
+  s.flipStage();
+  assert.equal(s.getSnapshot().stage.kind, "code");
+  s.flipStage();
+  assert.equal(s.getSnapshot().stage.kind, "reply");
+  s.pageStage(1);
+  assert.equal(s.getSnapshot().stage.kind, "transcript");
+  s.pageStage(1);
+  assert.equal(s.getSnapshot().stage.kind, "code");
+  s.pageStage(-1);
+  assert.equal(s.getSnapshot().stage.kind, "transcript");
+});
