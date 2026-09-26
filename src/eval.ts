@@ -115,7 +115,7 @@ export function fromEntries(es: Entry[]): Pick<Facts, "questions" | "specShown" 
   return {
     questions: asked.length,
     specShown: spec >= 0,
-    holes: es.filter((e) => e.kind === "tool" && e.name === "hole").length,
+    holes: new Set(es.filter((e) => e.kind === "tool" && e.name === "hole").map((e) => (e as { detail: string }).detail)).size,
     fills: es.filter((e) => e.kind === "fill").length,
     // The longest single thing it said: one wall of text is the problem, not the sum.
     replyLines: Math.max(0, ...said.map((e) => height(e.text))),
@@ -174,6 +174,10 @@ WHAT'S INTENDED - don't mark these down
 - This is the plain renderer. In the real UI, code dum writes streams into a
   file pane as it's written; here that shows only as "· Write <file>". Judge
   what was written, not whether it animated.
+- FILES DUM WROTE is the state before they typed anything. A hole still
+  open there is expected; whether their typing landed shows in the transcript.
+- dum's own notes are its UI, not the intern talking: "+ skill: x (not yet
+  keeps it off)", "✓ feature 1 of 9", "✓ fill", "▌ hole ... (yours to type)".
 
 THE SCENARIO: ${s.name}
 ${s.why}

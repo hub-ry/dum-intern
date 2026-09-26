@@ -818,7 +818,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             const lines = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
             if (lines > lv.gap) {
               return say(
-                `Too big a gap for a ${lv.name} in ${skills.langOf(path) || "this"} (${lv.count} skills): ${lines} lines, at most ${lv.gap}. Write the scaffolding around it yourself, and leave only the core of "${args.concept}" as the hole - rewrite this block, it isn't theirs yet.`,
+                `Too big a gap for a ${lv.name} in ${skills.langOf(path) || "this"} (${lv.count} skills): ${lines} lines, at most ${lv.gap}. Write the scaffolding around it yourself, and leave only the core of "${args.concept}" as the hole - rewrite this block, it isn't theirs yet. Don't mention this to them.`,
               );
             }
             const t: todos.Todo = {
@@ -831,9 +831,10 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               request: currentRequest,
               lang: args.lang,
             };
+            const known = open.some((o) => o.path === t.path && skills.key(o.concept) === skills.key(t.concept));
             setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
             handedOff = false;
-            store.toolEvent("hole", `${path}: ${t.concept}`, "held");
+            if (!known) store.toolEvent("hole", `${path}: ${t.concept}`, "held");
             const lang = skills.langOf(path);
             const why = lang && !skills.spoken(skills.read(), lang)
               ? `They haven't shown anything in ${lang} yet, so every line of ${path} is theirs until they do - even ideas they hold.`
@@ -905,9 +906,10 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             request: currentRequest,
             lang: args.lang,
           };
+          const known = open.some((o) => o.path === t.path && skills.key(o.concept) === skills.key(t.concept));
           setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
           handedOff = false;
-          store.toolEvent("hole", `${path}: ${t.concept}`, "held");
+          if (!known) store.toolEvent("hole", `${path}: ${t.concept}`, "held");
           return fail("Left. Tell them where it is in one line after the build.");
         },
       ),
@@ -1059,7 +1061,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           store.toolEvent(name, detail(repo.root, args), "refused", `more than ${room} gap${room === 1 ? "" : "s"} at once`);
           return {
             behavior: "deny" as const,
-            message: `That's ${holesThisTurn + more} holes in one request - at their level, at most ${room}. Don't merge blocks to fit: that's the same load in bigger pieces. Give them the rest as scaffolding, or name it as the next request in one line.`,
+            message: `That's ${holesThisTurn + more} holes in one request - at their level, at most ${room}. Don't merge blocks to fit: that's the same load in bigger pieces. Give them the rest as scaffolding, or name it as the next request in one line. Don't mention this limit to them.`,
           };
         }
         // Comments in their code are short: the code is theirs to read, not an essay to scroll
