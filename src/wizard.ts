@@ -34,6 +34,8 @@ import { debug } from "./debug.ts";
  * both land around 1.5s, because the latency is the round trip, not the model.
  */
 const MODEL = "claude-sonnet-5";
+/** Medium, with thinking off: a quip that lands after you've moved on is noise. */
+const EFFORT = "medium";
 
 const VOICE = `You are the wizard: a friendly, well-read engineer sitting beside someone while
 an intern interrogates them about a project they want built.
@@ -281,7 +283,7 @@ export class Wizard {
       // user's CLAUDE.md and project settings too, which it has no business
       // reading: its whole character is one short system prompt, and a
       // personal instructions file would quietly rewrite it.
-      effort: "medium",
+      effort: EFFORT,
       thinking: { type: "disabled" },
       settingSources: [],
     });
@@ -293,8 +295,8 @@ export class Wizard {
    * session reports - a session only says once its first turn runs, and a
    * label that is blank until the first quip reads as nothing being there.
    */
-  onModel(fn: (model: string) => void) {
-    fn(MODEL);
+  onModel(fn: (model: string, effort: string) => void) {
+    fn(MODEL, EFFORT);
     this.channel.onModel = fn;
   }
 

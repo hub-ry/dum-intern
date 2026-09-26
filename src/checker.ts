@@ -23,6 +23,7 @@ import { debug } from "./debug.ts";
 import type { Repo } from "./repo.ts";
 
 const MODEL = "claude-sonnet-5";
+const EFFORT = "medium";
 
 function prompt(now = new Date()): string {
   const today = now.toISOString().slice(0, 10);
@@ -102,7 +103,7 @@ export class Checker {
       cwd: repo.root,
       // Same reasoning as the wizard: it is one short judgement, and every
       // second here is a second later that the line reaches the margin.
-      effort: "medium",
+      effort: EFFORT,
       thinking: { type: "disabled" },
       settingSources: [],
     });

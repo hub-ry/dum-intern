@@ -92,3 +92,13 @@ test("not yet takes a skill back without costing the turn, and is an answer when
   s.submit("not yet");
   assert.equal(await reply, "not yet");
 });
+
+test("an init without effort never wipes an effort already read back", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  s.setModel("intern", "claude-opus-5-5", "high");
+  s.setModel("intern", "claude-opus-5-5");
+  assert.deepEqual(s.getSnapshot().models.intern, { model: "claude-opus-5-5", effort: "high" });
+  s.setModel("intern", "claude-sonnet-5");
+  assert.deepEqual(s.getSnapshot().models.intern, { model: "claude-sonnet-5", effort: "" });
+});

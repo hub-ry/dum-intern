@@ -60,3 +60,10 @@ test("a fill shows the code that went in, not just that it happened", async () =
   assert.equal(out[1], "  │ line 0");
   assert.match(out[out.length - 1]!, /… 3 more in a\.py/);
 });
+
+test("a voice reads as model and effort", async () => {
+  const { voiceName } = await import("../src/lines.ts");
+  assert.equal(voiceName("claude-opus-5-5", "high"), "opus 5.5 · high");
+  assert.equal(voiceName("claude-sonnet-5"), "sonnet 5");
+  assert.equal(voiceName("", "high"), "");
+});

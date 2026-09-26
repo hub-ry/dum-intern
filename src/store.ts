@@ -18,6 +18,9 @@ import type { Mode } from "./session.ts";
 
 export type Outcome = "ran" | "held" | "refused";
 
+/** A model, and the effort level it runs at. */
+export type Voice = { model: string; effort: string };
+
 export type Lesson = {
   concept: string;
   what_it_is: string;
@@ -118,8 +121,8 @@ export type State = {
   todos: { concept: string; path: string }[];
   /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
   suggestion: string;
-  /** The model behind each voice, as the SDK reported it. "" until known. */
-  models: { intern: string; wizard: string };
+  /** The model behind each voice and the effort it runs at, as the SDK reported them. "" until known. */
+  models: { intern: Voice; wizard: Voice };
 };
 
 export class Store {
@@ -168,7 +171,7 @@ export class Store {
       skills: { known: 0, shaky: 0, claimed: 0 },
       todos: [],
       suggestion: "",
-      models: { intern: "", wizard: "" },
+      models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
   }
 
@@ -384,9 +387,12 @@ export class Store {
   }
 
   /** Which model is behind a voice. */
-  setModel(who: "intern" | "wizard", model: string) {
-    if (this.state.models[who] === model) return;
-    this.patch({ models: { ...this.state.models, [who]: model } });
+  setModel(who: "intern" | "wizard", model: string, effort = "") {
+    const was = this.state.models[who];
+    // An init with no effort must not wipe one already read back.
+    const next = { model, effort: effort || (was.model === model ? was.effort : "") };
+    if (was.model === next.model && was.effort === next.effort) return;
+    this.patch({ models: { ...this.state.models, [who]: next } });
   }
 
   /** The holes left for you to type changed. */

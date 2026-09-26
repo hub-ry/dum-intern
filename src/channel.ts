@@ -47,6 +47,22 @@ export function lastText(msg: any): string {
   return text.trim();
 }
 
+/**
+ * The model and effort a live session is actually using, or null if the SDK
+ * can't say. Read, not assumed: an unpinned effort resolves per model, and a
+ * pinned one can still be capped by settings or the organisation.
+ */
+export async function applied(session: unknown): Promise<{ model: string; effort: string } | null> {
+  try {
+    const s = await (session as { getSettings?: () => Promise<any> }).getSettings?.();
+    const a = s?.applied;
+    if (!a) return null;
+    return { model: typeof a.model === "string" ? a.model : "", effort: typeof a.effort === "string" ? a.effort : "" };
+  } catch {
+    return null;
+  }
+}
+
 export class Channel {
   private turns = new Chan<string>();
   private replies = new Chan<Reply | null>();
@@ -54,8 +70,12 @@ export class Channel {
   private closed = false;
   private label: string;
   private options: Options;
-  /** Called with the model the session actually resolved to, once it starts. */
-  onModel: ((model: string) => void) | null = null;
+  /**
+   * Called with the model and effort the session actually runs at, once it
+   * starts. The init message carries the model; effort is read back from the
+   * session's applied settings, since that is after every default and cap.
+   */
+  onModel: ((model: string, effort: string) => void) | null = null;
 
   // Written out rather than as parameter properties: Node strips types, it
   // does not compile them, and `constructor(private x: T)` needs compiling.
@@ -90,7 +110,8 @@ export class Channel {
         const session = query({ prompt: stream(), options: this.options });
         for await (const msg of session as AsyncIterable<any>) {
           if (msg.type === "system" && msg.subtype === "init" && typeof msg.model === "string") {
-            this.onModel?.(msg.model);
+            this.onModel?.(msg.model, "");
+            void applied(session).then((a) => a && this.onModel?.(a.model || msg.model, a.effort));
             continue;
           }
           if (msg.type === "assistant") {

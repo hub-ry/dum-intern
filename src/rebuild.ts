@@ -21,6 +21,8 @@ import type { Mapped } from "./planner.ts";
 import { oneShot, json } from "./oneshot.ts";
 
 const MODEL = "claude-opus-5-5";
+const EFFORT = "high";
+export const VOICE = { model: MODEL, effort: EFFORT };
 const TOOLS = ["Read", "Glob", "Grep"];
 
 export type Milestone = { request: string; done: boolean };
@@ -134,7 +136,7 @@ vendored and generated code - and reply with two things.
 
 Reply with ONLY JSON, no prose and no fence:
 {"title": "rebuild <project name>", "summary": "one sentence on what it is", "milestones": ["..."], "skills": [{"name": "...", "requires": ["..."]}]}`,
-    { model: MODEL, cwd: source, tools: TOOLS, onStatus },
+    { model: MODEL, effort: EFFORT, cwd: source, tools: TOOLS, onStatus },
   );
   const r = Read.safeParse(json(reply, "{"));
   if (!r.success) return null;

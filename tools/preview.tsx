@@ -62,8 +62,8 @@ const store = new Store("some-repo", "anti-vibe", process.cwd(), [
   "test/stream.test.ts",
   "test/tree.test.ts",
 ]);
-store.setModel("intern", "claude-opus-5-5");
-store.setModel("wizard", "claude-sonnet-5");
+store.setModel("intern", "claude-opus-5-5", "high");
+store.setModel("wizard", "claude-sonnet-5", "medium");
 store.say("Got it. Two decisions before I build anything.");
 void store.askQuestion(
   "When a worker dies holding a job, what should happen to that job?",

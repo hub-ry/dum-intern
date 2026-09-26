@@ -13,6 +13,8 @@ import { oneShot, json } from "./oneshot.ts";
  * prerequisite here is a project you're sent to build for nothing.
  */
 const MODEL = "claude-opus-5-5";
+export const EFFORT = "high";
+export const VOICE = { model: MODEL, effort: EFFORT };
 
 function knownList(t: skills.Tree): string {
   const names = t.skills.filter((s) => s.solid).map((s) => s.name);
@@ -50,7 +52,7 @@ Map what building it rests on.
 
 Reply with ONLY JSON, no prose and no fence:
 {"title": "a short name for the project, lowercase", "summary": "one sentence", "skills": [{"name": "...", "requires": ["..."]}]}`,
-    { model: MODEL, onStatus },
+    { model: MODEL, effort: EFFORT, onStatus },
   );
   const m = Map.safeParse(json(reply, "{"));
   if (!m.success || !m.data.skills.length) return null;
@@ -101,7 +103,7 @@ Reply with ONLY a JSON array of ${jobs.length} objects, in order, no prose and n
 }
 
 async function briefs(prompt: string, count: number, onStatus?: (s: string) => void): Promise<Written[] | null> {
-  const raw = json(await oneShot(prompt, { model: MODEL, onStatus }), "[");
+  const raw = json(await oneShot(prompt, { model: MODEL, effort: EFFORT, onStatus }), "[");
   if (!Array.isArray(raw) || raw.length < count) return null;
   const out: Written[] = [];
   for (const r of raw.slice(0, count)) {

@@ -51,6 +51,12 @@ export function modelName(id: string): string {
   return `${m[1]} ${m[2]}${m[3] ? "." + m[3] : ""}`;
 }
 
+/** "opus 5.5 · high": the model, and the effort it runs at when that's known. */
+export function voiceName(model: string, effort = ""): string {
+  if (!model) return "";
+  return effort ? `${modelName(model)} · ${effort}` : modelName(model);
+}
+
 /**
  * Markdown, rendered rather than shown.
  *

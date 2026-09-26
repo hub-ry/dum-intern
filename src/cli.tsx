@@ -13,7 +13,7 @@ import * as projects from "./projects.ts";
 import * as planner from "./planner.ts";
 import * as rebuild from "./rebuild.ts";
 import { createInterface } from "node:readline/promises";
-import { c, wrap } from "./lines.ts";
+import { c, wrap, voiceName } from "./lines.ts";
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 import { basename as repo, resolve } from "node:path";
@@ -161,13 +161,11 @@ async function scanSkills(dirs: string[]) {
       continue;
     }
     const label = ok.path.replace(homedir(), "~");
-    let status = "reading";
-    const draw = () => stdout.isTTY && stdout.write(`\r\x1b[2K  ${c.dim(`${label}: ${status}`)}`);
-    const tick = setInterval(draw, 200);
-    const got = await scanner.scan(ok.path, t, (s) => (status = s));
-    clearInterval(tick);
-    if (stdout.isTTY) stdout.write("\r\x1b[2K");
-    console.log(`  ${c.dim(`${label}: ${got.length} found`)}`);
+    const bar = progress(label, scanner.VOICE);
+    bar.set("reading");
+    const got = await scanner.scan(ok.path, t, bar.set);
+    bar.stop();
+    console.log(`  ${c.dim(`${label}: ${got.length} found  (${voiceName(scanner.VOICE.model, scanner.VOICE.effort)})`)}`);
     for (const f of got) {
       if (!found.some((x) => skills.key(x.name) === skills.key(f.name))) found.push({ ...f, root: ok.path });
     }
@@ -209,9 +207,10 @@ async function scanSkills(dirs: string[]) {
 }
 
 /** A progress line that rewrites itself on a terminal, and stays quiet in a pipe. */
-function progress(label: string) {
+function progress(label: string, voice: { model: string; effort: string }) {
   let status = "";
-  const draw = () => stdout.isTTY && stdout.write(`\r\x1b[2K  ${c.dim(`${label}${status ? ": " + status : ""}`)}`);
+  const who = c.dim(`  (${voiceName(voice.model, voice.effort)})`);
+  const draw = () => stdout.isTTY && stdout.write(`\r\x1b[2K  ${c.dim(`${label}${status ? ": " + status : ""}`)}${who}`);
   const tick = setInterval(draw, 200);
   return {
     set: (s: string) => (status = s),
@@ -246,7 +245,7 @@ async function planQueue() {
 }
 
 async function planOne(idea: projects.Project) {
-  const bar = progress(`planning ${idea.title}`);
+  const bar = progress(`planning ${idea.title}`, planner.VOICE);
   const got = await planner.plan(idea, skills.read(), projects.read(), bar.set);
   bar.stop();
   if (!got) {
@@ -338,7 +337,7 @@ async function rebuildProject(args: string[]) {
     exit(1);
   }
   const t = skills.read();
-  const bar = progress(`reading ${ok.path.replace(homedir(), "~")}`);
+  const bar = progress(`reading ${ok.path.replace(homedir(), "~")}`, rebuild.VOICE);
   const read = await rebuild.read(ok.path, t, bar.set);
   if (!read) {
     bar.stop();
@@ -378,7 +377,7 @@ async function nextProjects(n: number) {
     console.log(`\n  ${c.dim(`nothing on the frontier yet. dum --queue "..." sets a goal to climb toward.`)}\n`);
     return;
   }
-  const bar = progress(`finding the fastest unlock`);
+  const bar = progress(`finding the fastest unlock`, planner.VOICE);
   const got = await planner.ideas(targets, n, t, bar.set);
   bar.stop();
   if (!got) {

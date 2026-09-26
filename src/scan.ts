@@ -19,6 +19,8 @@ import { resolve } from "node:path";
 import * as skills from "./skills.ts";
 
 const MODEL = "claude-sonnet-5";
+const EFFORT = "high";
+export const VOICE = { model: MODEL, effort: EFFORT };
 const TOOLS = ["Read", "Glob", "Grep"];
 
 export type Found = skills.Claim & {
@@ -94,5 +96,5 @@ export function checkDir(dir: string): { path: string } | { error: string } {
 
 /** Read one project and return what it shows. Empty on any failure - a scan is never worth a crash. */
 export async function scan(dir: string, tree: skills.Tree, onStatus?: (s: string) => void): Promise<Found[]> {
-  return parse(await oneShot(prompt(tree), { model: MODEL, cwd: dir, tools: TOOLS, onStatus }));
+  return parse(await oneShot(prompt(tree), { model: MODEL, effort: EFFORT, cwd: dir, tools: TOOLS, onStatus }));
 }

@@ -27,6 +27,7 @@ import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
 import { Wizard, log as logQuip, type Quip } from "./wizard.ts";
 import { debug as wdebug, debugTo } from "./debug.ts";
+import { applied } from "./channel.ts";
 
 /**
  * How high the bar is - the level of abstraction you must explain yourself at.
@@ -547,7 +548,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   }
 
   const wizard = new Wizard(repo);
-  wizard.onModel((m) => store.setModel("wizard", m));
+  wizard.onModel((m, e) => store.setModel("wizard", m, e));
   wizard.start();
 
   // Breadth: answers `?` questions and reviews finished builds. Started here
@@ -1053,7 +1054,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         remember(repo, msg.session_id);
         // Read off the session rather than assumed: the intern inherits the
         // default model from their settings, so it's whatever that is today.
-        if (typeof msg.model === "string") store.setModel("intern", msg.model);
+        if (typeof msg.model === "string") {
+          store.setModel("intern", msg.model);
+          // Effort too: it follows their own /effort setting, so it's
+          // whatever that resolves to for this model today.
+          void applied(session).then((a) => a && store.setModel("intern", a.model || msg.model, a.effort));
+        }
         continue;
       }
       if (msg.type === "stream_event") {

@@ -9,6 +9,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 
 export type Opts = {
   model: string;
+  effort: "low" | "medium" | "high" | "xhigh" | "max";
   cwd?: string;
   tools?: string[];
   /** Called with a short line whenever a tool is used, for a progress line. */
@@ -23,6 +24,7 @@ export async function oneShot(prompt: string, o: Opts): Promise<string> {
       prompt,
       options: {
         model: o.model,
+        effort: o.effort,
         ...(o.cwd ? { cwd: o.cwd } : {}),
         tools: o.tools ?? [],
         allowedTools: o.tools ?? [],

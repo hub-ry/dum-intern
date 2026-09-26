@@ -24,6 +24,11 @@ import type { Repo } from "./repo.ts";
 import { Channel } from "./channel.ts";
 
 const MODEL = "claude-sonnet-5";
+/**
+ * High, pinned rather than left to the default: it answers what you typed a
+ * `?` for and reviews finished builds, and neither sits in anyone's way.
+ */
+const EFFORT = "high";
 
 const VOICE = `You are a senior engineer sitting near someone who is having a junior build
 something for them. You have seen a lot of systems. You are not in their
@@ -138,6 +143,7 @@ export class Reference {
       tools: TOOLS,
       allowedTools: TOOLS,
       cwd: repo.root,
+      effort: EFFORT,
       thinking: { type: "disabled" },
       settingSources: [],
     });

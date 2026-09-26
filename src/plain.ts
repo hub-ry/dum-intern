@@ -12,7 +12,7 @@
 
 import { stdout, stdin } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { c, collapse, format, modelName } from "./lines.ts";
+import { c, collapse, format, voiceName } from "./lines.ts";
 import type { Prompt, Store } from "./store.ts";
 
 const WIDTH = 74;
@@ -123,8 +123,12 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     // Kill the spinner before printing: `\r` and fresh lines fight otherwise.
     stop?.();
     stop = null;
-    const said = s.models.intern
-      ? `dum is ${modelName(s.models.intern)}${s.models.wizard ? `, the wizard is ${modelName(s.models.wizard)}` : ""}`
+    const v = (x: { model: string; effort: string }) => voiceName(x.model, x.effort);
+    // Held until the effort is read back, which lands a beat after the
+    // model. If it never does, the first thing said releases it without.
+    const ready = s.models.intern.model && (s.models.intern.effort || s.transcript.length);
+    const said = ready
+      ? `dum is ${v(s.models.intern)}${s.models.wizard.model ? `, the wizard is ${v(s.models.wizard)}` : ""}`
       : "";
     if (said && said !== models) {
       models = said;
