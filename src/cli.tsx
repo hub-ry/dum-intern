@@ -522,6 +522,30 @@ function forgetSkill(name: string): string {
   return `${hit.name} is off your tree. dum will ask about it again.`;
 }
 
+function printHelp() {
+  const d = c.dim;
+  console.log(`
+  ${c.bold("dum")}                       start, inside a git repo
+  ${c.bold('dum "request"')}             start with a request
+  ${c.bold("dum -a")}                    anti-vibe: you own the what, dum owns the how
+  ${c.bold("dum --new")}                 a fresh intern in this repo
+  ${c.bold("dum -p")}                    plain lines instead of panes
+
+  ${d("your skill tree")}
+  dum --skills              see it ${d("(--graph: in the browser)")}
+  dum --add "x" --in c      add a skill you can write without AI
+  dum --forget "x"          take one off ${d("(--reset: start over)")}
+  dum --scan <folder>       claim skills from code you wrote by hand
+
+  ${d("learning")}
+  dum --learn "topic"       a small project to learn a topic
+  dum --queue "goal"        plan the steps up to a goal ${d("(--projects, --next)")}
+  dum --rebuild <folder>    rebuild a project from scratch
+
+  ${d("inside dum, :help lists the rest.")}
+`);
+}
+
 /** The repo root, or "" outside one. */
 function repoRoot(): string {
   try {
@@ -532,6 +556,7 @@ function repoRoot(): string {
 }
 
 async function main() {
+  if (argv.slice(2).some((a) => a === "--help" || a === "-h")) return printHelp();
   const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs, add: addArgs, fresh } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works from anywhere -
