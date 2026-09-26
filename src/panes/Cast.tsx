@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { load, framesFor, draw, type Sprite } from "../sprite.ts";
-import { wrap, voiceName } from "../lines.ts";
+import { wrap, voiceName, sentences } from "../lines.ts";
 import type { State } from "../store.ts";
 
 const ART = new URL("../art/", import.meta.url).pathname;
@@ -201,7 +201,19 @@ function lastQuip(s: State): string {
 
 /** What the intern is saying right now. */
 function currentLine(s: State): string {
-  if (s.prompt?.type === "question") return s.prompt.question;
+  if (s.prompt?.type === "question") {
+    // Whatever dum said since its last question (an answer to yours, say)
+    // goes above this one, or it's never seen.
+    const asked = s.transcript.filter((e) => e.kind === "question");
+    const before = asked[asked.length - 2]?.id ?? 0;
+    const said = s.transcript.filter((e) => e.kind === "say" && e.id > before).pop();
+    const q = s.prompt.again ? `still: ${s.prompt.question}` : s.prompt.question;
+    if (!(said && said.kind === "say" && asked.length > 1)) return q;
+    // The question is never the part that gets cut: the answer above it gives way.
+    const short = sentences(said.text, 2);
+    const brief = short.length > 160 ? short.slice(0, 157).trimEnd() + "…" : short;
+    return `${brief}\n\n${q}`;
+  }
   if (s.prompt?.type === "spec") return "that is the spec. build it?";
   if (s.prompt?.type === "next") {
     const t = s.todos[0];

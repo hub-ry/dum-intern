@@ -39,6 +39,8 @@ export type Prompt =
       why: string;
       /** The intern's own question, where "idk" and "type it" mean something. */
       choices?: boolean;
+      /** The same question as the last one, put back after a side question. */
+      again?: boolean;
     }
   | { type: "spec"; spec: string }
   | { type: "next" }
@@ -419,9 +421,9 @@ export class Store {
   }
 
   /** Ask one question and park until it is answered. */
-  askQuestion(question: string, why: string, choices = false): Promise<string> {
+  askQuestion(question: string, why: string, choices = false, again = false): Promise<string> {
     const id = this.append({ kind: "question", question, why, answer: null });
-    return this.park({ type: "question", question, why, choices }, id);
+    return this.park({ type: "question", question, why, choices, again }, id);
   }
 
   /** The `what next` prompt between turns. Same channel, no question text. */

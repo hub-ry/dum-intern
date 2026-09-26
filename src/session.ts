@@ -197,9 +197,10 @@ HOW TO INTERROGATE
   a four-line question is a paragraph wearing a question mark.
 - why_it_matters says what changes depending on their answer. It never
   contains the answer, and never narrows it down to one option.
-- Re-asking is re-asking. If you already explained the options and they asked
-  you something else first, put the question back in one line rather than
-  restating the whole thing.
+- Re-asking is re-asking. If they asked you something or went off-topic,
+  answer that in plain text, then put your question back in one short line
+  with again: true - "so: one value or a list?" - never the whole question
+  again. dum shows it as still open; they've already read it.
 - Never ask what the repo already answers. You can see the files and README.
 - Never ask about what their skill tree already covers, beyond the one short
   checks it allows.
@@ -689,10 +690,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           why_it_matters: z
             .string()
             .describe("One sentence: what changes depending on their answer."),
+          again: z
+            .boolean()
+            .optional()
+            .describe("True when this is your previous question put back after they asked or said something else. Keep it to one short line."),
         },
         async (args) => {
           await drainWizard();
-          const reply = (await store.askQuestion(args.question, args.why_it_matters, true)).trim();
+          // The same question again (after a side question, say) is shown as
+          // "still:" with no why: they've read it, and a full re-ask reads
+          // as dum starting over.
+          const again = args.again === true || reasks(lastAsked, args.question);
+          lastAsked = args.question;
+          const reply = (await store.askQuestion(args.question, again ? "" : args.why_it_matters, true, again)).trim();
           if (todos.wantsToType(reply)) {
             return {
               content: [
@@ -1014,6 +1024,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   /** A hole from an earlier spec got filled this turn, by explaining it. */
   let filledLate = false;
 
+  /** The last question asked, to tell a re-ask from a new one. */
+  let lastAsked = "";
+
   /** A hole of theirs was checked this turn. */
   let reviewed = false;
 
@@ -1300,6 +1313,17 @@ export function holesAllowed(lv: skills.Level): number {
   if (lv.name === "novice") return 2;
   if (lv.name === "developing") return 3;
   return MAX_HOLES;
+}
+
+/** Whether `next` is mostly `prev` asked again: most of prev's words are back. */
+export function reasks(prev: string, next: string): boolean {
+  const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]+/g)?.filter((w) => w.length > 2) ?? []);
+  const a = words(prev);
+  if (a.size < 3) return false;
+  const b = words(next);
+  let kept = 0;
+  for (const w of a) if (b.has(w)) kept++;
+  return kept / a.size >= 0.6;
 }
 
 /** How many TODO(dum) blocks a Write or Edit would add. */

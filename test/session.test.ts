@@ -168,3 +168,12 @@ test("gaps per request grow with the level: one the first time in a language", a
   assert.equal(holesAllowed({ name: "developing", count: 5, gap: 8, scaffold: true }), 3);
   assert.equal(holesAllowed({ name: "fluent", count: 12, gap: Infinity, scaffold: false }), 4);
 });
+
+test("a question put back after a side question counts as a re-ask", async () => {
+  const { reasks } = await import("../src/session.ts");
+  const q = "what should mode([1, 1, 2, 2, 3]) return?";
+  assert.ok(reasks(q, "right now it's just mean. so for a tie like mode([1, 1, 2, 2, 3]), what should come back? return one?"));
+  assert.ok(reasks(q, q));
+  assert.ok(!reasks(q, "should an empty list raise, or return None?"));
+  assert.ok(!reasks("", q));
+});
