@@ -79,7 +79,7 @@ I can fix a wrong one, delete one, or write one. A note I write myself counts as
 ### The graph
 
 ```sh
-dum --graph        # or :graph in a session
+dum --graph
 ```
 
 The tree and the queue as one picture, in the browser. The layout copies the Rust project's skill-tree: Graphviz boxes top to bottom, each project a group of the skills it unlocks, with a box to tick for each, climbing from what's done toward the goal. A goal and its steps share a frame. Skills no project covers sit in "your tree", and prerequisites nobody's recorded are dashed.
@@ -106,13 +106,13 @@ Claimed isn't known. Nobody watched me write that code. The first build that lea
 
 ### A shell, and no chords to collide with
 
-Learning a language includes running it, so the stage has a shell page next to the file, the reply and the log. It's my own `$SHELL` with my own prompt, running in the repo, started the first time I open it and kept for the session, so `cd`, history and env stick. `!` or `:shell` opens it from anywhere, and `!g++ -std=c++17 -Wall -o lab lab.cpp && ./lab` typed into the input runs there. While it has focus every key is the shell's: Tab completes, ctrl-c interrupts, interactive programs read their input. `shift-tab` is the one key that isn't, and it takes me back to the input.
+Learning a language includes running it, so the stage has a shell page next to the file, the reply and the log. It's my own `$SHELL` with my own prompt, running in the repo, started the first time I open it and kept for the session, so `cd`, history and env stick. `!` opens it from anywhere, and `!g++ -std=c++17 -Wall -o lab lab.cpp && ./lab` typed into the input runs there. While it has focus every key is the shell's: Tab completes, ctrl-c interrupts, interactive programs read their input. `shift-tab` is the one key that isn't, and it takes me back to the input.
 
 It's [node-pty](https://github.com/microsoft/node-pty) running the shell and xterm's headless emulator keeping the screen, so it behaves like the terminal it's inside.
 
 `:run` runs the open file for languages where that's one obvious command: python, node, ruby, go. For C, C++ and Rust it doesn't compile anything. It shows the line to type, because typing the compiler line is part of learning the language.
 
-dum's commands are typed, not chorded. `:run`, `:graph`, `:log`, `:help`, like vim's ex line, and they work on the file pane's `:` line too, next to `:w`. `ctrl-g` belongs to a browser extension and `ctrl-e` to every shell's end-of-line, so the input gets readline's keys and dum takes none. The one global chord left is ctrl-c.
+dum's commands are typed, not chorded, and there are few of them: `:run`, `:log`, `:skill`, `:taste`, `:help`, like vim's ex line, and they work on the file pane's `:` line too, next to `:w`. `ctrl-g` belongs to a browser extension and `ctrl-e` to every shell's end-of-line, so the input gets readline's keys and dum takes none. The one global chord left is ctrl-c.
 
 What runs in the shell is mine. The intern doesn't see it.
 
@@ -161,7 +161,7 @@ It only works if the tree is right. "The most important single factor influencin
 
 ```
 :skill for loops in python     add one, in a session
-:forget recursion              take one off
+:skill -recursion              take one off
 dum --add "structs" --in c     from the command line
 ```
 
@@ -557,15 +557,12 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `←` `→` | file and shell | the middle |
 | `j` `k`, `space` `b`, `g` `G` | scroll the board | the board |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
-| `!` + command | run it on the shell page | input, file's `:` line |
-| `!`, `:shell` | open the shell page | input |
+| `!` + command | run it on the shell page (`!` alone opens it) | input, file's `:` line |
 | `:run` | run the open file. Compiled languages get the line to type instead | input, file's `:` line |
-| `:graph` | the skill graph, in the browser | input, file's `:` line |
 | `:log` | the full transcript on the stage | input, file's `:` line |
 | `:help` | all of this, on the stage | input |
 | `:taste` + a rule | how dum should work, kept for every session | input |
-| `:skill` x [in lang] | add a skill I can write from a blank file, no AI | input |
-| `:forget` x | take a skill off my tree | input |
+| `:skill` x [in lang] | add a skill I can write from a blank file, no AI (`:skill -x` takes it off) | input |
 | `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |

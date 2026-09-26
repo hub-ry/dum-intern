@@ -19,15 +19,36 @@ export function Board({
   width,
   height,
   focused,
+  question,
 }: {
   stage: BoardStage;
   transcript: Entry[];
   width: number;
   height: number;
   focused: boolean;
+  /** dum's open question, kept in view at the foot of the board. */
+  question?: string;
 }) {
   const page = pageFor(stage, transcript, width);
-  return <Reading {...page} width={width} height={height} focused={focused} />;
+  const foot = question ? wrapAt(question, width - 6) : [];
+  const reserve = foot.length ? foot.length + 2 : 0;
+  return (
+    <Box flexDirection="column" width={width}>
+      <Reading {...page} width={width} height={height - reserve} focused={focused} />
+      {foot.length ? (
+        <Box flexDirection="column" paddingX={2} marginTop={1}>
+          <Text bold color="#87afd7">
+            dum
+          </Text>
+          {foot.map((l, i) => (
+            <Text key={i} wrap="truncate-end">
+              {l}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+    </Box>
+  );
 }
 
 type Page = {
@@ -54,8 +75,17 @@ function pageFor(stage: BoardStage, transcript: Entry[], width: number): Page {
     case "reply":
       return { id: stage, title: "dum", subtitle: "", color: "#87afd7", lines: markdown(stage.text, width - 4) };
     case "info":
-      // Laid out by whoever wrote it - columns stay columns.
-      return { id: stage, title: stage.title, subtitle: "", color: "#87afd7", lines: stage.body.split("\n") };
+      // Laid out by whoever wrote it; long lines wrap under their own indent.
+      return {
+        id: stage,
+        title: stage.title,
+        subtitle: "",
+        color: "#87afd7",
+        lines: stage.body.split("\n").flatMap((l) => {
+          const indent = /^\s*/.exec(l)![0];
+          return l.trim() ? wrapAt(l.trim(), width - 6 - indent.length).map((w) => indent + w) : [""];
+        }),
+      };
     case "spec":
       return {
         id: stage,

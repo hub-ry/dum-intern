@@ -177,7 +177,7 @@ ask for something dum does, name the command in one line:
   dum --forget "<skill>"  take one skill off
   not yet                 undo the skill you just checked off
   dum --learn "<topic>"   a project designed to learn a topic
-  dum --skills, :graph    see the tree
+  dum --skills, dum --graph  see the tree
   :help                   everything else
 
 HOW TO INTERROGATE

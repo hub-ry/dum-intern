@@ -68,7 +68,9 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
-  const body = Math.max(3, rows - 3);
+  // The field grows with a long answer; the panes give it the room.
+  const [fieldRows, setFieldRows] = useState(1);
+  const body = Math.max(3, rows - 2 - fieldRows);
   useEffect(() => {
     const onWheel = (w: Wheel) => {
       const x = w.x - 1;
@@ -146,7 +148,14 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         );
       case "cast":
         return isBoard(state.stage) ? (
-          <Board stage={state.stage} transcript={state.transcript} width={at.width} height={at.height} focused={focus === "side"} />
+          <Board
+            stage={state.stage}
+            transcript={state.transcript}
+            width={at.width}
+            height={at.height}
+            focused={focus === "side"}
+            question={state.prompt?.type === "question" ? state.prompt.question : undefined}
+          />
         ) : (
           <Cast state={state} width={at.width} />
         );
@@ -202,6 +211,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             color={state.prompt?.type === "spec" ? "#87af87" : undefined}
             active={focus === "input"}
             onSubmit={(v) => store.submit(v.trim())}
+            width={cols - 2}
+            onRows={setFieldRows}
           />
         )}
       </Box>
@@ -216,7 +227,7 @@ function hint(focus: Focus, typing: boolean, hasCode: boolean, inShell = false):
   if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return `tab: stage   ⇧tab: last page   !shell   ?ask   :run   :graph   :help`;
+  return "tab · ⇧tab back · ? ask · ! shell · :help";
 }
 
 function promptFor(p: Prompt): string {

@@ -188,21 +188,22 @@ export class Store {
       if (question) this.onAsk?.(question);
       return;
     }
-    // `:run`, `:graph`, `:log`, `:help` - dum's commands, vim's ex line.
-    const ex = /^:\s*(run|graph|log|help|shell)\s*$/i.exec(text.trim());
+    // `:run`, `:log`, `:help` - dum's commands, vim's ex line.
+    const ex = /^:\s*(run|log|help)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
       return;
     }
     // `:skill <name> [in <lang>]` and `:forget <name>`: their tree, edited by them.
+    // `:skill x [in lang]` adds; `:skill -x` takes it off.
+    const off = /^:\s*skill\s+-\s*(.+)$/i.exec(text.trim());
+    if (off) {
+      this.onSkillEdit?.("forget", off[1]!.trim(), "");
+      return;
+    }
     const sk = /^:\s*skill\s+(.+?)(?:\s+in\s+([\w+#.]+))?\s*$/i.exec(text.trim());
     if (sk) {
       this.onSkillEdit?.("add", sk[1]!.trim(), sk[2] ?? "");
-      return;
-    }
-    const fg = /^:\s*forget\s+(.+)$/i.exec(text.trim());
-    if (fg) {
-      this.onSkillEdit?.("forget", fg[1]!.trim(), "");
       return;
     }
     // `:taste <rule>` - a rule in their words, for this session and every one after.
@@ -367,27 +368,26 @@ export class Store {
 
   /** One of dum's `:` commands, from the input or the file's `:` line. */
   command(name: string) {
-    if (name === "shell") return this.onShell?.("");
+
     if (name === "run") return this.runFile();
-    if (name === "graph") return this.onGraph?.();
+
     if (name === "log") return this.toggleTranscript();
     if (name === "help") {
       return this.show(
-        "dum commands",
+        "dum",
         [
-          "!cmd      run it on the shell page. ! or :shell opens it",
-          "?text     ask anything, answered off to the side",
-          ":run      run the file on screen (compiled languages: the line to type)",
-          ":graph    the skill graph, in your browser",
-          ":log      everything said so far, and back",
-          ":taste x  a rule for how dum should work, kept for every session",
-          ":skill x [in lang]  add a skill you can write from a blank file, no AI",
-          ":forget x  take a skill off your tree",
-          "tab       input, file, file tree",
+          "?question   ask anything, off to the side",
+          "!command    run it in the shell  (! alone opens it)",
+          ":run        run the file you're looking at",
+          ":skill x    add a skill you can write without AI",
+          "            (:skill -x takes it off)",
+          ":taste x    a rule for how dum works",
+          ":log        everything said so far",
           "",
-          "answering a question: your answer, idk, or type it",
-          "at your turn: type it and say done, or explain it here",
-          "not yet   take back the skill just checked off",
+          "when dum asks   answer · idk · type it",
+          "your turn       type it and say done, or explain it",
+          "not yet         undo the skill just checked off",
+          "tab · ⇧tab      move around · go back",
         ].join("\n"),
       );
     }
@@ -484,6 +484,11 @@ export class Store {
   // -- internals ----------------------------------------------------------
 
   private park<T = string>(prompt: Prompt, entryId: number): Promise<T> {
+    // dum asking something takes the characters' side back from help-type
+    // boards. A lesson or reply stays up, with the question at its foot.
+    if (prompt?.type === "question" && this.state.stage.kind === "info") {
+      this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
+    }
     const early = this.typedAhead.shift();
     if (early !== undefined) {
       this.answer(entryId, early);

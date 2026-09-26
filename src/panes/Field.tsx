@@ -1,7 +1,7 @@
 // A one-line text field.
 
-import React, { useState } from "react";
-import { Text, useInput, usePaste } from "ink";
+import React, { useEffect, useState } from "react";
+import { Box, Text, useInput, usePaste } from "ink";
 import { typed, pasted, readline } from "../typing.ts";
 
 export function Field({
@@ -9,11 +9,17 @@ export function Field({
   onSubmit,
   color,
   active = true,
+  width = 80,
+  onRows,
 }: {
   prompt: string;
   onSubmit: (value: string) => void;
   color?: string;
   active?: boolean;
+  /** Columns to wrap at. */
+  width?: number;
+  /** How many rows it's taking, so the panes above can make room. */
+  onRows?: (rows: number) => void;
 }) {
   const [value, setValue] = useState("");
   const [at, setAt] = useState(0);
@@ -67,18 +73,54 @@ export function Field({
     { isActive: active },
   );
 
-  const before = value.slice(0, at);
-  const under = value[at] ?? " ";
-  const after = value.slice(at + 1);
+  // Wrapped, not run off the edge: a long answer stays readable while you type.
+  const rows = fieldRows(prompt, value, width);
+  useEffect(() => onRows?.(Math.min(MAX_ROWS, rows.length)), [rows.length, onRows]);
+  useEffect(() => () => onRows?.(1), [onRows]);
+  const cursor = prompt.length + at;
+  const where = Math.floor(cursor / width);
+  const first = Math.max(0, Math.min(where - MAX_ROWS + 1, rows.length - MAX_ROWS));
 
   return (
-    <Text>
-      <Text color={color} bold dimColor={!active}>
-        {prompt}
-      </Text>
-      {before}
-      {active ? <Text inverse>{under}</Text> : <Text dimColor>{under}</Text>}
-      {after}
-    </Text>
+    <Box flexDirection="column">
+      {rows.slice(first, first + MAX_ROWS).map((line, i) => {
+        const n = first + i;
+        const start = n * width;
+        const text = (s: string, from: number) => {
+          // The prompt part of the first row keeps its colour.
+          const cut = Math.max(0, Math.min(s.length, prompt.length - from));
+          return (
+            <>
+              <Text color={color} bold dimColor={!active}>
+                {s.slice(0, cut)}
+              </Text>
+              {s.slice(cut)}
+            </>
+          );
+        };
+        if (n !== where) return <Text key={n}>{text(line, start)}</Text>;
+        const col = cursor - start;
+        const under = line[col] ?? " ";
+        return (
+          <Text key={n}>
+            {text(line.slice(0, col), start)}
+            {active ? <Text inverse>{under}</Text> : <Text dimColor>{under}</Text>}
+            {line.slice(col + 1)}
+          </Text>
+        );
+      })}
+    </Box>
   );
+}
+
+/** Most rows the field grows to; past that it scrolls with the cursor. */
+const MAX_ROWS = 4;
+
+/** Prompt and text cut into rows of `width`, with room for the cursor at the end. */
+export function fieldRows(prompt: string, value: string, width: number): string[] {
+  const all = prompt + value + " ";
+  const w = Math.max(1, width);
+  const out: string[] = [];
+  for (let i = 0; i < all.length; i += w) out.push(all.slice(i, i + w));
+  return out.length ? out : [""];
 }

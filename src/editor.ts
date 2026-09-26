@@ -79,7 +79,7 @@ export type View = { rows: number; cols: number };
 export type Effect = "save" | "leave" | "reload" | `cmd:${string}` | `shell:${string}`;
 
 /** dum's commands, the same on the input line and on the file's `:` line. */
-export const COMMANDS = ["run", "graph", "log", "help", "shell"] as const;
+export const COMMANDS = ["run", "log", "help"] as const;
 
 const UNDO_MAX = 200;
 

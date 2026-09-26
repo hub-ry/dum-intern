@@ -79,12 +79,8 @@ test("the input has readline's keys", async () => {
 test(": commands are dum's, and only the exact words", async () => {
   const { Store } = await import("../src/store.ts");
   const s = new Store("r", "understand");
-  let graphs = 0;
-  s.onGraph = () => void graphs++;
   const reply = s.askQuestion("q?", "");
-  s.submit(":graph");
   s.submit(": log");
-  assert.equal(graphs, 1);
   assert.equal(s.getSnapshot().stage.kind, "transcript");
   s.submit(":yes");
   assert.equal(await reply, ":yes");
@@ -142,7 +138,7 @@ test("with a file open, :w in the input goes to the file, not the intern", async
   assert.equal(await reply, ":w", "the first :w, with no file open, was an answer");
 });
 
-test(":skill and :forget edit the tree, and never reach the intern", async () => {
+test(":skill adds, :skill -x takes off, and neither reaches the intern", async () => {
   const { Store } = await import("../src/store.ts");
   const s = new Store("r", "understand");
   const edits: string[][] = [];
@@ -150,8 +146,14 @@ test(":skill and :forget edit the tree, and never reach the intern", async () =>
   const reply = s.askQuestion("q?", "");
   s.submit(":skill for loops in python");
   s.submit(":skill recursion");
-  s.submit(":forget recursion");
+  s.submit(":skill -recursion");
   s.submit("an answer");
   assert.deepEqual(edits, [["add", "for loops", "python"], ["add", "recursion", ""], ["forget", "recursion", ""]]);
   assert.equal(await reply, "an answer");
+});
+
+test("the input wraps into rows instead of running off the screen", async () => {
+  const { fieldRows } = await import("../src/panes/Field.tsx");
+  assert.deepEqual(fieldRows("> ", "abcdefgh", 5), ["> abc", "defgh", " "]);
+  assert.deepEqual(fieldRows("> ", "", 5), [">  "], "a cell kept for the cursor");
 });

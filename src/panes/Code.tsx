@@ -40,7 +40,7 @@ export function Code({
   onLeave: () => void;
   /** True while every key is text - the app must not take tab from an insert. */
   onTyping: (typing: boolean) => void;
-  /** A `:run`, `:graph`, `:log` or `:!cmd` from the `:` line. */
+  /** A `:run`, `:log` or `:!cmd` from the `:` line. */
   onCommand: (effect: string) => void;
 }) {
   const buffers = useRef(BUFFERS);
