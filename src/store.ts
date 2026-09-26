@@ -20,7 +20,7 @@ export type Lesson = {
 
 /** One thing that happened, in order. The transcript is append-only. */
 export type Entry =
-  | { kind: "say"; id: number; text: string }
+  | { kind: "say"; id: number; text: string; lead?: boolean }
   | { kind: "question"; id: number; question: string; why: string; answer: string | null }
   | { kind: "lesson"; id: number; lesson: Lesson }
   | { kind: "quip"; id: number; text: string; about: string }
@@ -249,8 +249,9 @@ export class Store {
 
   // -- agent side ---------------------------------------------------------
 
-  say(text: string) {
-    this.append({ kind: "say", text });
+  /** `lead` marks the line that matters this turn - a review's verdict - over any chatter after it. */
+  say(text: string, lead = false) {
+    this.append({ kind: "say", text, ...(lead ? { lead } : {}) });
     // Too long for the six lines under dum's face: it opens on the stage, where it scrolls,
     // instead of hiding behind :log.
     if (text.length > LONG_SAY || text.split("\n").length > 6) this.patch({ stage: { kind: "reply", text } });

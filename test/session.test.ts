@@ -188,3 +188,20 @@ test("live comments pin to lines, replace per line, and clear together", async (
   s.unpin();
   assert.deepEqual(s.getSnapshot().pins, {});
 });
+
+test("what dum said since your last message shows above the prompt line", async () => {
+  const { sinceYou } = await import("../src/panes/Cast.tsx");
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  const done = s.askNext();
+  s.submit("done");
+  await done;
+  s.say('secret 50, you type 30, and it says "too high". is 30 bigger than 50?');
+  void s.askNext();
+  assert.match(sinceYou(s.getSnapshot()), /is 30 bigger than 50\?/);
+  const again = s.askNext();
+  s.submit("hm");
+  await again;
+  void s.askNext();
+  assert.equal(sinceYou(s.getSnapshot()), "", "nothing new since you spoke");
+});

@@ -199,6 +199,19 @@ function lastQuip(s: State): string {
   return "";
 }
 
+/** The last thing dum said after your most recent message, trimmed to fit. "" if nothing. */
+export function sinceYou(s: State): string {
+  let you = -1;
+  s.transcript.forEach((e, i) => {
+    if (e.kind === "question" && e.answer !== null) you = i;
+  });
+  const says = s.transcript.slice(you + 1).filter((e) => e.kind === "say");
+  const said = says.find((e) => e.kind === "say" && e.lead) ?? says.pop();
+  if (!said || said.kind !== "say") return "";
+  const text = sentences(said.text, 3);
+  return text.length > 260 ? text.slice(0, 257).trimEnd() + "…" : text;
+}
+
 /** What the intern is saying right now. */
 function currentLine(s: State): string {
   if (s.prompt?.type === "question") {
@@ -217,8 +230,15 @@ function currentLine(s: State): string {
   if (s.prompt?.type === "spec") return "that is the spec. build it?";
   if (s.prompt?.type === "next") {
     const t = s.todos[0];
-    if (t) return `your turn: ${t.concept} in ${t.path}. type it and say done, or explain it here.`;
-    return s.suggestion ? `next up: ${s.suggestion}. say go, or ask for something else.` : "what next?";
+    const next = t
+      ? `your turn: ${t.concept} in ${t.path}. type it and say done, or explain it here.`
+      : s.suggestion
+        ? `next up: ${s.suggestion}. say go, or ask for something else.`
+        : "what next?";
+    // What dum said since you last spoke - a review's question, say - goes
+    // above, or the prompt line covers it and dum looks like it ignored you.
+    const said = sinceYou(s);
+    return said ? `${said}\n\n${next}` : next;
   }
   if (s.busy) return "";
   for (let i = s.transcript.length - 1; i >= 0; i--) {

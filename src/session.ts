@@ -975,12 +975,13 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           if (!t) {
             return { content: [{ type: "text" as const, text: `No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.` }] };
           }
-          // A pass is one line; a miss is the one question. Anything after is a wrap-up.
-          store.say(sentences(args.feedback, 1));
+          // A pass is one line. A miss is the question, whole - cutting it to a
+          // sentence once dropped the question and kept only the setup.
+          reviewed = true;
+          store.say(args.passed ? sentences(args.feedback, 1) : args.feedback.trim().slice(0, 400), true);
           if (args.passed) {
             setOpen(open.filter((o) => o !== t));
             if (t.request && !open.some((o) => o.request === t.request)) hooks.onBuilt?.(t.request);
-            reviewed = true;
             record({
               name: t.concept,
               solid: true,
@@ -1205,7 +1206,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       if (msg.type === "assistant") {
         for (const b of msg.message?.content ?? []) {
           if (b.type === "text" && b.text?.trim()) {
-            store.say(b.text.trim());
+            // After a review it's told to say nothing more; if it does, it
+            // would bury the verdict, so it's dropped.
+            if (!reviewed) store.say(b.text.trim());
           }
           if (b.type === "tool_use" && b.id && WATCHED[b.name]) {
             const path = detail(repo.root, b.input);
