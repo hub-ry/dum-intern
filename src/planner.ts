@@ -68,6 +68,7 @@ Reply with ONLY JSON, no prose and no fence:
 }
 
 const Brief = z.object({
+  minutes: z.number().positive().max(2400).optional().catch(undefined),
   title: z.string().min(1),
   brief: z.string().catch(""),
   done_when: z.string().catch(""),
@@ -93,13 +94,14 @@ exercise exactly the concepts listed - building it is how they learn them.
 - brief: two or three sentences - what it does, and why it's the right
   size step. Written to them: "you", never "they".
 - done_when: one sentence, something they can see working.
+- minutes: an honest estimate for someone learning as they go. A number.
 - start: the first thing to say to dum in an empty folder - one plain request,
   under 15 words, the way you'd ask a teammate. "a vec2 class with add and length".
 
 ${jobs.map((j, i) => `${i + 1}. ${j}`).join("\n")}
 
 Reply with ONLY a JSON array of ${jobs.length} objects, in order, no prose and no fence:
-[{"title": "...", "brief": "...", "done_when": "...", "start": "..."}]`;
+[{"title": "...", "brief": "...", "done_when": "...", "start": "...", "minutes": 90}]`;
 }
 
 async function briefs(prompt: string, count: number, onStatus?: (s: string) => void): Promise<Written[] | null> {
@@ -172,6 +174,7 @@ export async function plan(
     start: written[i]!.start.trim(),
     planned: today,
     body: body(written[i]!),
+    ...(written[i]!.minutes ? { minutes: Math.round(written[i]!.minutes!) } : {}),
   }));
   const last = written[written.length - 1]!;
   const goal: projects.Project = {
@@ -182,6 +185,7 @@ export async function plan(
     leadsTo: "",
     start: last.start.trim(),
     planned: today,
+    ...(last.minutes ? { minutes: Math.round(last.minutes) } : {}),
     body: [idea.body.trim() && idea.body.trim() !== idea.title ? idea.body.trim() : m.summary, body({ ...last, brief: last.brief })]
       .filter(Boolean)
       .join("\n\n"),
@@ -232,5 +236,6 @@ export async function ideas(
     start: w.start.trim(),
     planned: today,
     body: body(w),
+    ...(w.minutes ? { minutes: Math.round(w.minutes) } : {}),
   }));
 }

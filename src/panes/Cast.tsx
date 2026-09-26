@@ -66,6 +66,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         text={internSaid.shown}
         width={inner}
         why={state.prompt?.type === "question" ? state.prompt.why : ""}
+        clamp={SAY_LINES}
         choices={state.prompt?.type === "question" && state.prompt.choices ? "answer it · idk · type it" : ""}
       />
     </Box>
@@ -82,6 +83,7 @@ function Speaker({
   text,
   why,
   choices,
+  clamp,
   width,
   dim,
 }: {
@@ -96,6 +98,8 @@ function Speaker({
   why?: string;
   /** The ways out of a question, so "type it" is discoverable without a manual. */
   choices?: string;
+  /** Most lines to show before pointing at the transcript. */
+  clamp?: number;
   width: number;
   dim?: boolean;
 }) {
@@ -109,8 +113,8 @@ function Speaker({
         </Text>
         {model ? <Text dimColor>{"  " + model}</Text> : null}
       </Text>
-      {(text ? wrap(text, "", width) : [""]).map((line, i) => (
-        <Text key={i} dimColor={dim} wrap="truncate-end">
+      {clamped(text ? wrap(text, "", width) : [""], clamp).map((line, i) => (
+        <Text key={i} dimColor={dim || line.startsWith("… ")} wrap="truncate-end">
           {line || " "}
         </Text>
       ))}
@@ -128,6 +132,17 @@ function Speaker({
       ) : null}
     </Box>
   );
+}
+
+/**
+ * What dum says, cut to what fits in working memory. The whole of it is in the
+ * transcript; a wall of text here is a turn nobody reads.
+ */
+const SAY_LINES = 6;
+
+function clamped(lines: string[], n?: number): string[] {
+  if (!n || lines.length <= n) return lines;
+  return [...lines.slice(0, n - 1), `… ${lines.length - n + 1} more - ctrl-t`];
 }
 
 function Face({

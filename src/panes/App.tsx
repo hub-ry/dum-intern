@@ -15,6 +15,7 @@ import { Panes } from "./Panes.tsx";
 import { Field } from "./Field.tsx";
 import type { Box as Rect, Node, Pane } from "../layout.ts";
 import type { Prompt, Store } from "../store.ts";
+import { bar } from "../lines.ts";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -109,19 +110,34 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   return (
     <Box flexDirection="column" width={cols} height={rows}>
       <Box paddingX={1}>
-        <Text color="#d7a55f" bold>
-          ▛▚▘{" "}
-        </Text>
-        <Text bold>dum-intern</Text>
-        <Text dimColor>{"  " + state.repo + "  "}</Text>
-        <Text color="#87afd7">{state.mode}</Text>
-        <Text dimColor>{"  "}</Text>
-        <Text color="#87af87">{`${state.skills.known} known`}</Text>
-        {state.skills.claimed ? <Text color="#87afd7">{`  ${state.skills.claimed} claimed`}</Text> : null}
-        {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
-        {state.todos.length ? <Text color="#d7a55f">{`  ${state.todos.length} to type`}</Text> : null}
-        <Box flexGrow={1} />
-        <Text dimColor>{hint(focus, typing, hasCode)}</Text>
+        {/* Where you are never shrinks; the key hints give way first. As
+            separate flex items these all shrank together and read as
+            "dum-inte  some-repoanti-vi". */}
+        <Box flexShrink={0}>
+          <Text>
+            <Text color="#d7a55f" bold>
+              ▛▚▘{" "}
+            </Text>
+            <Text bold>dum-intern</Text>
+            <Text dimColor>{"  " + state.repo + "  "}</Text>
+            <Text color="#87afd7">{state.mode}</Text>
+            <Text color="#87af87">{`  ${state.skills.known} known`}</Text>
+            {state.skills.claimed ? <Text color="#87afd7">{`  ${state.skills.claimed} claimed`}</Text> : null}
+            {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
+            {state.todos.length ? <Text color="#d7a55f">{`  ${state.todos.length} to type`}</Text> : null}
+            {state.progress ? (
+              <>
+                <Text dimColor>{`  ${state.progress.unit} ${Math.min(state.progress.done + 1, state.progress.total)}/${state.progress.total} `}</Text>
+                <Text color="#87af87">{bar(state.progress.done, state.progress.total)}</Text>
+              </>
+            ) : null}
+          </Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" marginLeft={2}>
+          <Text dimColor wrap="truncate-end">
+            {hint(focus, typing, hasCode)}
+          </Text>
+        </Box>
       </Box>
 
       <Box height={body}>

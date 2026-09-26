@@ -104,6 +104,20 @@ Claimed isn't known. Nobody watched me write that code. The first build that lea
 `dum --reset` starts the tree over. The old notes get moved aside, not deleted.
 
 
+### Short, on purpose
+
+This is closer to a game than a document, and every long message is a turn I stop playing. The rules come from [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md), and they're kept in code wherever code can keep them:
+
+- **Where I am is always on screen.** `feature 2/9 ▰▱▱▱▱▱▱▱▱` in the header, and on its own line at every prompt in plain mode, with the open holes.
+- **One next action, and dum says it.** "next up: … say go", "your turn: … type it and say done, or explain it here". The intern doesn't have to.
+- **Wins show.** Every `✓ feature 3 of 9 ▰▰▰▱▱▱▱▱▱` moves the bar.
+- **Numbers, not "a bit of work".** Every feature, milestone and project comes with minutes, and none is allowed over 45.
+- **What dum says fits in working memory.** The pane shows six lines and points at `ctrl-t` for the rest.
+- **Lists stop at five.** The rest is a count.
+
+The intern's prompt carries the rest. After a build it gets three lines: what runs now, where my holes are, and nothing else. It doesn't recap, list the files, or write a "still open" essay. The spec's sections are five bullets at most, and a section with nothing real in it is left out. Lessons and `?` answers are two or three sentences.
+
+
 ### Not too strict
 
 The intern used to over-ask. Now it's told most requests need zero to three questions, and that plain words count as an explanation. I don't need the jargon, I need to clearly get it.

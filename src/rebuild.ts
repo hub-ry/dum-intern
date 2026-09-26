@@ -25,7 +25,7 @@ const EFFORT = "high";
 export const VOICE = { model: MODEL, effort: EFFORT };
 const TOOLS = ["Read", "Glob", "Grep"];
 
-export type Milestone = { request: string; done: boolean };
+export type Milestone = { request: string; done: boolean; minutes?: number };
 /**
  * A folder built one milestone at a time. A rebuild has a `source` it was read
  * from; a learning project has the `topic` it was designed to teach instead.
@@ -56,7 +56,11 @@ export function load(root: string): Rebuild | null {
       goal: raw.goal,
       milestones: raw.milestones
         .filter((m: any) => m && typeof m.request === "string")
-        .map((m: any) => ({ request: m.request, done: m.done === true })),
+        .map((m: any) => ({
+          request: m.request,
+          done: m.done === true,
+          ...(typeof m.minutes === "number" && m.minutes > 0 ? { minutes: m.minutes } : {}),
+        })),
     };
   } catch {
     return null;
@@ -71,10 +75,23 @@ export function save(root: string, r: Rebuild) {
 }
 
 /** The first milestone not built yet, with its number, or null when it's all built. */
-export function nextUp(r: Rebuild): { index: number; request: string } | null {
+export function nextUp(r: Rebuild): { index: number; request: string; minutes?: number } | null {
   const i = r.milestones.findIndex((m) => !m.done);
-  return i < 0 ? null : { index: i, request: r.milestones[i]!.request };
+  if (i < 0) return null;
+  const m = r.milestones[i]!;
+  return { index: i, request: m.request, ...(m.minutes ? { minutes: m.minutes } : {}) };
 }
+
+/** What a unit is called here, and how far along it is. */
+export function progress(r: Rebuild): { done: number; total: number; unit: string } {
+  return { done: r.milestones.filter((m) => m.done).length, total: r.milestones.length, unit: r.topic ? "feature" : "milestone" };
+}
+
+/** A feature or milestone as the model wrote it: a sentence, or a sentence with minutes. */
+export const Step = z.union([
+  z.string().min(1).transform((request) => ({ request, minutes: undefined as number | undefined })),
+  z.object({ request: z.string().min(1), minutes: z.number().positive().max(600).optional().catch(undefined) }),
+]);
 
 /** Mark the milestone built, if that's what this request was. */
 export function built(r: Rebuild, request: string): Rebuild {
@@ -132,7 +149,7 @@ export function prepare(target: string): string | null {
 const Read = z.object({
   title: z.string().min(1),
   summary: z.string().catch(""),
-  milestones: z.array(z.string().min(1)).min(1),
+  milestones: z.array(Step).min(1),
   skills: z.array(z.object({ name: z.string().min(1), requires: z.array(z.string()).catch([]) })).catch([]),
 });
 
@@ -141,7 +158,7 @@ export async function read(
   source: string,
   t: skills.Tree,
   onStatus?: (s: string) => void,
-): Promise<(Mapped & { milestones: string[] }) | null> {
+): Promise<(Mapped & { milestones: { request: string; minutes?: number }[] }) | null> {
   const names = t.skills.filter((s) => s.solid).map((s) => s.name);
   const reply = await oneShot(
     `The project in this directory is going to be rebuilt from scratch by someone
@@ -153,9 +170,10 @@ vendored and generated code - and reply with two things.
 
 1. milestones: the order to rebuild it in, as requests to dum. Each is one
    small working step that builds on the last, one plain sentence under 20
-   words ("a CLI that reads the config file and prints it"). Start from the
-   smallest thing that runs. Six to twelve of them. Describe what to build,
-   not what the original's files are called.
+   words ("a CLI that reads the config file and prints it"), with an honest
+   estimate in minutes for someone learning as they go. Start from the
+   smallest thing that runs. Six to twelve of them, none over 45 minutes -
+   split any that would be. Describe what to build, not the original's files.
 
 2. skills: every concept the project rests on that you'd need to understand to
    write it - named the way an engineer says it out loud - and for each, what it
@@ -164,7 +182,7 @@ vendored and generated code - and reply with two things.
    requires may only name concepts in your list or on their tree. At most 30.
 
 Reply with ONLY JSON, no prose and no fence:
-{"title": "rebuild <project name>", "summary": "one sentence on what it is", "milestones": ["..."], "skills": [{"name": "...", "requires": ["..."]}]}`,
+{"title": "rebuild <project name>", "summary": "one sentence on what it is", "milestones": [{"request": "...", "minutes": 20}], "skills": [{"name": "...", "requires": ["..."]}]}`,
     { model: MODEL, effort: EFFORT, cwd: source, tools: TOOLS, onStatus },
   );
   const r = Read.safeParse(json(reply, "{"));
@@ -182,6 +200,6 @@ Reply with ONLY JSON, no prose and no fence:
     title: r.data.title.trim().toLowerCase(),
     summary: r.data.summary.trim(),
     needs,
-    milestones: r.data.milestones.map((m) => m.trim()).filter(Boolean),
+    milestones: r.data.milestones.map((m) => ({ request: m.request.trim(), ...(m.minutes ? { minutes: Math.round(m.minutes) } : {}) })).filter((m) => m.request),
   };
 }

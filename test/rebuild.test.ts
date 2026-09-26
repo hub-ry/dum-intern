@@ -63,3 +63,16 @@ test("a learning project reads as one, and the old rebuild.json still loads", as
   writeFileSync(`${root}/.dum/rebuild.json`, JSON.stringify(r));
   assert.deepEqual(load(root), r);
 });
+
+test("a step can come back as a sentence or with minutes, and minutes survive a save", async () => {
+  const { Step, progress } = await import("../src/rebuild.ts");
+  assert.deepEqual(Step.parse("echo server"), { request: "echo server", minutes: undefined });
+  assert.deepEqual(Step.parse({ request: "echo server", minutes: 15 }), { request: "echo server", minutes: 15 });
+  assert.equal(Step.parse({ request: "x", minutes: -3 }).minutes, undefined);
+  const root = mkdtempSync(`${tmpdir()}/dum-rb-`);
+  const withTime = { ...r, milestones: [{ request: "a", done: true, minutes: 10 }, { request: "b", done: false }] };
+  save(root, withTime);
+  assert.deepEqual(load(root), withTime);
+  assert.deepEqual(nextUp(withTime), { index: 1, request: "b" });
+  assert.deepEqual(progress({ ...withTime, topic: "x" }), { done: 1, total: 2, unit: "feature" });
+});

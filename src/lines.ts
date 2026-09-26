@@ -51,6 +51,30 @@ export function modelName(id: string): string {
   return `${m[1]} ${m[2]}${m[3] ? "." + m[3] : ""}`;
 }
 
+/**
+ * ▰▰▱▱▱▱▱▱▱ - progress you can see at a glance. One cell per item up to ten,
+ * so a nine-feature project reads as nine steps and not as a percentage.
+ */
+export function bar(done: number, total: number): string {
+  if (total <= 0) return "";
+  const cells = Math.min(total, 10);
+  const on = Math.round((Math.min(done, total) / total) * cells);
+  return "▰".repeat(on) + "▱".repeat(cells - on);
+}
+
+/** "~20 min", "~1.5 h": a number, never "a bit". "" when there isn't one. */
+export function minutes(m: number | undefined): string {
+  if (!m || !Number.isFinite(m) || m <= 0) return "";
+  if (m < 90) return `~${Math.round(m / 5) * 5 || 5} min`;
+  const h = Math.round((m / 60) * 2) / 2;
+  return `~${h} h`;
+}
+
+/** At most `n` items, and how many were left out: lists stay scannable. */
+export function cap<T>(items: T[], n = 5): { shown: T[]; more: number } {
+  return { shown: items.slice(0, n), more: Math.max(0, items.length - n) };
+}
+
 /** "opus 5.5 · high": the model, and the effort it runs at when that's known. */
 export function voiceName(model: string, effort = ""): string {
   if (!model) return "";

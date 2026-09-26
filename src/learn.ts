@@ -16,6 +16,7 @@ import * as skills from "./skills.ts";
 import * as projects from "./projects.ts";
 import type { Mapped } from "./planner.ts";
 import { oneShot, json } from "./oneshot.ts";
+import { Step } from "./rebuild.ts";
 
 const MODEL = "claude-opus-5-5";
 const EFFORT = "high";
@@ -25,11 +26,11 @@ const Design = z.object({
   title: z.string().min(1),
   summary: z.string().catch(""),
   why: z.string().catch(""),
-  features: z.array(z.string().min(1)).min(1),
+  features: z.array(Step).min(1),
   skills: z.array(z.object({ name: z.string().min(1), requires: z.array(z.string()).catch([]) })).catch([]),
 });
 
-export type Designed = Mapped & { why: string; features: string[] };
+export type Designed = Mapped & { why: string; features: { request: string; minutes?: number }[] };
 
 export async function design(topic: string, t: skills.Tree, onStatus?: (s: string) => void): Promise<Designed | null> {
   const held = t.skills.filter((s) => s.solid).map((s) => s.name);
@@ -53,8 +54,10 @@ ${
   incidental ones.
 - Small: a few evenings at most. Something that runs early and grows.
 - features: the order to build it in, as requests to dum. Each one small and
-  working, building on the last, one plain sentence under 20 words. Five to
-  ten of them. The first is the smallest thing that runs.
+  working, building on the last, one plain sentence under 20 words, with an
+  honest estimate in minutes for someone learning it. Five to ten of them,
+  none over 30 minutes - split any that would be. The first is the smallest
+  thing that runs, and should take about ten.
 - skills: every concept the project rests on - the topic's AND the ones from
   their tree it uses, listed by their exact tree names with requires: [].
   Name each the way an engineer says it out loud, at the grain of a skill tree:
@@ -66,7 +69,7 @@ ${
 - title: short, lowercase.
 
 Reply with ONLY JSON, no prose and no fence:
-{"title": "...", "summary": "one sentence on what it is", "why": "...", "features": ["..."], "skills": [{"name": "...", "requires": ["..."]}]}`,
+{"title": "...", "summary": "one sentence on what it is", "why": "...", "features": [{"request": "...", "minutes": 15}], "skills": [{"name": "...", "requires": ["..."]}]}`,
     { model: MODEL, effort: EFFORT, onStatus },
   );
   const d = Design.safeParse(json(reply, "{"));
@@ -85,7 +88,7 @@ Reply with ONLY JSON, no prose and no fence:
     summary: d.data.summary.trim(),
     why: d.data.why.trim(),
     needs,
-    features: d.data.features.map((f) => f.trim()).filter(Boolean),
+    features: d.data.features.map((f) => ({ request: f.request.trim(), ...(f.minutes ? { minutes: Math.round(f.minutes) } : {}) })).filter((f) => f.request),
   };
 }
 

@@ -16,7 +16,7 @@ import * as graphs from "./graph.ts";
 import * as learn from "./learn.ts";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { c, wrap, voiceName } from "./lines.ts";
+import { c, wrap, voiceName, minutes, cap, bar } from "./lines.ts";
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 import { basename as repo, resolve } from "node:path";
@@ -298,8 +298,9 @@ function printProjects(only?: string) {
   };
   const line = (p: projects.Project, indent: string) => {
     const s = st(p);
-    const unlocks = p.unlocks.length ? c.dim(`  ${p.unlocks.join(", ")}`) : "";
-    console.log(`${indent}${MARK[s]} ${s === "waiting" ? c.dim(p.title) : p.title}${unlocks}`);
+    const unlocks = p.unlocks.length ? c.dim(`  ${cap(p.unlocks, 3).shown.join(", ")}${p.unlocks.length > 3 ? " …" : ""}`) : "";
+    const t = minutes(p.minutes);
+    console.log(`${indent}${MARK[s]} ${s === "waiting" ? c.dim(p.title) : p.title}${t ? c.dim(`  ${t}`) : ""}${unlocks}`);
     if (s === "ready" && p.start) console.log(`${indent}  ${c.dim(`start: dum "${p.start}"`)}`);
   };
   console.log();
@@ -362,19 +363,27 @@ async function rebuildProject(args: string[]) {
     read,
   );
   bar.stop();
-  if (planned) projects.write([...planned.steps, { ...planned.goal, start: read.milestones[0]! }]);
-  rebuild.save(target, { source: ok.path, goal: read.title, milestones: read.milestones.map((request) => ({ request, done: false })) });
+  if (planned) projects.write([...planned.steps, { ...planned.goal, start: read.milestones[0]!.request }]);
+  rebuild.save(target, { source: ok.path, goal: read.title, milestones: read.milestones.map((m) => ({ ...m, done: false })) });
 
-  console.log(`\n  ${c.green("✓")} ${read.title}  ${c.dim(read.summary)}\n`);
-  read.milestones.forEach((m, i) => console.log(`  ${c.dim(String(i + 1).padStart(2))}  ${m}`));
-  console.log();
+  printSteps(read.title, read.milestones, "milestones");
   if (planned?.steps.length) {
-    console.log(`  ${c.amber("!")} it sits ${planned.height} tiers above your tree. ${planned.steps.length} stepping stones are in the queue`);
-    console.log(`    ${c.dim("(dum --projects). you can start anyway - what you don't hold becomes holes to type.")}`);
-  } else {
-    console.log(`  ${c.dim("close enough to your tree to start now.")}`);
+    console.log(`  ${c.amber("!")} ${planned.height} tiers above your tree. ${planned.steps.length} stepping stones in dum --projects, or start anyway.`);
   }
-  console.log(`\n  cd ${target.replace(homedir(), "~")} && dum\n`);
+  console.log(`\n  next: ${c.bold(`cd ${target.replace(homedir(), "~")} && dum`)}   ${c.dim(`milestone 1, ${minutes(read.milestones[0]!.minutes) || "short"}`)}\n`);
+}
+
+/** A headline with the total time, then the steps, each with its minutes. */
+function printSteps(title: string, steps: { request: string; minutes?: number }[], unit: string, extra = "") {
+  const sum = steps.reduce((a, s) => a + (s.minutes ?? 0), 0);
+  const head = [minutes(sum), `${steps.length} ${unit}`, extra].filter(Boolean).join(" · ");
+  console.log(`\n  ${c.green("✓")} ${c.bold(title)}  ${c.dim(head)}\n`);
+  const w = String(steps.length).length;
+  for (const [i, s] of steps.entries()) {
+    const t = minutes(s.minutes);
+    console.log(`  ${c.dim(String(i + 1).padStart(w))}  ${s.request}${t ? c.dim(`  ${t}`) : ""}`);
+  }
+  console.log();
 }
 
 /**
@@ -413,27 +422,22 @@ async function learnTopic(args: string[]) {
       unlocks: missing,
       after: [],
       leadsTo: "",
-      start: d.features[0]!,
+      start: d.features[0]!.request,
       planned: new Date().toISOString().slice(0, 10),
       body: `${d.summary}\n\n${d.why}\n\nLearning ${topic}, in ${target.replace(homedir(), "~")}.`,
     },
   ]);
-  rebuild.save(target, { source: "", topic, goal: d.title, milestones: d.features.map((request) => ({ request, done: false })) });
+  rebuild.save(target, { source: "", topic, goal: d.title, milestones: d.features.map((f) => ({ ...f, done: false })) });
 
   const total = held.length + missing.length;
   const pct = total ? Math.round((held.length / total) * 100) : 0;
-  console.log(`\n  ${c.green("✓")} ${d.title}  ${c.dim(d.summary)}`);
-  if (d.why) for (const l of wrap(d.why, "    ", 76)) console.log(c.dim(l));
-  console.log();
-  d.features.forEach((f, i) => console.log(`  ${c.dim(String(i + 1).padStart(2))}  ${f}`));
-  console.log();
-  console.log(`  you hold ${held.length} of the ${total} skills it rests on (${pct}%). those get filled in front of you.`);
-  if (held.length) for (const l of wrap(`already yours: ${held.join(", ")}`, "  ", 78)) console.log(c.dim(l));
+  printSteps(d.title, d.features, "features", `you hold ${held.length}/${total} skills (${pct}%)`);
   if (missing.length) {
-    for (const l of wrap(`new to you: ${missing.join(", ")}`, "  ", 78)) console.log(c.dim(l));
-    console.log(`  ${c.dim("type those when dum leaves them as holes, or explain them and dum fills them.")}`);
+    const { shown, more } = cap(missing);
+    console.log(`  ${c.dim("new to you:")} ${shown.join(", ")}${more ? c.dim(` +${more} more`) : ""}`);
+    console.log(`  ${c.dim("held skills get filled. new ones: type them, or explain them and they get filled.")}`);
   }
-  console.log(`\n  cd ${target.replace(homedir(), "~")} && dum\n`);
+  console.log(`\n  next: ${c.bold(`cd ${target.replace(homedir(), "~")} && dum`)}   ${c.dim(`feature 1, ${minutes(d.features[0]!.minutes) || "short"}`)}\n`);
 }
 
 /** Project ideas that unlock the next skills on the tree, fastest first. */
@@ -454,9 +458,12 @@ async function nextProjects(n: number) {
   }
   projects.write(got);
   console.log();
+  // The win you'll see, not the pitch: the brief is in the note and the graph.
   for (const p of got) {
-    console.log(`  ${c.blue("▶")} ${c.bold(p.title)}  ${c.dim(p.unlocks.join(", "))}`);
-    for (const l of wrap(p.body.replace(/\*\*/g, ""), "    ", 76)) console.log(c.dim(l));
+    const t = minutes(p.minutes);
+    console.log(`  ${c.blue("▶")} ${c.bold(p.title)}${t ? c.dim(`  ${t}`) : ""}  ${c.dim(`unlocks ${p.unlocks.join(", ")}`)}`);
+    const done = /\*\*done when:\*\*\s*(.+)/.exec(p.body)?.[1];
+    if (done) for (const l of wrap(`done when: ${done}`, "    ", 76)) console.log(c.dim(l));
     if (p.start) console.log(`    start: dum "${p.start}"`);
     console.log();
   }
@@ -570,21 +577,26 @@ async function main() {
             const next = rebuild.built(r, req);
             if (next === r) return;
             rebuild.save(repo.root, next);
+            store.setProgress(rebuild.progress(next));
             const done = next.milestones.filter((m) => m.done).length;
-            store.note(`✓ ${next.topic ? "feature" : "milestone"} ${done} of ${next.milestones.length}: ${req}`);
+            store.note(`✓ ${next.topic ? "feature" : "milestone"} ${done} of ${next.milestones.length} ${bar(done, next.milestones.length)}  ${req}`);
           },
           suggest: () => {
-            const r = rb();
-            return (r && rebuild.nextUp(r)?.request) || "";
+            const n = rb() && rebuild.nextUp(rb()!);
+            return n ? `${n.request}${n.minutes ? ` (${minutes(n.minutes)})` : ""}` : "";
           },
         }
       : {};
+    if (rb()) store.setProgress(rebuild.progress(rb()!));
     let request =
       fromArgs ||
       (holes.length
         ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, "tab into the file, type it, :w, and say done. or explain it here and dum fills it. or ask for something else.")
         : up
-          ? await store.askQuestion(`next up: ${up.request}`, `${rb()!.topic ? "feature" : "milestone"} ${up.index + 1} of ${rb()!.milestones.length} of ${rb()!.goal}. say go, or ask for something else.`)
+          ? await store.askQuestion(
+              `next up: ${up.request}`,
+              `${rb()!.topic ? "feature" : "milestone"} ${up.index + 1} of ${rb()!.milestones.length}${up.minutes ? `, ${minutes(up.minutes)}` : ""}. say go.`,
+            )
           : await store.askQuestion("what do you want?", "")
       ).trim();
     if (!request) {

@@ -155,6 +155,13 @@ if (scene === "spec") {
   store.typing("stats.py", file.replace("    mid = n // 2\n", "    mid = n // 2\n    return s[mid] if n % 2 else (s[mid - 1] + s[mi"), 2);
   store.filled("stats.py", "median", "    n = len(s)\n    mid = n // 2\n    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2");
   void store.askNext();
+} else if (scene === "long") {
+  // dum saying far too much: the pane shows what fits and points at the rest.
+  void store.askQuestion(
+    "miner.py is set up, but it doesn't print an IP yet. Both regex pieces are yours to type, so python miner.py stops with NotImplementedError until you fill them in. Your holes: miner.py:5 (the IP pattern) and miner.py:12 (the search and print). Also the empty list case is still open, and mean() still crashes on an empty list with ZeroDivisionError instead of ValueError, which I left alone because you didn't ask.",
+    "",
+  );
+  store.setProgress({ done: 1, total: 9, unit: "feature" });
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");
   store.toggleTranscript();

@@ -67,3 +67,16 @@ test("a voice reads as model and effort", async () => {
   assert.equal(voiceName("claude-sonnet-5"), "sonnet 5");
   assert.equal(voiceName("", "high"), "");
 });
+
+test("progress, time and lists read at a glance", async () => {
+  const { bar, minutes, cap } = await import("../src/lines.ts");
+  assert.equal(bar(2, 9), "▰▰▱▱▱▱▱▱▱");
+  assert.equal(bar(0, 3), "▱▱▱");
+  assert.equal(bar(12, 12), "▰".repeat(10));
+  assert.equal(bar(1, 0), "");
+  assert.equal(minutes(12), "~10 min");
+  assert.equal(minutes(2), "~5 min");
+  assert.equal(minutes(150), "~2.5 h");
+  assert.equal(minutes(undefined), "");
+  assert.deepEqual(cap([1, 2, 3, 4, 5, 6, 7]), { shown: [1, 2, 3, 4, 5], more: 2 });
+});

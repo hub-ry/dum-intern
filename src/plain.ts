@@ -12,7 +12,7 @@
 
 import { stdout, stdin } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { c, collapse, format, voiceName } from "./lines.ts";
+import { c, collapse, format, voiceName, bar } from "./lines.ts";
 import type { Prompt, Store } from "./store.ts";
 
 const WIDTH = 74;
@@ -160,6 +160,12 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     // and printing its hints again reads as a second question.
     if (s.prompt !== hinted) {
       hinted = s.prompt;
+      // Where things stand, every turn: nobody should have to remember it.
+      if (s.prompt.type === "next" && s.progress) {
+        const p = s.progress;
+        const holes = s.todos.length ? ` · ${s.todos.length} hole${s.todos.length === 1 ? "" : "s"} open` : "";
+        console.log(`  ${c.dim(`${p.unit} ${Math.min(p.done + 1, p.total)}/${p.total}`)} ${c.green(bar(p.done, p.total))}${c.dim(holes)}`);
+      }
       // No editor here, so the hole is typed in yours - the line says where.
       const t = s.prompt.type === "next" ? s.todos[0] : undefined;
       if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - type it and say done, or explain it here`)}`);

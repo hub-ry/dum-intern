@@ -121,6 +121,8 @@ export type State = {
   todos: { concept: string; path: string }[];
   /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
   suggestion: string;
+  /** Where a milestone folder stands: done of total, and what a unit is called. */
+  progress: { done: number; total: number; unit: string } | null;
   /** The model behind each voice and the effort it runs at, as the SDK reported them. "" until known. */
   models: { intern: Voice; wizard: Voice };
 };
@@ -174,6 +176,7 @@ export class Store {
       skills: { known: 0, shaky: 0, claimed: 0 },
       todos: [],
       suggestion: "",
+      progress: null,
       models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
   }
@@ -364,6 +367,11 @@ export class Store {
   /** The skill tree changed. */
   setSkills(skills: { known: number; shaky: number; claimed: number }) {
     this.patch({ skills });
+  }
+
+  /** Where a milestone folder stands. */
+  setProgress(progress: { done: number; total: number; unit: string } | null) {
+    this.patch({ progress });
   }
 
   /** What "what next?" offers. */

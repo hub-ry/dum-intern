@@ -38,6 +38,8 @@ export type Project = {
   planned: string;
   /** The brief, as markdown. For a hand-written note, the idea itself. */
   body: string;
+  /** An honest estimate, so "an evening" is a number. */
+  minutes?: number;
 };
 
 /** Beside the skills, so one Obsidian vault on ~/.dum links the two. */
@@ -60,6 +62,7 @@ export function toNote(p: Project): string {
   if (p.leadsTo) front["leads-to"] = p.leadsTo;
   if (p.start) front.start = p.start;
   if (p.planned) front.planned = p.planned;
+  if (p.minutes) front.minutes = p.minutes;
   front.tags = [`dum/project/${p.kind}`];
   // The same edges again as links, for the graph view. Frontmatter is what
   // gets read back; these are regenerated on every write.
@@ -100,6 +103,7 @@ export function fromNote(text: string, file: string): Project | null {
     start: str(front.start) ? front.start.trim() : "",
     planned: str(front.planned) ? front.planned : front.planned instanceof Date ? front.planned.toISOString().slice(0, 10) : "",
     body: body.replace(LINKS_LINE, "").trim(),
+    ...(typeof front.minutes === "number" && front.minutes > 0 ? { minutes: front.minutes } : {}),
   };
 }
 
