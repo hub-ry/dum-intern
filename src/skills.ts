@@ -23,9 +23,10 @@
 // What none of this buys is skipping the spec. The gate is absolute no matter
 // how big the tree gets.
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename } from "node:path";
+import { fileName, fromNote, toNote } from "./notes.ts";
 
 export type Breadth = "general" | "niche";
 
@@ -34,6 +35,12 @@ export type Skill = {
   name: string;
   /** True once they explained it. False when the intern had to teach it. */
   solid: boolean;
+  /**
+   * They say they hold it - a scan of their own project, or a note they wrote
+   * - but never showed dum. Counts as solid for asking purposes except that
+   * the first build leaning on it gets one short check.
+   */
+  claimed: boolean;
   breadth: Breadth;
   /** Skills this one builds on directly, by name. May name skills not yet on the tree. */
   requires: string[];
@@ -52,8 +59,14 @@ export function home(): string {
   return process.env.DUM_HOME || `${homedir()}/.dum`;
 }
 
-function file(dir: string) {
+/** The old single-file tree, read once to seed the notes and then left alone. */
+function legacy(dir: string) {
   return `${dir}/skills.json`;
+}
+
+/** Where the notes live. Obsidian can open this folder as a vault. */
+export function folder(dir = home()) {
+  return `${dir}/skills`;
 }
 
 /**
@@ -122,6 +135,7 @@ function clean(raw: unknown): Skill | null {
   return {
     name: s.name.trim(),
     solid: s.solid,
+    claimed: s.claimed === true,
     breadth: s.breadth === "niche" ? "niche" : "general",
     requires: Array.isArray(s.requires) ? s.requires.filter(str) : [],
     why: str(s.why) ? s.why : "",
@@ -130,57 +144,135 @@ function clean(raw: unknown): Skill | null {
   };
 }
 
+/**
+ * Every note in the folder, as a tree.
+ *
+ * The first read after the switch to notes seeds them from the old
+ * skills.json, which is then renamed rather than deleted. A note that does not
+ * parse is skipped, never fatal: it means fewer known skills, which means more
+ * questions, which is the safe direction.
+ */
 export function read(dir = home()): Tree {
+  seed(dir);
+  let names: string[];
   try {
-    const raw = JSON.parse(readFileSync(file(dir), "utf8")) as { skills?: unknown };
-    if (!Array.isArray(raw?.skills)) return EMPTY;
-    return { skills: raw.skills.map(clean).filter((s): s is Skill => !!s) };
+    names = readdirSync(folder(dir)).filter((n) => n.endsWith(".md") && !n.startsWith("."));
   } catch {
-    // No file, or someone edited it into nonsense. Starting from nothing is
-    // correct here: it means more questions, which is the safe direction.
     return EMPTY;
+  }
+  const byKey = new Map<string, Skill>();
+  for (const n of names.sort()) {
+    let s: Skill | null = null;
+    try {
+      s = fromNote(readFileSync(`${folder(dir)}/${n}`, "utf8"), n);
+    } catch {
+      continue;
+    }
+    if (!s || !key(s.name)) continue;
+    // Two notes for one skill - a copy made by hand, usually. The newer wins.
+    const prev = byKey.get(key(s.name));
+    if (!prev || s.at > prev.at) byKey.set(key(s.name), s);
+  }
+  return { skills: [...byKey.values()] };
+}
+
+function seed(dir: string) {
+  if (existsSync(folder(dir)) || !existsSync(legacy(dir))) return;
+  let raw: { skills?: unknown };
+  try {
+    raw = JSON.parse(readFileSync(legacy(dir), "utf8"));
+  } catch {
+    return; // unreadable - left where it is for a person to look at
+  }
+  const skills = Array.isArray(raw?.skills) ? raw.skills.map(clean).filter((s): s is Skill => !!s) : [];
+  write({ skills }, dir);
+  try {
+    renameSync(legacy(dir), `${legacy(dir)}.migrated`);
+  } catch {
+    /* the notes exist now, so the old file is never read again anyway */
+  }
+}
+
+function noteFor(dir: string, name: string): string | undefined {
+  const k = key(name);
+  try {
+    return readdirSync(folder(dir))
+      .filter((n) => n.endsWith(".md"))
+      .find((n) => {
+        try {
+          const s = fromNote(readFileSync(`${folder(dir)}/${n}`, "utf8"), n);
+          return s && key(s.name) === k;
+        } catch {
+          return false;
+        }
+      });
+  } catch {
+    return undefined;
   }
 }
 
 /**
- * Written through a temp file and a rename.
+ * Write every skill whose note changed, each through a temp file and a rename.
  *
- * The tree is shared by every dum session on the machine now, so a torn write
- * no longer costs one repo's record, it costs all of them.
+ * Never deletes: a note another session added since this tree was read must
+ * not vanish because this copy did not have it. Taking a skill off is
+ * `remove`, on purpose, by name. A skill already living in a note you named
+ * yourself is written back into that note rather than growing a second one.
  */
 export function write(t: Tree, dir = home()) {
   try {
-    mkdirSync(dir, { recursive: true });
-    keepIfCorrupt(dir);
-    const tmp = `${file(dir)}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(t, null, 2) + "\n");
-    renameSync(tmp, file(dir));
+    mkdirSync(folder(dir), { recursive: true });
+    for (const s of t.skills) {
+      const name = noteFor(dir, s.name) ?? fileName(s.name);
+      const path = `${folder(dir)}/${name}`;
+      const text = toNote(s);
+      let was: string | null = null;
+      try {
+        was = readFileSync(path, "utf8");
+      } catch {
+        /* new note */
+      }
+      if (was === text) continue;
+      const tmp = `${path}.${process.pid}.tmp`;
+      writeFileSync(tmp, text);
+      renameSync(tmp, path);
+    }
   } catch {
     /* losing the record is bad, crashing over it is worse */
   }
 }
 
+/** Delete a skill's note. How you dispute something, or take back a claim. */
+export function remove(name: string, dir = home()): boolean {
+  const n = noteFor(dir, name);
+  if (!n) return false;
+  try {
+    unlinkSync(`${folder(dir)}/${n}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Move an unreadable skills.json aside before anything overwrites it.
- *
- * A file that does not parse reads as an empty tree, which is the safe
- * direction for asking questions - but the next skill recorded would then
- * write a one-skill tree over months of history. Usually the damage is one
- * stray comma from a hand edit, so the original is kept next to it.
+ * Start over. The old notes are moved aside, not deleted - a tree is months
+ * of history, and "start from scratch" is something people take back.
  */
-function keepIfCorrupt(dir: string) {
-  let raw: string;
-  try {
-    raw = readFileSync(file(dir), "utf8");
-  } catch {
-    return; // no file yet
+export function reset(dir = home()): string | null {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const aside = `${folder(dir)}.before-reset-${stamp}`;
+  let moved = false;
+  if (existsSync(folder(dir))) {
+    renameSync(folder(dir), aside);
+    moved = true;
   }
-  try {
-    JSON.parse(raw);
-  } catch {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    renameSync(file(dir), `${file(dir)}.corrupt-${stamp}`);
+  // Or the old file would seed the fresh tree straight back.
+  if (existsSync(legacy(dir))) {
+    renameSync(legacy(dir), `${legacy(dir)}.before-reset-${stamp}`);
+    moved = true;
   }
+  mkdirSync(folder(dir), { recursive: true });
+  return moved ? aside : null;
 }
 
 export type Entry = {
@@ -225,10 +317,38 @@ export function note(t: Tree, e: Entry, root: string): Tree {
   const next: Skill = {
     name: prev?.name ?? e.name.trim(),
     solid: e.solid,
+    // dum saw it for itself, so whatever was claimed is now settled.
+    claimed: false,
     breadth: e.breadth,
     requires,
     why: e.why,
     repos,
+    at: new Date().toISOString(),
+  };
+  return { skills: [...t.skills.filter((s) => key(s.name) !== k), next] };
+}
+
+export type Claim = { name: string; breadth: Breadth; requires: string[]; why: string };
+
+/**
+ * Add what they say they hold, from a scan of their own project.
+ *
+ * Only ever adds or refreshes a claim. It never touches a skill dum has a real
+ * judgement on: a solid one is already better than a claim, and a shaky one
+ * means they fumbled it in front of dum, which a scan cannot outvote.
+ */
+export function claim(t: Tree, c: Claim, root: string): Tree {
+  const k = key(c.name);
+  const prev = t.skills.find((s) => key(s.name) === k);
+  if (!k || (prev && !prev.claimed)) return t;
+  const next: Skill = {
+    name: prev?.name ?? c.name.trim(),
+    solid: true,
+    claimed: true,
+    breadth: c.breadth,
+    requires: [...new Set([...(prev?.requires ?? []), ...c.requires])].filter((r) => key(r) !== k).slice(0, 3),
+    why: c.why,
+    repos: [...new Set([...(prev?.repos ?? []), root])],
     at: new Date().toISOString(),
   };
   return { skills: [...t.skills.filter((s) => key(s.name) !== k), next] };
@@ -263,12 +383,17 @@ export function stale(s: Skill, now = new Date()): boolean {
 
 /** Solid and trusted in this repo: general anywhere, niche only where shown. */
 export function known(t: Tree, root: string): Skill[] {
-  return t.skills.filter((s) => s.solid && (s.breadth === "general" || s.repos.includes(root)));
+  return t.skills.filter((s) => s.solid && !s.claimed && (s.breadth === "general" || s.repos.includes(root)));
+}
+
+/** They say they hold it; dum has not seen it yet. */
+export function claimed(t: Tree): Skill[] {
+  return t.skills.filter((s) => s.claimed);
 }
 
 /** Solid, but niche and shown somewhere else. Worth one quick check here. */
 export function elsewhere(t: Tree, root: string): Skill[] {
-  return t.skills.filter((s) => s.solid && s.breadth === "niche" && !s.repos.includes(root));
+  return t.skills.filter((s) => s.solid && !s.claimed && s.breadth === "niche" && !s.repos.includes(root));
 }
 
 /** Taught, or claimed and then fumbled. */
@@ -302,6 +427,7 @@ export function migrate(t: Tree, root: string): Tree {
     added.push({
       name: o.topic.trim(),
       solid: o.solid,
+      claimed: false,
       breadth: "general",
       requires: [],
       why: str(o.why) ? o.why : "",
@@ -353,6 +479,16 @@ export function describe(t: Tree, root: string): string {
       ...e.map((s) => `${line(s)}  (in ${s.repos.map((r) => basename(r)).join(", ")})`),
     );
   }
+  const cl = claimed(t);
+  if (cl.length) {
+    out.push(
+      "",
+      "CLAIMED. They say they hold these - from code they wrote themselves - but",
+      "never showed you. Don't teach them. The first time this build actually",
+      "leans on one, ONE short check; if they get it, note_understanding solid:",
+      ...cl.map(line),
+    );
+  }
   const w = shaky(t);
   if (w.length) {
     out.push(
@@ -366,15 +502,15 @@ export function describe(t: Tree, root: string): string {
 }
 
 /** Counts for a header. */
-export function summary(t: Tree, root: string): { known: number; shaky: number } {
-  return { known: known(t, root).length, shaky: shaky(t).length };
+export function summary(t: Tree, root: string): { known: number; shaky: number; claimed: number } {
+  return { known: known(t, root).length, shaky: shaky(t).length, claimed: claimed(t).length };
 }
 
 export type Row = {
   depth: number;
   name: string;
   /** `ghost` is a prerequisite something builds on that they have not shown yet. */
-  state: "solid" | "shaky" | "ghost";
+  state: "solid" | "shaky" | "claimed" | "ghost";
   niche: boolean;
   /** Already drawn further up under another parent, so its children are not repeated. */
   repeat: boolean;
@@ -419,7 +555,7 @@ export function rows(t: Tree): Row[] {
     out.push({
       depth,
       name: nameOf(k),
-      state: s ? (s.solid ? "solid" : "shaky") : "ghost",
+      state: s ? (s.claimed ? "claimed" : s.solid ? "solid" : "shaky") : "ghost",
       niche: s?.breadth === "niche",
       repeat,
     });

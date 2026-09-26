@@ -116,6 +116,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         <Text color="#87afd7">{state.mode}</Text>
         <Text dimColor>{"  "}</Text>
         <Text color="#87af87">{`${state.skills.known} known`}</Text>
+        {state.skills.claimed ? <Text color="#87afd7">{`  ${state.skills.claimed} claimed`}</Text> : null}
         {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
         {state.todos.length ? <Text color="#d7a55f">{`  ${state.todos.length} to type`}</Text> : null}
         <Box flexGrow={1} />

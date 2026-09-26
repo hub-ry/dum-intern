@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   note,
@@ -21,6 +21,11 @@ import {
   key,
   similar,
   stale,
+  claim,
+  find,
+  folder,
+  remove,
+  reset,
   type Tree,
   type Entry,
 } from "../src/skills.ts";
@@ -40,7 +45,7 @@ const e = (name: string, over: Partial<Entry> = {}): Entry => ({
 
 test("an empty tree says nothing to the intern", () => {
   assert.equal(describe(empty, A), "");
-  assert.deepEqual(summary(empty, A), { known: 0, shaky: 0 });
+  assert.deepEqual(summary(empty, A), { known: 0, shaky: 0, claimed: 0 });
 });
 
 test("a general skill shown in one repo is known in every repo", () => {
@@ -142,6 +147,8 @@ test("a missing or corrupt file reads as an empty tree", () => {
   const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
   writeFileSync(`${dir}/skills.json`, "{not json");
   assert.deepEqual(read(dir), empty);
+  // Left for a person to look at, never overwritten or renamed.
+  assert.equal(readFileSync(`${dir}/skills.json`, "utf8"), "{not json");
 });
 
 test("an old per-repo record folds in without overwriting the tree", () => {
@@ -223,12 +230,63 @@ test("a stale skill is described as a while ago, not as known", () => {
   assert.doesNotMatch(text, /^KNOWN\. /m);
 });
 
-test("an unreadable skills.json is kept aside, not overwritten", () => {
+test("the old skills.json seeds the notes once, then is left as .migrated", () => {
   const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
-  writeFileSync(`${dir}/skills.json`, '{"skills": [ {"name": "leases",, } ]');
-  write(note(empty, e("quorums"), A), dir);
-  const kept = readdirSync(dir).filter((f) => f.startsWith("skills.json.corrupt-"));
-  assert.equal(kept.length, 1);
-  assert.match(readFileSync(`${dir}/${kept[0]}`, "utf8"), /leases/);
-  assert.equal(read(dir).skills[0]!.name, "quorums");
+  const t = note(note(empty, e("timeouts")), e("leases", { requires: ["timeouts"] }), A);
+  writeFileSync(`${dir}/skills.json`, JSON.stringify(t));
+  assert.deepEqual(read(dir).skills.map((s) => s.name).sort(), ["leases", "timeouts"]);
+  assert.ok(existsSync(`${dir}/skills.json.migrated`) && !existsSync(`${dir}/skills.json`));
+  assert.ok(existsSync(`${folder(dir)}/leases.md`));
+});
+
+test("a note you write by hand, with no frontmatter, is a claimed skill", () => {
+  const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
+  mkdirSync(folder(dir));
+  writeFileSync(`${folder(dir)}/rust ownership.md`, "moves and borrows. builds on [[memory safety]]\n");
+  const s = read(dir).skills[0]!;
+  assert.equal(s.name, "rust ownership");
+  assert.ok(s.claimed && s.solid);
+  assert.deepEqual(s.requires, ["memory safety"]);
+  assert.deepEqual(known(read(dir), A), []);
+});
+
+test("recording into a hand-named note updates it rather than growing a second", () => {
+  const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
+  mkdirSync(folder(dir));
+  writeFileSync(`${folder(dir)}/My Leases Note.md`, "---\nname: leases\n---\n");
+  write(note(read(dir), e("Leases"), A), dir);
+  assert.deepEqual(readdirSync(folder(dir)), ["My Leases Note.md"]);
+  assert.ok(!read(dir).skills[0]!.claimed);
+});
+
+test("a broken note is skipped, not fatal", () => {
+  const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
+  mkdirSync(folder(dir));
+  writeFileSync(`${folder(dir)}/bad.md`, "---\nname: [oops\n---\n");
+  writeFileSync(`${folder(dir)}/good.md`, "---\nname: good\nstate: solid\n---\n");
+  assert.deepEqual(read(dir).skills.map((s) => s.name), ["good"]);
+});
+
+test("a claim never overrides what dum saw for itself", () => {
+  let t = note(empty, e("leases", { solid: false }), A);
+  t = claim(t, { name: "leases", breadth: "general", requires: [], why: "scan" }, A);
+  assert.ok(!t.skills[0]!.solid && !t.skills[0]!.claimed);
+  t = claim(t, { name: "joins", breadth: "general", requires: [], why: "scan" }, A);
+  assert.ok(find(t, "joins")!.claimed);
+  assert.deepEqual(known(t, A), []);
+  assert.match(describe(t, A), /CLAIMED[\s\S]*joins/);
+  // Showing it settles the claim.
+  t = note(t, e("joins"), A);
+  assert.ok(!find(t, "joins")!.claimed);
+  assert.deepEqual(known(t, A).map((s) => s.name), ["joins"]);
+});
+
+test("remove takes the note off disk, and reset moves the tree aside", () => {
+  const dir = mkdtempSync(`${tmpdir()}/dum-skills-`);
+  write(note(note(empty, e("a")), e("b"), A), dir);
+  assert.ok(remove("A", dir));
+  assert.deepEqual(read(dir).skills.map((s) => s.name), ["b"]);
+  const aside = reset(dir)!;
+  assert.ok(existsSync(`${aside}/b.md`));
+  assert.deepEqual(read(dir), empty);
 });

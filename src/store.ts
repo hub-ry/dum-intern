@@ -106,7 +106,7 @@ export type State = {
   code: CodeView | null;
   stage: Stage;
   /** Skills on the tree that count in this repo, and how many are still shaky. */
-  skills: { known: number; shaky: number };
+  skills: { known: number; shaky: number; claimed: number };
   /** Holes the intern left for you to type, each one a skill to unlock. */
   todos: { concept: string; path: string }[];
   /** The model behind each voice, as the SDK reported it. "" until known. */
@@ -153,7 +153,7 @@ export class Store {
       status: "",
       code: null,
       stage: { kind: "code" },
-      skills: { known: 0, shaky: 0 },
+      skills: { known: 0, shaky: 0, claimed: 0 },
       todos: [],
       models: { intern: "", wizard: "" },
     };
@@ -337,7 +337,7 @@ export class Store {
   }
 
   /** The skill tree changed. */
-  setSkills(skills: { known: number; shaky: number }) {
+  setSkills(skills: { known: number; shaky: number; claimed: number }) {
     this.patch({ skills });
   }
 

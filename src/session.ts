@@ -423,7 +423,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     store.setSkills(skills.summary(t, repo.root));
     // Shown, so a wrong entry can be disputed while it is fresh rather than
     // discovered weeks later as a question that stopped being asked.
-    if (entry.solid && !before?.solid) {
+    if (entry.solid && (!before?.solid || before.claimed)) {
       const name = skills.find(t, entry.name)?.name ?? entry.name;
       store.note(`+ skill: ${name}${entry.breadth === "niche" ? " (niche)" : ""}`);
     }

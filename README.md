@@ -25,7 +25,7 @@ Anti-vibe used to be the default. Understand-everything asked about everything, 
 
 ### The skill tree
 
-Every concept I explain, or get taught, lands on one tree in `~/.dum/skills.json`. It follows me across repos.
+Every concept I explain, or get taught, lands on one tree in `~/.dum/skills/`. It follows me across repos, and it never goes in any repo.
 
 ```
 $ dum --skills
@@ -40,7 +40,7 @@ $ dum --skills
     ● stripe webhook signing  niche
 ```
 
-`●` is known. I explained it, so the intern builds on it without asking. `○` is shaky: it had to teach me, or I got it wrong. A quick check on those is fair. `·` is something a skill builds on that I haven't touched yet. That's the frontier.
+`●` is known. I explained it, so the intern builds on it without asking. `◐` is claimed: I say I have it, dum hasn't seen it yet. `○` is shaky: it had to teach me, or I got it wrong. A quick check on those is fair. `·` is something a skill builds on that I haven't touched yet. That's the frontier.
 
 Nobody curates the edges. When the intern records a skill it names what the skill builds on, so the tree grows into the shape of what I actually build.
 
@@ -55,6 +55,40 @@ Skills go a bit stale. Something general I proved over a year ago, or something 
 One idea should be one node. "Leases" and "lease", or "Rust macros (macro_rules!)" and "rust macros", land on the same skill. Near-misses like "SQS visibility timeout" next to "visibility timeout" get caught before they're recorded, and the intern has to say whether it's the same idea. It's deliberately not a merge: "rust macros" and "rust procedural macros" pass the same word test and are different things.
 
 It doesn't buy skipping the spec. Nothing does.
+
+
+### It's notes, and they're mine
+
+Each skill is a markdown note. "Builds on" is a `[[link]]`, so the folder opens as an Obsidian vault and the graph view draws the tree. A skill nobody's recorded yet is an unresolved link, which Obsidian already draws as a grey node.
+
+```markdown
+---
+name: module-relative file paths
+state: solid
+breadth: general
+---
+
+They read `pathlib.Path(__file__).parent` correctly as the directory containing the file.
+
+builds on: [[python main guard]]
+```
+
+I can fix a wrong one, delete one, or write one. A note I write myself counts as claimed, not known, and so does one with no frontmatter at all. The file name is the skill.
+
+
+### Claiming what I already had
+
+An empty tree means dum asks about everything, including things I knew before dum existed. So I can point it at projects I wrote by hand:
+
+```sh
+dum --scan ~/code/old-cli ~/code/raytracer
+```
+
+It reads them and lists the concepts the code actually rests on, each with the line that shows it. I drop what isn't mine (a vendored library, a file a friend wrote), and the rest lands as claimed.
+
+Claimed isn't known. Nobody watched me write that code. The first build that leans on a claimed skill gets one short check, and passing it makes it known. Something dum already judged in a session is never touched by a scan. A skill I fumbled in front of it stays shaky however much of it my old code uses.
+
+`dum --reset` starts the tree over. The old notes get moved aside, not deleted.
 
 
 ### Not too strict
@@ -239,6 +273,8 @@ Quips render inline, not in a real second pane. Every quip gets written to `.dum
 
 The tree is a printout. It should be a pane.
 
+There's no git protocol. dum writes files and never commits, branches, or checks what's dirty before it starts. What it should do there is still open.
+
 The intern runs on the Claude Code bundled with the Agent SDK, but it uses my default model. Switch to a model newer than that bundle and every request fails. dum says so and tells me to `npm update @anthropic-ai/claude-agent-sdk` in its own folder, but it can't fix it for me.
 
 
@@ -285,16 +321,18 @@ dum
 | `-p`, `--plain` | line printer instead of panes, also what you get in a pipe |
 | `-s`, `--skills` | print the skill tree |
 | `--forget <name>` | take a skill off the tree |
+| `--scan <folders>` | claim skills from projects I wrote myself |
+| `--reset` | start the tree over, the old one moved aside |
 
-`--skills` and `--forget` work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
+The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 
 
 ### Where things live
 
 ```
 ~/.dum/
-  skills.json      the skill tree, shared by every repo (DUM_HOME moves it)
-  skills.json.corrupt-<time>   a file that stopped parsing, kept instead of overwritten
+  skills/          the skill tree, one note per skill, shared by every repo (DUM_HOME moves it)
+  skills.json.migrated         the old single-file tree, read once into notes
 
 <repo>/.dum/
   session          so the next `dum` resumes the same intern

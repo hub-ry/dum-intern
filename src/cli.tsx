@@ -8,6 +8,8 @@ import { banner, runPlain, Input } from "./plain.ts";
 import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
 import * as skills from "./skills.ts";
 import * as todos from "./todos.ts";
+import * as scanner from "./scan.ts";
+import { createInterface } from "node:readline/promises";
 import { c } from "./lines.ts";
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
@@ -19,6 +21,8 @@ type Args = {
   request: string;
   show: boolean;
   forget: string | null;
+  reset: boolean;
+  scan: string[] | null;
 };
 
 function parse(args: string[]): Args {
@@ -29,6 +33,8 @@ function parse(args: string[]): Args {
   let plain = false;
   let show = false;
   let forget: string | null = null;
+  let reset = false;
+  let scan: string[] | null = null;
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -37,10 +43,12 @@ function parse(args: string[]): Args {
     else if (a === "--plain" || a === "-p") plain = true;
     else if (a === "--skills" || a === "-s") show = true;
     else if (a === "--forget") forget = args.slice(i + 1).join(" ").trim();
+    else if (a === "--reset") reset = true;
+    else if (a === "--scan") scan = args.slice(i + 1);
     else rest.push(a);
-    if (forget !== null) break;
+    if (forget !== null || scan !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan };
 }
 
 /**
@@ -61,7 +69,13 @@ function printSkills(root: string) {
   console.log();
   for (const r of skills.rows(t)) {
     const mark =
-      r.state === "solid" ? c.green("●") : r.state === "shaky" ? c.amber("○") : c.dim("·");
+      r.state === "solid"
+        ? c.green("●")
+        : r.state === "shaky"
+          ? c.amber("○")
+          : r.state === "claimed"
+            ? c.blue("◐")
+            : c.dim("·");
     const name = r.state === "ghost" ? c.dim(r.name) : r.name;
     const tags = [r.niche ? "niche" : "", r.repeat ? "↑ above" : "", r.state === "ghost" ? "not shown yet" : ""]
       .filter(Boolean)
@@ -69,10 +83,108 @@ function printSkills(root: string) {
     console.log(`  ${"  ".repeat(r.depth)}${mark} ${name}${tags ? "  " + c.dim(tags) : ""}`);
   }
   console.log();
-  const where = `${skills.home()}/skills.json`.replace(homedir(), "~");
-  console.log(`  ${c.green("●")} ${c.dim("known")}   ${c.amber("○")} ${c.dim("shaky")}   ${c.dim("· not shown yet")}`);
-  console.log(`  ${c.dim(`${here}, ${shaky} shaky.  ${where}`)}`);
+  const where = `${skills.folder()}/`.replace(homedir(), "~");
+  const { claimed } = skills.summary(t, root);
+  console.log(
+    `  ${c.green("●")} ${c.dim("known")}   ${c.blue("◐")} ${c.dim("claimed")}   ${c.amber("○")} ${c.dim("shaky")}   ${c.dim("· not shown yet")}`,
+  );
+  console.log(`  ${c.dim(`${here}, ${claimed} claimed, ${shaky} shaky.`)}`);
+  console.log(`  ${c.dim(`one note per skill in ${where} - edit them, or open the folder in Obsidian.`)}`);
   console.log();
+}
+
+/** Ask one line on the terminal. Empty string when input has ended. */
+async function line(prompt: string): Promise<string> {
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    return await rl.question(prompt);
+  } catch {
+    return "";
+  } finally {
+    rl.close();
+  }
+}
+
+/** Start the tree over. Asks first, and moves the old one aside rather than deleting it. */
+async function resetSkills() {
+  const n = skills.read().skills.length;
+  if (n) {
+    const ok = (await line(`\n  start your skill tree over? ${n} skill${n === 1 ? "" : "s"} get moved aside, not deleted. [y/N] `)).trim().toLowerCase();
+    if (ok !== "y" && ok !== "yes") {
+      console.log(`\n  ${c.dim("left it alone.")}\n`);
+      return;
+    }
+  }
+  const aside = skills.reset();
+  console.log(`\n  ${c.green("✓")} fresh tree.${aside ? c.dim(` the old one is in ${aside.replace(homedir(), "~")}`) : ""}`);
+  console.log(`  ${c.dim("dum --scan <folders> fills it from code you wrote yourself.")}\n`);
+}
+
+/**
+ * Fill the tree from projects you say you wrote yourself.
+ *
+ * Nothing is written until you have seen the list and dropped what isn't
+ * yours. What is kept lands as claimed, never known.
+ */
+async function scanSkills(dirs: string[]) {
+  if (!dirs.length) {
+    console.error(`\n  usage: dum --scan <folder> [more folders]   (projects you wrote yourself, without AI)\n`);
+    exit(1);
+  }
+  let t = skills.read();
+  const found: (scanner.Found & { root: string })[] = [];
+  for (const d of dirs) {
+    const ok = scanner.checkDir(d);
+    if ("error" in ok) {
+      console.error(`  ${c.red("✗")} ${ok.error}`);
+      continue;
+    }
+    const label = ok.path.replace(homedir(), "~");
+    let status = "reading";
+    const draw = () => stdout.isTTY && stdout.write(`\r\x1b[2K  ${c.dim(`${label}: ${status}`)}`);
+    const tick = setInterval(draw, 200);
+    const got = await scanner.scan(ok.path, t, (s) => (status = s));
+    clearInterval(tick);
+    if (stdout.isTTY) stdout.write("\r\x1b[2K");
+    console.log(`  ${c.dim(`${label}: ${got.length} found`)}`);
+    for (const f of got) {
+      if (!found.some((x) => skills.key(x.name) === skills.key(f.name))) found.push({ ...f, root: ok.path });
+    }
+  }
+  // Already settled by dum - a claim changes nothing about those, so they're not offered.
+  const offer = found.filter((f) => {
+    const s = skills.find(t, f.name);
+    return !s || s.claimed;
+  });
+  const settled = found.length - offer.length;
+  if (settled) console.log(`  ${c.dim(`${settled} already on your tree from a session - a claim can't change ${settled === 1 ? "it" : "those"}.`)}`);
+  if (!offer.length) {
+    console.log(`\n  ${c.dim("nothing new to claim.")}\n`);
+    return;
+  }
+  console.log();
+  const w = String(offer.length).length;
+  offer.forEach((f, i) => {
+    const tag = f.breadth === "niche" ? c.dim("  niche") : "";
+    console.log(`  ${c.dim(String(i + 1).padStart(w))}  ${f.name}${tag}`);
+    if (f.evidence) console.log(`  ${" ".repeat(w)}  ${c.dim(f.evidence)}`);
+  });
+  console.log();
+  console.log(`  ${c.dim("keep only what you actually own. these land as claimed: the first build that")}`);
+  console.log(`  ${c.dim("leans on one gets a short check, and passing it makes it known.")}`);
+  const reply = (await line(`\n  drop any? numbers like 2 5 7, enter keeps all, q cancels: `)).trim().toLowerCase();
+  if (reply === "q") {
+    console.log(`\n  ${c.dim("nothing written.")}\n`);
+    return;
+  }
+  const drop = new Set(reply.split(/[\s,]+/).map(Number).filter((n) => n >= 1 && n <= offer.length));
+  const keep = offer.filter((_, i) => !drop.has(i + 1));
+  t = skills.read(); // re-read: another session may have written since
+  for (const f of keep) {
+    t = skills.claim(t, { name: f.name, breadth: f.breadth, requires: f.requires, why: `scanned ${f.root.replace(homedir(), "~")}: ${f.evidence}` }, f.root);
+  }
+  skills.write(t);
+  console.log(`\n  ${c.blue("◐")} ${keep.length} claimed${drop.size ? c.dim(`, ${drop.size} dropped`) : ""}. ${c.dim("dum --skills shows the tree.")}\n`);
 }
 
 /** The repo root, or "" outside one. */
@@ -85,11 +197,13 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works
   // from anywhere - only "known here" needs a repo.
   if (show) return printSkills(repoRoot());
+  if (reset) return resetSkills();
+  if (scan !== null) return scanSkills(scan);
   if (forget !== null) {
     if (!forget) {
       console.error(`\n  usage: dum --forget <skill name>   (\`dum --skills\` lists them)\n`);
@@ -101,7 +215,7 @@ async function main() {
       console.error(`\n  ${c.red("✗")} no skill called "${forget}". \`dum --skills\` lists them.\n`);
       exit(1);
     }
-    skills.write(skills.forget(t, forget));
+    skills.remove(hit.name);
     console.log(`\n  ${c.dim("forgot")} ${hit.name}${c.dim(". dum will ask about it again.")}\n`);
     return;
   }
