@@ -42,6 +42,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     }
     // A chord, because the field owns every plain key while you are typing.
     if (key.ctrl && ch === "t") return store.toggleTranscript();
+    if (key.ctrl && ch === "g") return store.onGraph?.();
   });
 
   useEffect(() => {
@@ -151,7 +152,7 @@ function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
   if (focus === "code") {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   / find   esc: back";
   }
-  return `tab: ${hasCode ? "file" : "files"}   ? asks anything   ctrl-t: transcript`;
+  return `tab: ${hasCode ? "file" : "files"}   ? asks anything   ctrl-t: transcript   ctrl-g: graph`;
 }
 
 function promptFor(p: Prompt): string {

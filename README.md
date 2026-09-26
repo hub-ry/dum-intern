@@ -76,6 +76,19 @@ builds on: [[python main guard]]
 I can fix a wrong one, delete one, or write one. A note I write myself counts as claimed, not known, and so does one with no frontmatter at all. The file name is the skill.
 
 
+### The graph
+
+```sh
+dum --graph        # or ctrl-g in a session
+```
+
+The tree and the queue as one picture, in the browser. The layout copies the Rust project's skill-tree: Graphviz boxes top to bottom, each project a group of the skills it unlocks, with a box to tick for each, climbing from what's done toward the goal. A goal and its steps share a frame. Skills no project covers sit in "your tree", and prerequisites nobody's recorded are dashed.
+
+The interaction copies Obsidian's graph. Drag to pan, scroll to zoom, hover to light up what a node touches. Click to read the note: the brief, what it unlocks, what it comes after, the `dum` command that starts it, and a link that opens the note in Obsidian. `#open=<id>` on the URL opens one directly.
+
+It's one file, `~/.dum/graph.html`. Graphviz runs in Node as WebAssembly and the SVG goes in already laid out, and the pan-and-zoom script is inlined from `node_modules`. Nothing loads from a CDN, so it opens offline.
+
+
 ### Claiming what I already had
 
 An empty tree means dum asks about everything, including things I knew before dum existed. So I can point it at projects I wrote by hand:
@@ -353,7 +366,7 @@ Buffers outlive the view. The intern starting a new file pulls the pane onto it,
 
 Quips render inline, not in a real second pane. Every quip gets written to `.dum/wizard.jsonl`, so the pane is a reader over that file.
 
-The tree is a printout. It should be a pane.
+The graph is a browser page. Inside the TUI the tree is still a printout (`dum --skills`), not a pane.
 
 There's no git protocol. dum writes files and never commits, branches, or checks what's dirty before it starts. What it should do there is still open.
 
@@ -373,6 +386,7 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `not yet` [name] | don't count the skill just checked off | anywhere |
 | `y` | approve the spec, anything else declines | spec |
 | `ctrl-t` | swap the stage to the full transcript and back | anywhere |
+| `ctrl-g` | open the skill graph in the browser | anywhere |
 | `j` / `k`, arrows | move | file tree, file |
 | `h` / `l` | collapse / expand | file tree |
 | `enter` / `o` | open the file (only you see it, the intern doesn't) | file tree |
@@ -412,6 +426,7 @@ dum
 | `--projects` | the queue, what's done, what's ready |
 | `--next [n]` | project ideas for the fastest next unlock |
 | `--rebuild <dir> [target]` | rebuild a project from scratch, milestone by milestone |
+| `-g`, `--graph` | the tree and the queue as a graph, in the browser |
 
 The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 
@@ -422,6 +437,7 @@ The tree flags work from anywhere. Everything else needs a git repo, since the i
 ~/.dum/
   skills/          the skill tree, one note per skill, shared by every repo (DUM_HOME moves it)
   projects/        the project queue, one note per goal, step, or idea
+  graph.html       the graph, redrawn by every --graph
   skills.json.migrated         the old single-file tree, read once into notes
 
 <repo>/.dum/

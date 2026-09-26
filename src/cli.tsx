@@ -12,6 +12,8 @@ import * as scanner from "./scan.ts";
 import * as projects from "./projects.ts";
 import * as planner from "./planner.ts";
 import * as rebuild from "./rebuild.ts";
+import * as graphs from "./graph.ts";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { c, wrap, voiceName } from "./lines.ts";
 import { homedir } from "node:os";
@@ -31,6 +33,7 @@ type Args = {
   plan: boolean;
   list: boolean;
   next: number | null;
+  graph: boolean;
 };
 
 function parse(args: string[]): Args {
@@ -48,6 +51,7 @@ function parse(args: string[]): Args {
   let plan = false;
   let list = false;
   let next: number | null = null;
+  let graph = false;
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -62,6 +66,7 @@ function parse(args: string[]): Args {
     else if (a === "--rebuild") rebuild = args.slice(i + 1);
     else if (a === "--plan") plan = true;
     else if (a === "--projects") list = true;
+    else if (a === "--graph" || a === "-g") graph = true;
     else if (a === "--next") {
       const n = Number(args[i + 1]);
       next = Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 1;
@@ -69,7 +74,7 @@ function parse(args: string[]): Args {
     } else rest.push(a);
     if (forget !== null || scan !== null || queue !== null || rebuild !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph };
 }
 
 /**
@@ -395,6 +400,31 @@ async function nextProjects(n: number) {
   console.log(`  ${c.dim("saved to the queue. make a folder, git init, and start it there.")}\n`);
 }
 
+/** Write the graph page and open it. Prints where it is either way. */
+async function showGraph(quiet = false): Promise<string | null> {
+  let out: string;
+  try {
+    out = await graphs.write();
+  } catch (err) {
+    if (!quiet) console.error(`\n  ${c.red("✗")} couldn't draw the graph: ${(err as Error).message}\n`);
+    return null;
+  }
+  // In a pipe it's a script asking where the page is, not a person wanting a window.
+  const opened = quiet || stdout.isTTY;
+  if (opened) openInBrowser(out);
+  if (!quiet) console.log(`\n  ${c.green("✓")} ${out.replace(homedir(), "~")}  ${c.dim(opened ? "opened in your browser" : "open it in a browser")}\n`);
+  return out;
+}
+
+function openInBrowser(path: string) {
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+  try {
+    spawn(cmd, [path], { detached: true, stdio: "ignore" }).unref();
+  } catch {
+    /* the path was printed; opening it is a convenience */
+  }
+}
+
 /** The repo root, or "" outside one. */
 function repoRoot(): string {
   try {
@@ -405,7 +435,7 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works
   // from anywhere - only "known here" needs a repo.
@@ -417,6 +447,7 @@ async function main() {
   if (plan) return planQueue();
   if (list) return printProjects();
   if (next !== null) return nextProjects(next);
+  if (graph) return showGraph();
   if (forget !== null) {
     if (!forget) {
       console.error(`\n  usage: dum --forget <skill name>   (\`dum --skills\` lists them)\n`);
@@ -435,6 +466,9 @@ async function main() {
 
   const repo = readRepo(cwd());
   const store = new Store(repo.name, mode, repo.root, repo.files);
+  store.onGraph = () => {
+    void showGraph(true).then((out) => store.note(out ? `graph opened in your browser: ${out.replace(homedir(), "~")}` : "couldn't draw the graph."));
+  };
 
   // A pane layout needs a terminal it can own. Without one - a pipe, a CI log,
   // `dum | less` - the line-printer is not a downgrade, it is the only thing

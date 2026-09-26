@@ -153,6 +153,9 @@ export class Store {
   /** Set by the runner: where a `?` question goes. */
   onAsk: ((question: string) => void) | null = null;
 
+  /** Set by the runner: draw the graph and open it. */
+  onGraph: (() => void) | null = null;
+
   /** Set by the runner: "not yet", with the skill named or "" for the last one checked off. */
   onNotYet: ((name: string) => boolean) | null = null;
 
