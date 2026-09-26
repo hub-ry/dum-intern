@@ -2,7 +2,7 @@
 
 import { argv, exit, cwd, stdout, stdin } from "node:process";
 import { readRepo } from "./repo.ts";
-import { run, type Mode } from "./session.ts";
+import { run, type Mode, type Hooks } from "./session.ts";
 import { Store } from "./store.ts";
 import { banner, runPlain, Input } from "./plain.ts";
 import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
@@ -11,11 +11,12 @@ import * as todos from "./todos.ts";
 import * as scanner from "./scan.ts";
 import * as projects from "./projects.ts";
 import * as planner from "./planner.ts";
+import * as rebuild from "./rebuild.ts";
 import { createInterface } from "node:readline/promises";
 import { c, wrap } from "./lines.ts";
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
-import { basename as repo } from "node:path";
+import { basename as repo, resolve } from "node:path";
 
 type Args = {
   mode: Mode;
@@ -26,6 +27,7 @@ type Args = {
   reset: boolean;
   scan: string[] | null;
   queue: string | null;
+  rebuild: string[] | null;
   plan: boolean;
   list: boolean;
   next: number | null;
@@ -42,6 +44,7 @@ function parse(args: string[]): Args {
   let reset = false;
   let scan: string[] | null = null;
   let queue: string | null = null;
+  let rebuild: string[] | null = null;
   let plan = false;
   let list = false;
   let next: number | null = null;
@@ -56,6 +59,7 @@ function parse(args: string[]): Args {
     else if (a === "--reset") reset = true;
     else if (a === "--scan") scan = args.slice(i + 1);
     else if (a === "--queue") queue = args.slice(i + 1).join(" ").trim();
+    else if (a === "--rebuild") rebuild = args.slice(i + 1);
     else if (a === "--plan") plan = true;
     else if (a === "--projects") list = true;
     else if (a === "--next") {
@@ -63,9 +67,9 @@ function parse(args: string[]): Args {
       next = Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 1;
       if (Number.isInteger(n) && n > 0) i++;
     } else rest.push(a);
-    if (forget !== null || scan !== null || queue !== null) break;
+    if (forget !== null || scan !== null || queue !== null || rebuild !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, plan, list, next };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next };
 }
 
 /**
@@ -308,6 +312,63 @@ function printProjects(only?: string) {
   console.log(`  ${c.dim(`done means its skills are on your tree. notes in ${projects.folder().replace(homedir(), "~")}/`)}\n`);
 }
 
+/**
+ * Set up a rebuild: read the original, queue it as a goal with whatever steps
+ * it needs under it, and make the empty folder it gets rebuilt in.
+ */
+async function rebuildProject(args: string[]) {
+  const [from, to] = args;
+  if (!from) {
+    console.error(`\n  usage: dum --rebuild <project folder> [empty folder to rebuild it in]\n`);
+    exit(1);
+  }
+  const ok = scanner.checkDir(from);
+  if ("error" in ok) {
+    console.error(`\n  ${c.red("✗")} ${ok.error}\n`);
+    exit(1);
+  }
+  const target = resolve(to ?? rebuild.defaultTarget(ok.path));
+  if (target === ok.path || target.startsWith(ok.path + "/")) {
+    console.error(`\n  ${c.red("✗")} the rebuild can't live inside the original - the intern would be able to read it.\n`);
+    exit(1);
+  }
+  const why = rebuild.prepare(target);
+  if (why) {
+    console.error(`\n  ${c.red("✗")} ${why}\n`);
+    exit(1);
+  }
+  const t = skills.read();
+  const bar = progress(`reading ${ok.path.replace(homedir(), "~")}`);
+  const read = await rebuild.read(ok.path, t, bar.set);
+  if (!read) {
+    bar.stop();
+    console.error(`\n  ${c.red("✗")} couldn't read it into a plan. try again.\n`);
+    exit(1);
+  }
+  bar.set("planning the climb");
+  const planned = await planner.plan(
+    { title: read.title, body: `${read.summary}\n\nRebuilt from ${ok.path.replace(homedir(), "~")} in ${target.replace(homedir(), "~")}.` },
+    t,
+    projects.read(),
+    bar.set,
+    read,
+  );
+  bar.stop();
+  if (planned) projects.write([...planned.steps, { ...planned.goal, start: read.milestones[0]! }]);
+  rebuild.save(target, { source: ok.path, goal: read.title, milestones: read.milestones.map((request) => ({ request, done: false })) });
+
+  console.log(`\n  ${c.green("✓")} ${read.title}  ${c.dim(read.summary)}\n`);
+  read.milestones.forEach((m, i) => console.log(`  ${c.dim(String(i + 1).padStart(2))}  ${m}`));
+  console.log();
+  if (planned?.steps.length) {
+    console.log(`  ${c.amber("!")} it sits ${planned.height} tiers above your tree. ${planned.steps.length} stepping stones are in the queue`);
+    console.log(`    ${c.dim("(dum --projects). you can start anyway - what you don't hold becomes holes to type.")}`);
+  } else {
+    console.log(`  ${c.dim("close enough to your tree to start now.")}`);
+  }
+  console.log(`\n  cd ${target.replace(homedir(), "~")} && dum\n`);
+}
+
 /** Project ideas that unlock the next skills on the tree, fastest first. */
 async function nextProjects(n: number) {
   const t = skills.read();
@@ -345,7 +406,7 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, plan, list, next } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works
   // from anywhere - only "known here" needs a repo.
@@ -353,6 +414,7 @@ async function main() {
   if (reset) return resetSkills();
   if (scan !== null) return scanSkills(scan);
   if (queue !== null) return queueProject(queue);
+  if (rebuildArgs !== null) return rebuildProject(rebuildArgs);
   if (plan) return planQueue();
   if (list) return printProjects();
   if (next !== null) return nextProjects(next);
@@ -395,17 +457,45 @@ async function main() {
       store.setTodos(holes.map((h) => ({ concept: h.concept, path: h.path })));
       store.openFile(t.path, at);
     }
-    const request =
+    // A rebuild folder offers its next milestone, and "go" takes it.
+    const rb = () => rebuild.load(repo.root);
+    const up = rb() && rebuild.nextUp(rb()!);
+    const hooks: Hooks = rb()
+      ? {
+          context: () => rebuild.context(rb()),
+          expand: (reply) => {
+            const n = rb() && rebuild.nextUp(rb()!);
+            return n && /^(go|next|ok|yes|y)[.!]*$/i.test(reply.trim()) ? n.request : reply;
+          },
+          onBuilt: (req) => {
+            const r = rb();
+            if (!r) return;
+            const next = rebuild.built(r, req);
+            if (next === r) return;
+            rebuild.save(repo.root, next);
+            const done = next.milestones.filter((m) => m.done).length;
+            store.note(`✓ milestone ${done} of ${next.milestones.length}: ${req}`);
+          },
+          suggest: () => {
+            const r = rb();
+            return (r && rebuild.nextUp(r)?.request) || "";
+          },
+        }
+      : {};
+    let request =
       fromArgs ||
       (holes.length
         ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, "tab into the file, type it, :w, then say done. or ask for something else.")
-        : await store.askQuestion("what do you want?", "")
+        : up
+          ? await store.askQuestion(`next up: ${up.request}`, `milestone ${up.index + 1} of ${rb()!.milestones.length} of ${rb()!.goal}. say go, or ask for something else.`)
+          : await store.askQuestion("what do you want?", "")
       ).trim();
     if (!request) {
       store.note("nothing to do.");
       return;
     }
-    await run(request, repo, mode, store);
+    if (hooks.expand && !fromArgs) request = hooks.expand(request);
+    await run(request, repo, mode, store, hooks);
   } finally {
     stop();
   }

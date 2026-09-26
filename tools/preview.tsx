@@ -149,6 +149,12 @@ if (scene === "spec") {
   );
   store.toolEvent("Write", "stats.py", "ran");
   void store.askNext();
+} else if (scene === "fill") {
+  // Mid-fill: a skill they hold, typing itself into its block.
+  const file = ["def median(xs):", "    s = sorted(xs)", "    n = len(s)", "    mid = n // 2", "", "def mode(xs):", "    pass", ""].join("\n");
+  store.typing("stats.py", file.replace("    mid = n // 2\n", "    mid = n // 2\n    return s[mid] if n % 2 else (s[mid - 1] + s[mi"), 2);
+  store.filled("stats.py", "median", "    n = len(s)\n    mid = n // 2\n    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2");
+  void store.askNext();
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");
   store.toggleTranscript();
@@ -156,6 +162,7 @@ if (scene === "spec") {
   void store.askQuestion(
     "Is it worse for a job to run twice, or to never run at all?",
     "Decides at-least-once versus at-most-once delivery.",
+    true,
   );
 }
 

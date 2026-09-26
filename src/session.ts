@@ -407,7 +407,27 @@ const WIZARD_WAIT = 2500;
 /** How long a hole sits on screen before dum fills it or leaves it. Long enough to read the marker. */
 const FLASH_MS = 900;
 
-export async function run(request: string, repo: Repo, mode: Mode, store: Store) {
+/** A fill types itself in over this long, scaled to its length. */
+const FILL_MIN_MS = 700;
+const FILL_MAX_MS = 2500;
+const FILL_FRAME_MS = 50;
+
+/**
+ * What a caller can wrap around a session without the session knowing why.
+ * A rebuild uses all four; a plain `dum` uses none.
+ */
+export type Hooks = {
+  /** Told to the intern with the opening turn. */
+  context?: () => string;
+  /** A reply at "what next?" turned into a request - "go" into the next milestone. */
+  expand?: (reply: string) => string;
+  /** A build under this request was approved and written. */
+  onBuilt?: (request: string) => void;
+  /** What to offer at "what next?". "" for nothing. */
+  suggest?: () => string;
+};
+
+export async function run(request: string, repo: Repo, mode: Mode, store: Store, hooks: Hooks = {}) {
   let approved = false;
 
   // The wizard runs beside the session, never inside it.
@@ -590,6 +610,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   function opening(req: string): string {
     return [
       BAR[mode],
+      hooks.context?.() ?? "",
       mode === "understand" ? onboarding(skills.read()) : "",
       skills.describe(skills.read(), repo.root),
       describe(repo),
@@ -642,7 +663,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         },
         async (args) => {
           await drainWizard();
-          const reply = (await store.askQuestion(args.question, args.why_it_matters)).trim();
+          const reply = (await store.askQuestion(args.question, args.why_it_matters, true)).trim();
           if (todos.wantsToType(reply)) {
             return {
               content: [
@@ -771,6 +792,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
               breadth: args.breadth,
               requires: args.requires.slice(0, 3),
               before: body,
+              request: currentRequest,
             };
             setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
             handedOff = false;
@@ -779,13 +801,24 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           }
           const filled = todos.fill(body, args.concept, args.code);
           if (filled === null) return say(`Couldn't find the block for that in ${path}.`);
+          // Typed in, not swapped in. A skill you hold is one you may skip
+          // writing, never one you may skip seeing: the code arrives in the
+          // block at a pace you can follow, then lands.
+          const code = args.code.replace(/\n+$/, "");
+          const ms = Math.min(FILL_MAX_MS, Math.max(FILL_MIN_MS, code.length * 12));
+          const frames = Math.max(1, Math.round(ms / FILL_FRAME_MS));
+          for (let f = 1; f <= frames; f++) {
+            const part = todos.fill(body, args.concept, code.slice(0, Math.ceil((code.length * f) / frames)));
+            if (part !== null) store.typing(path, part, at);
+            await new Promise((r) => setTimeout(r, FILL_FRAME_MS));
+          }
           try {
             writeFileSync(resolve(repo.root, path), filled);
           } catch (err) {
             return say(`Couldn't write ${path}: ${(err as Error).message}`);
           }
           wrote.push(path);
-          store.toolEvent("fill", `${path}: ${args.concept.trim()}`, "ran");
+          store.filled(path, args.concept.trim(), code);
           store.openFile(path, at);
           return say("Filled.");
         },
@@ -817,6 +850,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
             breadth: args.breadth,
             requires: args.requires.slice(0, 3),
             before: body,
+            request: currentRequest,
           };
           setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
           handedOff = false;
@@ -841,6 +875,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           store.say(args.feedback);
           if (args.passed) {
             setOpen(open.filter((o) => o !== t));
+            if (t.request && !open.some((o) => o.request === t.request)) hooks.onBuilt?.(t.request);
             record({
               name: t.concept,
               solid: true,
@@ -1061,6 +1096,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         // The wizard catches. Fires after every build and says nothing unless
         // the work actually departs from the spec that authorised it - silence
         // here means it looked, which is why a false alarm is so expensive.
+        // Built means built: while this request still has holes open, it
+        // isn't - the last hole passing review is what finishes it.
+        if (approved && wrote.length && !open.some((t) => t.request === currentRequest)) hooks.onBuilt?.(currentRequest);
         if (approved && wrote.length) {
           const files = [...new Set(wrote)];
           wrote.length = 0;
@@ -1089,6 +1127,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           handOff();
         }
         let next = "";
+        store.setSuggestion(hooks.suggest?.() ?? "");
         for (;;) {
           next = (
             failed
@@ -1105,6 +1144,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           store.note(`${open.map((t) => t.path).join(", ")} ${open.length === 1 ? "is" : "are"} still as dum left ${open.length === 1 ? "it" : "them"} - type it in, :w, then done`);
           handOff();
         }
+        if (hooks.expand && !failed) next = hooks.expand(next);
         pending.deliver?.(next);
         if (!next || QUIT.has(next.toLowerCase())) return;
         continue;

@@ -66,7 +66,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         text={internSaid.shown}
         width={inner}
         why={state.prompt?.type === "question" ? state.prompt.why : ""}
-        choices={state.prompt?.type === "question" && state.prompt.why ? "answer it · idk · type it" : ""}
+        choices={state.prompt?.type === "question" && state.prompt.choices ? "answer it · idk · type it" : ""}
       />
     </Box>
   );
@@ -207,7 +207,8 @@ function currentLine(s: State): string {
   if (s.prompt?.type === "spec") return "that is the spec. build it?";
   if (s.prompt?.type === "next") {
     const t = s.todos[0];
-    return t ? `your turn: ${t.concept} in ${t.path}. :w it, then say done.` : "what next?";
+    if (t) return `your turn: ${t.concept} in ${t.path}. :w it, then say done.`;
+    return s.suggestion ? `next up: ${s.suggestion}. say go, or ask for something else.` : "what next?";
   }
   if (s.busy) return "";
   for (let i = s.transcript.length - 1; i >= 0; i--) {

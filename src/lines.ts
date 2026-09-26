@@ -239,6 +239,9 @@ function quipLines(text: string, about: string, width: number): string[] {
  * like a successful one is a terminal lying about what the intern did, which
  * is disqualifying for a program whose entire job is to say no.
  */
+/** Lines of a fill shown in the transcript before it points at the file. */
+const FILL_SHOWN = 12;
+
 function toolLine(name: string, detail: string, outcome: Outcome): string {
   // A hole isn't a refusal of anything. It's dum deciding, off the tree, that
   // this piece is theirs - so it reads as an invitation, in the gutter's colour.
@@ -279,6 +282,18 @@ export function format(e: Entry, width: number): string[] {
       return quipLines(e.text, e.about, width);
     case "tool":
       return [toolLine(e.name, e.detail, e.outcome)];
+    case "fill": {
+      // The code itself, not just that it happened. A skill you hold lets you
+      // skip typing a piece; it never lets the piece arrive unseen.
+      const lines = e.code.split("\n");
+      const shown = lines.slice(0, FILL_SHOWN).map((l) => c.dim("  │ ") + c.blue(l));
+      const more = lines.length - FILL_SHOWN;
+      return [
+        `${c.green("✓")} ${c.dim("fill")}${c.dim(`  ${e.path}: ${e.concept}`)}${c.dim("  (a skill you hold)")}`,
+        ...shown,
+        ...(more > 0 ? [c.dim(`  │ … ${more} more in ${e.path}`)] : []),
+      ];
+    }
     case "answer":
       // Unattributed on purpose: nobody said this. It is looked up, not
       // spoken, so it gets no name and no colour of its own.

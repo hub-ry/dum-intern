@@ -159,7 +159,8 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
       // No editor here, so the hole is typed in yours - the line says where.
       const t = s.prompt.type === "next" ? s.todos[0] : undefined;
       if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - save it, then say done`)}`);
-      if (s.prompt.type === "question" && s.prompt.why) console.log(`  ${c.dim("answer it · idk · type it")}`);
+      else if (s.prompt.type === "next" && s.suggestion) console.log(`  ${c.dim(`next up: ${s.suggestion} - say go`)}`);
+      if (s.prompt.type === "question" && s.prompt.choices) console.log(`  ${c.dim("answer it · idk · type it")}`);
     }
     const reply = (await input.ask(promptFor(s.prompt))).trim();
     console.log();

@@ -235,6 +235,7 @@ function tint(c: CodeView): string | undefined {
 
 /** Tool names are nouns; the pane needs the verb. */
 const VERB: Record<string, string> = {
+  fill: "filling in a skill you hold",
   Write: "writing",
   Edit: "editing",
   MultiEdit: "editing",
@@ -242,7 +243,7 @@ const VERB: Record<string, string> = {
 };
 
 function status(c: CodeView, b: Buf): string {
-  if (c.live) return `${VERB[c.tool] ?? "writing"}…`;
+  if (c.live || c.tool === "fill") return `${VERB[c.tool] ?? "writing"}…`;
   if (c.outcome === "held") return "held - no spec yet, this was not written";
   if (c.outcome === "refused") return "refused - outside the repo, this was not written";
   if (c.outcome === "ran") return c.onDisk ? "written" : "writing…";

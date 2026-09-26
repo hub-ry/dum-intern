@@ -27,6 +27,8 @@ export type Todo = {
   requires: string[];
   /** The file as the intern left it, so an untouched hole is caught in code. */
   before: string;
+  /** The request it was left under. That request isn't built until its holes are. */
+  request?: string;
 };
 
 /**

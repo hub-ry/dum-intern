@@ -125,10 +125,12 @@ export async function plan(
   t: skills.Tree,
   existing: projects.Project[],
   onStatus?: (s: string) => void,
+  /** Already mapped - a rebuild reads the original and maps it in one go. */
+  mapped?: Mapped,
 ): Promise<{ goal: projects.Project; steps: projects.Project[]; height: number } | null> {
   const text = idea.body.trim() ? `${idea.title}\n\n${idea.body}` : idea.title;
-  onStatus?.("mapping what it rests on");
-  const m = await map(text, t, onStatus);
+  if (!mapped) onStatus?.("mapping what it rests on");
+  const m = mapped ?? (await map(text, t, onStatus));
   if (!m) return null;
   const holds = projects.holder(t);
   const { steps, top, topAfter, height } = projects.ladder(m.needs, holds);

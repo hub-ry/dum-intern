@@ -51,3 +51,12 @@ test("model ids read the way people say them", async () => {
   assert.equal(modelName("claude-fable-5-1"), "fable 5.1");
   assert.equal(modelName("us.anthropic.claude-x"), "us.anthropic.claude-x");
 });
+
+test("a fill shows the code that went in, not just that it happened", async () => {
+  const { format } = await import("../src/lines.ts");
+  const code = Array.from({ length: 15 }, (_, i) => `line ${i}`).join("\n");
+  const out = format({ kind: "fill", id: 1, path: "a.py", concept: "median", code }, 80).map(printable);
+  assert.match(out[0]!, /fill\s+a\.py: median\s+\(a skill you hold\)/);
+  assert.equal(out[1], "  │ line 0");
+  assert.match(out[out.length - 1]!, /… 3 more in a\.py/);
+});

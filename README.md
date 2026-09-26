@@ -145,6 +145,32 @@ The queue is a folder of notes in `~/.dum/projects/`, beside the skills, so one 
 Planning runs on Opus, not the Sonnet the voices use. It runs once, and everything after follows the map it draws. A wrong prerequisite is a project I get sent to build for nothing.
 
 
+### Rebuilding what I already have
+
+Having a project isn't the same as being able to explain it. Especially one I wrote fast, or with a model's help.
+
+```sh
+dum --rebuild ~/code/hysa            # into ~/code/hysa-rebuild
+dum --rebuild ~/code/hysa ~/rebuilt  # or anywhere empty
+```
+
+Opus reads the original and turns it into milestones, each a short request to dum, starting from the smallest thing that runs. It's also a goal like any other: mapped, tiered against my tree, and anything far above it gets stepping stones in the queue. The target gets `git init`, and `dum` there opens on the next milestone. `go` starts it.
+
+The original stays out of reach. The rebuild is its own repo, and the intern's path gate refuses anything outside it. The only ways code gets there are the usual ones.
+
+Skills I hold can be skipped. A piece that rests on one gets filled, and I don't retype what I've already shown. Skipped doesn't mean unseen, though. A fill types itself into the highlighted block at a pace I can follow, and the transcript keeps the code, not just a line saying it happened:
+
+```
+  ✓ fill  stats.py: median  (a skill you hold)
+    │     s = sorted(xs)
+    │     mid = len(s) // 2
+    │     ...
+  ▌ hole  stats.py: multimodal data  (yours to type)
+```
+
+A milestone isn't built until its holes are. Writing the skeleton doesn't count, and the last hole passing review does.
+
+
 ### The intern asks, the wizard tells
 
 Two voices. Questions I have to answer come from the intern. The wizard only fires on an answer I already gave, so it can't answer a pending question for me.
@@ -341,6 +367,7 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
 | `done` | check what I typed into the hole | "what next?" |
+| `go` | start the next milestone of a rebuild | "next up" |
 | `not yet` [name] | don't count the skill just checked off | anywhere |
 | `y` | approve the spec, anything else declines | spec |
 | `ctrl-t` | swap the stage to the full transcript and back | anywhere |
@@ -382,6 +409,7 @@ dum
 | `--plan` | plan goals I wrote into the queue by hand |
 | `--projects` | the queue, what's done, what's ready |
 | `--next [n]` | project ideas for the fastest next unlock |
+| `--rebuild <dir> [target]` | rebuild a project from scratch, milestone by milestone |
 
 The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 
@@ -398,6 +426,7 @@ The tree flags work from anywhere. Everything else needs a git repo, since the i
   session          so the next `dum` resumes the same intern
   wizard.jsonl     every quip
   todos.json       holes left for me to type
+  rebuild.json     a rebuild's milestones, and which are built
   debug.log        with DUM_DEBUG=1
   knowledge.json   the old per-repo record, folded into the tree once and left alone
 ```

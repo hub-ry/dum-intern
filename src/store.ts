@@ -36,11 +36,18 @@ export type Entry =
   | { kind: "tool"; id: number; name: string; detail: string; outcome: Outcome }
   | { kind: "answer"; id: number; question: string; body: string }
   | { kind: "review"; id: number; text: string }
+  | { kind: "fill"; id: number; path: string; concept: string; code: string }
   | { kind: "note"; id: number; text: string };
 
 /** What the agent is currently blocked on, if anything. */
 export type Prompt =
-  | { type: "question"; question: string; why: string }
+  | {
+      type: "question";
+      question: string;
+      why: string;
+      /** The intern's own question, where "idk" and "type it" mean something. */
+      choices?: boolean;
+    }
   | { type: "spec"; spec: string }
   | { type: "next" }
   | null;
@@ -109,6 +116,8 @@ export type State = {
   skills: { known: number; shaky: number; claimed: number };
   /** Holes the intern left for you to type, each one a skill to unlock. */
   todos: { concept: string; path: string }[];
+  /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
+  suggestion: string;
   /** The model behind each voice, as the SDK reported it. "" until known. */
   models: { intern: string; wizard: string };
 };
@@ -158,6 +167,7 @@ export class Store {
       stage: { kind: "code" },
       skills: { known: 0, shaky: 0, claimed: 0 },
       todos: [],
+      suggestion: "",
       models: { intern: "", wizard: "" },
     };
   }
@@ -350,6 +360,29 @@ export class Store {
     this.patch({ skills });
   }
 
+  /** What "what next?" offers. */
+  setSuggestion(suggestion: string) {
+    if (this.state.suggestion !== suggestion) this.patch({ suggestion });
+  }
+
+  /**
+   * A hole being filled, one frame of it. The file as it will be with part of
+   * the code typed in - not on disk yet, and not yours to edit until it is.
+   */
+  typing(path: string, body: string, at: number) {
+    const was = this.state.code;
+    const same = was?.tool === "fill" && was.path === path;
+    this.patch({
+      code: { tool: "fill", path, body, live: false, outcome: null, onDisk: false, at, jump: same ? was.jump : ++this.jumps },
+      stage: { kind: "code" },
+    });
+  }
+
+  /** A hole was filled from a skill they hold. The code goes in the record too. */
+  filled(path: string, concept: string, code: string) {
+    this.append({ kind: "fill", path, concept, code });
+  }
+
   /** Which model is behind a voice. */
   setModel(who: "intern" | "wizard", model: string) {
     if (this.state.models[who] === model) return;
@@ -362,9 +395,9 @@ export class Store {
   }
 
   /** Ask one question and park until it is answered. */
-  askQuestion(question: string, why: string): Promise<string> {
+  askQuestion(question: string, why: string, choices = false): Promise<string> {
     const id = this.append({ kind: "question", question, why, answer: null });
-    return this.park({ type: "question", question, why }, id);
+    return this.park({ type: "question", question, why, choices }, id);
   }
 
   /** The `what next` prompt between turns. Same channel, no question text. */
