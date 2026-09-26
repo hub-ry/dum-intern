@@ -38,6 +38,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     // No other global chords, on purpose.
   });
 
+  useEffect(() => {
+    store.onEditorCommand = (cmd) => void scrolls.emit("code-cmd", cmd);
+    return () => void (store.onEditorCommand = null);
+  }, [store]);
+
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;

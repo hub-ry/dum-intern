@@ -148,7 +148,8 @@ export class Reference {
     );
     if (!reply) return null;
     const clean = reply.trim();
-    return /^ok\b/i.test(clean) || clean.length < 3 ? null : clean;
+    // "ok" first or last means it found nothing, whatever it said on the way.
+    return /^ok\b/i.test(clean) || /(^|\n)\s*ok[.!]?\s*$/i.test(clean) || clean.length < 3 ? null : clean;
   }
 
   close() {

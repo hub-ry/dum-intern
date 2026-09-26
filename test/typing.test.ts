@@ -125,3 +125,19 @@ test("a split report is still a report, and a lone escape still arrives as a key
   mouse.off("wheel", onWheel);
   f.close();
 });
+
+test("with a file open, :w in the input goes to the file, not the intern", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand", process.cwd());
+  const ran: string[] = [];
+  s.onEditorCommand = (c) => ran.push(c);
+  const reply = s.askQuestion("q?", "");
+  s.submit(":w");
+  assert.deepEqual(ran, [], "no file open: it's just text");
+  s.openFile("package.json");
+  s.submit(":w");
+  s.submit(": 31");
+  s.submit(":wow");
+  assert.deepEqual(ran, ["w", "31"]);
+  assert.equal(await reply, ":w", "the first :w, with no file open, was an answer");
+});

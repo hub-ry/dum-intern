@@ -109,8 +109,8 @@ function Speaker({
         </Text>
       ))}
       {why
-        ? clamped(wrap(why, "", width), 3).map((line, i) => (
-            <Text key={`w${i}`} dimColor>
+        ? trimmed(wrap(why, "", width), 3, width).map((line, i) => (
+            <Text key={`w${i}`} dimColor wrap="truncate-end">
               {line}
             </Text>
           ))
@@ -129,7 +129,14 @@ const SAY_LINES = 6;
 
 function clamped(lines: string[], n?: number): string[] {
   if (!n || lines.length <= n) return lines;
-  return [...lines.slice(0, n - 1), `… ${lines.length - n + 1} more - all of it's on the stage`];
+  return [...lines.slice(0, n - 1), "… more on the stage"];
+}
+
+/** Cut to `n` lines with an ellipsis, for text that isn't on the stage anywhere. */
+function trimmed(lines: string[], n: number, width: number): string[] {
+  if (lines.length <= n) return lines;
+  const last = lines[n - 1]!;
+  return [...lines.slice(0, n - 1), (last.length >= width ? last.slice(0, width - 1) : last) + "…"];
 }
 
 function Face({

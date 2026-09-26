@@ -4,7 +4,7 @@ import React, { useEffect, useReducer, useRef } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
 import { printable, slice } from "../lines.ts";
 import { highlight } from "../highlight.ts";
-import { dirty, goto, open, paste, scrollBy, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
+import { dirty, goto, key, open, paste, scrollBy, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
 import type { CodeView } from "../store.ts";
 import { spans } from "../todos.ts";
 import { scrolls } from "../mouse.ts";
@@ -72,28 +72,44 @@ export function Code({
     bump();
   };
 
+  const apply = (step: { buf: Buf; effects: string[] }) => {
+    if (!entry || !code) return;
+    const { buf: next, effects } = step;
+    let out = next;
+    for (const e of effects) {
+      if (e === "save") {
+        const err = onSave(code.path, text(out));
+        out = err ? tell(out, err) : tell(saved(out), `wrote ${code.path}`);
+      }
+      if (e === "leave") onLeave();
+      if (e.startsWith("cmd:") || e.startsWith("shell:")) onCommand(e);
+      if (e === "reload") {
+        buffers.current.delete(keyOf(code));
+        onReload(code.path);
+        return;
+      }
+    }
+    commit(out);
+  };
+
   useInput(
     (ch, key) => {
-      if (!entry || !code) return;
-      const { buf: next, effects } = press(entry.buf, ch, key, view);
-      let out = next;
-      for (const e of effects) {
-        if (e === "save") {
-          const err = onSave(code.path, text(out));
-          out = err ? tell(out, err) : tell(saved(out), `wrote ${code.path}`);
-        }
-        if (e === "leave") onLeave();
-        if (e.startsWith("cmd:") || e.startsWith("shell:")) onCommand(e);
-        if (e === "reload") {
-          buffers.current.delete(keyOf(code));
-          onReload(code.path);
-          return;
-        }
-      }
-      commit(out);
+      if (entry) apply(press(entry.buf, ch, key, view));
     },
     { isActive: focused },
   );
+
+  // `:w` typed into the input (Esc twice is a vim habit) runs here, not at the intern.
+  useEffect(() => {
+    const f = (cmd: string) => {
+      if (!entry) return;
+      let b = press(entry.buf, ":", key({}), view).buf;
+      for (const ch of cmd) b = press(b, ch, key({}), view).buf;
+      apply(press(b, "", key({ return: true }), view));
+    };
+    scrolls.on("code-cmd", f);
+    return () => void scrolls.off("code-cmd", f);
+  });
 
   usePaste((s) => entry && commit(paste(entry.buf, s)), { isActive: focused });
 

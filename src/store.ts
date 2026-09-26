@@ -126,6 +126,9 @@ export class Store {
   /** Set by the runner: `!cmd` - run it in a real shell. "" for an interactive shell. */
   onShell: ((cmd: string) => void) | null = null;
 
+  /** Set by the renderer: run a `:` command on the open file. */
+  onEditorCommand: ((cmd: string) => void) | null = null;
+
   /** Set by the runner: draw the graph and open it. */
   onGraph: (() => void) | null = null;
 
@@ -174,6 +177,12 @@ export class Store {
     const ex = /^:\s*(run|graph|log|help)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
+      return;
+    }
+    // Editor commands meant for the open file: never a message to the intern.
+    const ed = /^:\s*(w|wq|x|q!?|e!?|\d+|\$)\s*$/.exec(text.trim());
+    if (ed && this.state.code?.onDisk && this.state.stage.kind === "code") {
+      this.onEditorCommand?.(ed[1]!);
       return;
     }
     // `!` is a shell, same as vim and Claude Code. Never an answer either.
