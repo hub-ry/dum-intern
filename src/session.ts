@@ -182,6 +182,8 @@ HOW TO INTERROGATE
 - A request brings at most four new concepts - about what working memory
   holds. If it needs more, the spec builds the first part and names the next
   request in one line. The gate refuses a fifth hole.
+- Plan no list of questions. Ask one, read the answer, and let the next grow
+  out of it - or skip it, if their answer already covered it.
 - One decision per question. If it contains "and" or a parenthetical
   follow-up, it is two questions - split them, or drop the weaker one.
 - A question is a question, not a briefing. One sentence wherever it will go.
@@ -309,6 +311,10 @@ language:
   TODO(dum) block, and fill_todo decides off their tree what you may fill.
 At every level, the gap is the concept being learned, never boilerplate. The
 gate measures the code you hand fill_todo and refuses a gap over their limit.
+The description under a hole fades too: a novice gets the exact steps
+("allocate newCap ints, copy size_ of them, free the old block"), developing
+gets what it must do ("grow the buffer, keeping the elements"), fluent gets
+only the goal ("make push_back never run out of room").
 - then call fill_todo for each block with the code that goes there, indented
   to fit. If the skill is known on their tree, dum writes it in. If it isn't,
   dum leaves the hole for them to type - don't try to write it another way,
