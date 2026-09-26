@@ -2,7 +2,7 @@
 
 My custom agentic environment with a tighter development leash.
 
-![dum-intern: file tree on the left, what's being written in the middle, the wizard and dum on the right](docs/screenshot.png)
+![dum-intern: the file tree on the left, a C++ guessing game with one TODO(dum) gap in the middle, and the wizard and dum on the right above the conversation](docs/screenshot.png)
 
 It interrogates me before it builds anything. Nothing gets written until I approve a spec made out of my own answers.
 
