@@ -168,7 +168,9 @@ writing prose at them - plain text you emit is a side channel they may not read.
   note_understanding
                Put a concept on their skill tree: one they showed they hold,
                or one they fumbled. See below.
-  leave_todo   After approval: register a hole you left for them to type.
+  fill_todo    After approval: hand dum the code for a TODO(dum) hole. dum
+               writes it only if the skill is on their tree. See HOLES.
+  leave_todo   After approval: register a hole they chose to type.
   check_todo   Judge what they typed into a hole. See TYPE IT below.
 
 HOW YOU TALK
@@ -288,6 +290,20 @@ where it goes:
 - then call leave_todo for it. One hole per concept.
 - after the build, one line telling them where the hole is. Nothing more.
 
+HOLES
+In understand mode, every piece of the build that rests on a concept - the
+same kind of thing you'd ask about, not boilerplate or glue - is built as a
+hole first, and it's dum that decides whether you fill it:
+- write the file with a TODO(dum) block (same shape as above) for each such
+  piece, and everything else as real code.
+- then call fill_todo for each block with the code that goes there, indented
+  to fit. If the skill is known on their tree, dum writes it in. If it isn't,
+  dum leaves the hole for them to type - don't try to write it another way,
+  and don't argue. A hole left like that is theirs, same as "type it".
+- blocks they chose to type ("type it") never get fill_todo. Call leave_todo.
+- you can't Edit a TODO(dum) block yourself. The gate refuses it.
+In anti-vibe mode there are no holes unless they say "type it". Write the code.
+
 When they say they've typed it you'll be asked to check. Read their code and
 call check_todo. Passing is the skill, so judge it like a reviewer: does it do
 what the hole said, and would it work? Not whether it matches what you'd have
@@ -388,6 +404,9 @@ const QUIT = new Set(["exit", "quit", ":q", "bye"]);
  */
 const WIZARD_WAIT = 2500;
 
+/** How long a hole sits on screen before dum fills it or leaves it. Long enough to read the marker. */
+const FLASH_MS = 900;
+
 export async function run(request: string, repo: Repo, mode: Mode, store: Store) {
   let approved = false;
 
@@ -413,11 +432,31 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     store.setSkills(skills.summary(m, repo.root));
   }
 
+  // "not yet": skills they've said not to check off, this session. The intern
+  // may be right that they hold it; they still get to say it doesn't count.
+  const held = new Set<string>();
+  /** What each skill looked like before this session changed it, for undoing. */
+  const was = new Map<string, skills.Skill | null>();
+  /** Checked off this session, newest last. What a bare "not yet" undoes. */
+  const checked: string[] = [];
+  /** Things to tell the intern with whatever it hears next. */
+  const aside: string[] = [];
+  const withAside = (text: string) => {
+    if (!aside.length) return text;
+    const out = `${aside.join("\n")}\n\n${text}`;
+    aside.length = 0;
+    return out;
+  };
+  let hinted = false;
+
   function record(entry: skills.Entry) {
     // Capped here rather than in the schema: a fourth prerequisite is not
     // worth failing the tool call over.
     entry = { ...entry, requires: entry.requires.slice(0, 3) };
+    const k = skills.key(entry.name);
+    if (entry.solid && held.has(k)) return;
     const before = skills.find(skills.read(), entry.name);
+    if (!was.has(k)) was.set(k, before ?? null);
     const t = skills.note(skills.read(), entry, repo.root);
     skills.write(t);
     store.setSkills(skills.summary(t, repo.root));
@@ -425,9 +464,42 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     // discovered weeks later as a question that stopped being asked.
     if (entry.solid && (!before?.solid || before.claimed)) {
       const name = skills.find(t, entry.name)?.name ?? entry.name;
-      store.note(`+ skill: ${name}${entry.breadth === "niche" ? " (niche)" : ""}`);
+      checked.push(name);
+      const hint = hinted ? "" : "   (not yet keeps it off)";
+      hinted = true;
+      store.note(`+ skill: ${name}${entry.breadth === "niche" ? " (niche)" : ""}${hint}`);
     }
   }
+
+  /** Is this skill theirs, for writing code on it? Claimed counts: they said so. */
+  function holds(concept: string): boolean {
+    if (held.has(skills.key(concept))) return false;
+    const s = skills.find(skills.read(), concept);
+    return !!s && s.solid && (s.breadth === "general" || s.claimed || s.repos.includes(repo.root));
+  }
+
+  store.onNotYet = (name: string) => {
+    const target = name ? skills.find(skills.read(), name)?.name : checked[checked.length - 1];
+    if (!target) return false;
+    const k = skills.key(target);
+    held.add(k);
+    const i = checked.findIndex((c) => skills.key(c) === k);
+    if (i >= 0) checked.splice(i, 1);
+    if (was.has(k)) {
+      const prev = was.get(k)!;
+      if (prev) skills.write({ skills: [prev] });
+      else skills.remove(target);
+    } else {
+      const now = skills.find(skills.read(), target);
+      if (now?.solid) skills.write({ skills: [{ ...now, solid: false, claimed: false }] });
+    }
+    store.setSkills(skills.summary(skills.read(), repo.root));
+    store.note(`not yet: ${target} stays off your tree this session.`);
+    aside.push(
+      `(They said not to count "${target}" as known yet. Treat it as not on their tree: don't record it solid, and a hole for it stays theirs to type.)`,
+    );
+    return true;
+  };
   // Holes left for them to type. Kept on disk, since typing one is often the
   // next session's work, and the review turn goes to the resumed intern.
   let open = todos.load(repo.root);
@@ -549,7 +621,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       // would mean the second thing you asked for was never gated.
       approved = false;
       currentRequest = next;
-      yield userTurn(next);
+      yield userTurn(withAside(next));
     }
   }
 
@@ -587,7 +659,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           }
           return {
             content: [
-              { type: "text" as const, text: reply || "(they said nothing - ask again)" },
+              { type: "text" as const, text: withAside(reply || "(they said nothing - ask again)") },
             ],
           };
         },
@@ -665,6 +737,57 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
               { type: "text" as const, text: "Recorded. Do not mention this to them." },
             ],
           };
+        },
+      ),
+      tool(
+        "fill_todo",
+        "Hand dum the code for a TODO(dum) hole. dum writes it if the skill is known on their tree, and leaves the hole for them if not.",
+        {
+          path: z.string().describe("The file the hole is in, relative to the repo"),
+          concept: z.string().describe("The skill this piece rests on - the name after TODO(dum):"),
+          what: z.string().describe("What the code has to do. The same words as the hole."),
+          code: z.string().describe("The code that replaces the whole block - marker, comment lines and stub - indented to fit"),
+          breadth: BREADTH,
+          requires: REQUIRES,
+        },
+        async (args) => {
+          const say = (text: string) => ({ content: [{ type: "text" as const, text }] });
+          if (!approved) return say("Not yet - holes are filled while building, after the spec is approved.");
+          if (escapes(repo.root, args.path)) return say(`${args.path} is outside the repo.`);
+          const path = rel(repo.root, args.path);
+          const body = readRel(path);
+          if (body === null) return say(`${path} doesn't exist. Write the file with its holes first.`);
+          const at = todos.hole(body, args.concept);
+          if (at < 0) return say(`There's no ${todos.MARKER} line for that in ${path}. Write the hole first.`);
+          // The block is on screen before anything happens to it, whichever
+          // way it goes: that's how you see what the build rested on.
+          store.openFile(path, at);
+          await new Promise((r) => setTimeout(r, FLASH_MS));
+          if (mode === "understand" && !holds(args.concept)) {
+            const t: todos.Todo = {
+              concept: args.concept.trim(),
+              path,
+              what: args.what.trim(),
+              breadth: args.breadth,
+              requires: args.requires.slice(0, 3),
+              before: body,
+            };
+            setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
+            handedOff = false;
+            store.toolEvent("hole", `${path}: ${t.concept}`, "held");
+            return say(`"${t.concept}" isn't known on their tree, so the hole stays for them to type. Don't write it any other way.`);
+          }
+          const filled = todos.fill(body, args.concept, args.code);
+          if (filled === null) return say(`Couldn't find the block for that in ${path}.`);
+          try {
+            writeFileSync(resolve(repo.root, path), filled);
+          } catch (err) {
+            return say(`Couldn't write ${path}: ${(err as Error).message}`);
+          }
+          wrote.push(path);
+          store.toolEvent("fill", `${path}: ${args.concept.trim()}`, "ran");
+          store.openFile(path, at);
+          return say("Filled.");
         },
       ),
       tool(
@@ -844,6 +967,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         if (name.startsWith("mcp__dum__")) {
           return { behavior: "allow" as const, updatedInput: args };
         }
+        // Filling a hole is dum's call, made off the tree in fill_todo. An
+        // Edit that rewrites a block would be the intern making it instead.
+        if (erasesHole(repo.root, name, args)) {
+          store.toolEvent(name, detail(repo.root, args), "refused");
+          return {
+            behavior: "deny" as const,
+            message: "TODO(dum) blocks are filled through fill_todo, never edited directly.",
+          };
+        }
         if (!approved && MUTATING.has(name)) {
           gateEngaged = true;
           store.toolEvent(name, detail(repo.root, args), "held");
@@ -998,6 +1130,35 @@ export function notAnAnswer(reply: string): boolean {
   return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
     reply.trim(),
   );
+}
+
+/**
+ * Whether a tool call would rewrite a TODO(dum) block that already exists.
+ *
+ * Adding a block is fine - that's how a file gets its holes. Replacing or
+ * dropping one is not: an Edit whose old text holds a marker, or a Write that
+ * leaves out a marker line the file has now.
+ */
+export function erasesHole(root: string, name: string, args: Record<string, unknown>): boolean {
+  if (name === "Edit") return String(args.old_string ?? "").includes(todos.MARKER);
+  if (name === "MultiEdit") {
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    return edits.some((e: any) => String(e?.old_string ?? "").includes(todos.MARKER));
+  }
+  if (name === "Write" && typeof args.file_path === "string") {
+    let now: string;
+    try {
+      now = readFileSync(resolve(root, args.file_path), "utf8");
+    } catch {
+      return false; // a new file can't erase anything
+    }
+    const next = String(args.content ?? "");
+    return now
+      .split("\n")
+      .filter((l) => l.includes(todos.MARKER))
+      .some((l) => !next.includes(l.trim()));
+  }
+  return false;
 }
 
 /** Where dum-intern itself is installed, for telling someone what to update. */

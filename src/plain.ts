@@ -145,16 +145,22 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
   store.subscribe(draw);
   draw();
 
+  let hinted: Prompt = null;
   for (;;) {
     const s = store.getSnapshot();
     if (!s.prompt) {
       await new Promise<void>((r) => (wake = r));
       continue;
     }
-    // No editor here, so the hole is typed in yours - the line says where.
-    const t = s.prompt.type === "next" ? s.todos[0] : undefined;
-    if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - save it, then say done`)}`);
-    if (s.prompt.type === "question" && s.prompt.why) console.log(`  ${c.dim("answer it · idk · type it")}`);
+    // Once per prompt. A `?` or a `not yet` leaves the same prompt standing,
+    // and printing its hints again reads as a second question.
+    if (s.prompt !== hinted) {
+      hinted = s.prompt;
+      // No editor here, so the hole is typed in yours - the line says where.
+      const t = s.prompt.type === "next" ? s.todos[0] : undefined;
+      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - save it, then say done`)}`);
+      if (s.prompt.type === "question" && s.prompt.why) console.log(`  ${c.dim("answer it · idk · type it")}`);
+    }
     const reply = (await input.ask(promptFor(s.prompt))).trim();
     console.log();
     store.submit(reply);

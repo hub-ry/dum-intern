@@ -240,6 +240,9 @@ function quipLines(text: string, about: string, width: number): string[] {
  * is disqualifying for a program whose entire job is to say no.
  */
 function toolLine(name: string, detail: string, outcome: Outcome): string {
+  // A hole isn't a refusal of anything. It's dum deciding, off the tree, that
+  // this piece is theirs - so it reads as an invitation, in the gutter's colour.
+  if (name === "hole") return `${c.amber("▌")} ${c.bold("hole")}${c.dim("  " + detail)}${c.amber("  (yours to type)")}`;
   const mark = outcome === "ran" ? c.dim("·") : outcome === "held" ? c.amber("⊘") : c.red("✗");
   const label = outcome === "ran" ? c.dim(name) : c.bold(name);
   const note =

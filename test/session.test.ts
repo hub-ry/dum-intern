@@ -63,3 +63,32 @@ test("a real answer that mentions not knowing still goes to the wizard", () => {
   assert.equal(notAnAnswer("not sure, maybe a lock file?"), false);
   assert.equal(notAnAnswer("index 1"), false);
 });
+
+test("the gate refuses rewriting a hole, and allows adding one", async () => {
+  const { erasesHole } = await import("../src/session.ts");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const root = mkdtempSync(`${tmpdir()}/dum-gate-`);
+  writeFileSync(`${root}/a.py`, "def f():\n    # TODO(dum): retries\n    # try three times\n    pass\n");
+  assert.ok(erasesHole(root, "Edit", { old_string: "    # TODO(dum): retries\n    pass" }));
+  assert.ok(!erasesHole(root, "Edit", { old_string: "def f():", new_string: "# TODO(dum): x\ndef f():" }));
+  assert.ok(erasesHole(root, "MultiEdit", { edits: [{ old_string: "x" }, { old_string: "# TODO(dum): retries" }] }));
+  assert.ok(erasesHole(root, "Write", { file_path: "a.py", content: "def f():\n    return 1\n" }));
+  assert.ok(!erasesHole(root, "Write", { file_path: "a.py", content: "import x\ndef f():\n    # TODO(dum): retries\n    pass\n" }));
+  assert.ok(!erasesHole(root, "Write", { file_path: "new.py", content: "anything" }));
+});
+
+test("not yet takes a skill back without costing the turn, and is an answer when there's nothing to take", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  const taken: string[] = [];
+  let has = true;
+  s.onNotYet = (name) => (has ? (taken.push(name), true) : false);
+  const reply = s.askQuestion("have you added tests?", "");
+  s.submit("not yet");
+  s.submit("Not yet: rust macros");
+  assert.deepEqual(taken, ["", "rust macros"]);
+  has = false;
+  s.submit("not yet");
+  assert.equal(await reply, "not yet");
+});

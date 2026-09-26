@@ -52,6 +52,49 @@ export function hole(text: string, concept = ""): number {
   return lines.findIndex((l) => l.includes(MARKER));
 }
 
+/**
+ * The lines a hole spans: the marker, the comment lines under it, and the one
+ * stub line after those. [from, to] inclusive, or null if `at` is not a marker.
+ *
+ * The comment run is found by the marker's own prefix - `//`, `#`, `--` - so
+ * it works in any language without knowing any of them.
+ */
+export function span(lines: string[], at: number): [number, number] | null {
+  const line = lines[at];
+  if (line === undefined || !line.includes(MARKER)) return null;
+  const prefix = line.slice(0, line.indexOf(MARKER)).trim().replace(/\s+$/, "");
+  const lead = prefix.replace(/^\/\*+$/, "*") || "#";
+  let to = at;
+  while (to + 1 < lines.length && lines[to + 1]!.trim() && lines[to + 1]!.trimStart().startsWith(lead)) to++;
+  // The stub, unless the block runs into a blank line or the end.
+  if (to + 1 < lines.length && lines[to + 1]!.trim()) to++;
+  return [at, to];
+}
+
+/** Every hole in a file, as spans. For the pane, which paints them. */
+export function spans(text: string): [number, number][] {
+  const lines = text.split("\n");
+  const out: [number, number][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const s = span(lines, i);
+    if (s) {
+      out.push(s);
+      i = s[1];
+    }
+  }
+  return out;
+}
+
+/** The file with a hole replaced by code, or null if there is no such hole. */
+export function fill(text: string, concept: string, code: string): string | null {
+  const lines = text.split("\n");
+  const at = hole(text, concept);
+  const s = at < 0 ? null : span(lines, at);
+  if (!s) return null;
+  const body = code.replace(/\n+$/, "").split("\n");
+  return [...lines.slice(0, s[0]), ...body, ...lines.slice(s[1] + 1)].join("\n");
+}
+
 /** Holes whose file is exactly as the intern left it, or gone. */
 export function untouched(todos: Todo[], read: (path: string) => string | null): Todo[] {
   return todos.filter((t) => read(t.path) === t.before);

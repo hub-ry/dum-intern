@@ -131,8 +131,23 @@ if (scene === "spec") {
   void store.askQuestion("what next?", "");
 } else if (scene === "hole") {
   // Handed a hole to type: the file open at the TODO, dum saying whose turn.
-  store.setTodos([{ concept: "median of an even-length list", path: "src/store.ts" }]);
-  store.openFile("src/store.ts", 120);
+  store.setTodos([{ concept: "median of a sorted list", path: "stats.py" }]);
+  store.streaming(
+    "Write",
+    "stats.py",
+    [
+      "def mean(xs):",
+      "    return sum(xs) / len(xs)",
+      "",
+      "def median(xs):",
+      "    s = sorted(xs)",
+      "    # TODO(dum): median of a sorted list",
+      "    # Return the middle value; average the two middles when even.",
+      "    raise NotImplementedError",
+      "",
+    ].join("\n"),
+  );
+  store.toolEvent("Write", "stats.py", "ran");
   void store.askNext();
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");

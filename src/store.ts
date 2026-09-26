@@ -141,6 +141,9 @@ export class Store {
   /** Set by the runner: where a `?` question goes. */
   onAsk: ((question: string) => void) | null = null;
 
+  /** Set by the runner: "not yet", with the skill named or "" for the last one checked off. */
+  onNotYet: ((name: string) => boolean) | null = null;
+
   constructor(repo: string, mode: Mode, root = "", files: string[] = []) {
     this.state = {
       repo,
@@ -184,6 +187,12 @@ export class Store {
       if (question) this.onAsk?.(question);
       return;
     }
+    // Same rule as `?`: taking a skill back is not an answer to anything, and
+    // must never cost the turn or reach the intern as one.
+    const nope = /^not yet\b[\s:,-]*(.*)$/i.exec(text.trim());
+    // Returns false when there is nothing to take back, and then it was
+    // just an answer: "have you added tests?" "not yet".
+    if (nope && this.onNotYet?.(nope[1]!.trim())) return;
     const w = this.waiting;
     if (!w) {
       this.typedAhead.push(text);

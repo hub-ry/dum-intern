@@ -17,6 +17,7 @@ import { printable, slice } from "../lines.ts";
 import { highlight } from "../highlight.ts";
 import { dirty, goto, open, paste, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
 import type { CodeView } from "../store.ts";
+import { spans } from "../todos.ts";
 
 type Entry = { source: string; buf: Buf; jump?: number };
 
@@ -103,6 +104,10 @@ export function Code({
   const shown = lines.slice(buf.top, buf.top + view.rows);
   const bar = scrollbar(buf.lines.length, buf.top, view.rows);
   const where = `${buf.row + 1}:${vcol(buf.lines[buf.row]!, buf.col) + 1}`;
+  // TODO(dum) blocks, painted in the gutter. Off the live buffer, so a block
+  // you are typing over stops being painted once its marker is gone.
+  const holes = spans(buf.lines.join("\n"));
+  const inHole = (n: number) => holes.some(([a, b]) => n >= a && n <= b);
 
   return (
     <Box width={width} flexDirection="column" paddingX={1}>
@@ -129,7 +134,11 @@ export function Code({
       </Text>
       {shown.map((line, i) => (
         <Text key={i}>
-          <Text dimColor={buf.top + i !== buf.row || !focused}>{String(buf.top + i + 1).padStart(gutter)} </Text>
+          {inHole(buf.top + i) ? (
+            <Text color="#d7a55f">{String(buf.top + i + 1).padStart(gutter)}▌</Text>
+          ) : (
+            <Text dimColor={buf.top + i !== buf.row || !focused}>{String(buf.top + i + 1).padStart(gutter)} </Text>
+          )}
           {row(line.replace(/\t/g, "  "), buf, buf.top + i, view.cols, focused && !buf.cmd)}
           <Text dimColor>{" " + bar[i]}</Text>
         </Text>

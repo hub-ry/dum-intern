@@ -243,6 +243,30 @@ Open holes live in `.dum/todos.json`, so quitting halfway is fine. The next `dum
 Typing is harder to fake than a sentence. A deleted marker isn't an implementation, and a function that's wrong on the even case doesn't pass.
 
 
+### Every piece starts as a hole
+
+In understand mode, the parts of a build that rest on a concept get written as `TODO(dum)` blocks first. Glue and boilerplate don't, just the pieces I'd have to understand. Then the intern hands dum the code for each block, and dum decides from my tree, not the intern:
+
+```
+  · Write  stats.py
+  · fill  stats.py: median
+  ▌ hole  stats.py: frequency counting  (yours to type)
+```
+
+Known skill: the block sits on screen for a moment, then the code goes in. Not on the tree, shaky, or taken back with `not yet`: the block stays, and it's mine to type. Either way I see where the build leaned on something.
+
+The intern can't route around it. An Edit that rewrites a `TODO(dum)` block, or a Write that drops one, is refused at the gate. Open blocks are painted amber in the gutter until I type over them.
+
+Anti-vibe has no holes unless I say `type it`. The mechanics are the intern's there.
+
+
+### Not yet
+
+The intern can be right that I hold something, and I can still not want it counted. `not yet` right after a `+ skill` takes it back. It goes back to what it was before this session, or off the tree if it's new, and it stays off until the session ends. The intern is told, so a hole for it stays mine. `not yet <name>` picks one further back.
+
+It doesn't cost the turn, same as `?`. A bare `not yet` with nothing to take back is just an answer: "have you added tests?" "not yet".
+
+
 ### Enforced in code, not in the prompt
 
 Mutating tools are denied until I approve the spec. v1 asked for this in the system prompt. On the first real run the intern skipped it, wrote two files, and printed "nothing was built".
@@ -287,6 +311,7 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
 | `done` | check what I typed into the hole | "what next?" |
+| `not yet` [name] | don't count the skill just checked off | anywhere |
 | `y` | approve the spec, anything else declines | spec |
 | `ctrl-t` | swap the stage to the full transcript and back | anywhere |
 | `j` / `k`, arrows | move | file tree, file |
