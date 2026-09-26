@@ -124,6 +124,19 @@ The trackpad scrolls the pane under the pointer, focused or not. Full-screen pro
 The cost is plain drag-to-select. Option-drag (iTerm, Terminal.app) or shift-drag (most others) still selects text, and in tmux selection is tmux's anyway.
 
 
+### Small enough to hold
+
+A hole is what the research calls a completion problem: working code with a part missing, which I finish. Completion problems were proposed for teaching programming by [van Merriënboer and Krammer in 1987](https://www.uky.edu/~gmswan3/544/Cognitive_Load_&_ID.pdf). They beat plain worked examples because you can't skim the given part and still fill the gap.
+
+The limits come from the same line of research, and dum keeps them in code:
+
+- **Four new things per request.** Working memory holds [about four chunks](https://philpapers.org/rec/COWTMN) (Cowan, 2001). The gate refuses a fifth hole in one request, and the intern splits the build instead of merging blocks, which would be the same load in bigger pieces.
+- **Small steps, at my pace.** People learn more from [learner-paced segments](https://link.springer.com/article/10.1007/s10648-018-9456-4) than from one continuous unit (a meta-analysis of 56 studies). Features stay under 30 minutes and milestones under 45, and nothing moves on until I say `go`.
+- **One concept per hole, twelve lines per fill.** Nothing big rides in under one name.
+
+One finding cuts the other way. Worked examples help novices most, and they stop helping, or hurt, once you know the material. That's the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003), and the fix it points to is [fading](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6): start with most of the code given and a few gaps, then widen the gaps. dum does the reverse. An empty tree gets all holes, and a full one gets fills. That's on purpose, because code I can't explain shouldn't appear. But it's worth knowing that a beginner is doing the hardest version of each task.
+
+
 ### Short, on purpose
 
 This is closer to a game than a document, and every long message is a turn I stop playing. The rules come from [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md), and they're kept in code wherever code can keep them:
