@@ -9,8 +9,10 @@ import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
 import * as skills from "./skills.ts";
 import * as todos from "./todos.ts";
 import * as scanner from "./scan.ts";
+import * as projects from "./projects.ts";
+import * as planner from "./planner.ts";
 import { createInterface } from "node:readline/promises";
-import { c } from "./lines.ts";
+import { c, wrap } from "./lines.ts";
 import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 import { basename as repo } from "node:path";
@@ -23,6 +25,10 @@ type Args = {
   forget: string | null;
   reset: boolean;
   scan: string[] | null;
+  queue: string | null;
+  plan: boolean;
+  list: boolean;
+  next: number | null;
 };
 
 function parse(args: string[]): Args {
@@ -35,6 +41,10 @@ function parse(args: string[]): Args {
   let forget: string | null = null;
   let reset = false;
   let scan: string[] | null = null;
+  let queue: string | null = null;
+  let plan = false;
+  let list = false;
+  let next: number | null = null;
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -45,10 +55,17 @@ function parse(args: string[]): Args {
     else if (a === "--forget") forget = args.slice(i + 1).join(" ").trim();
     else if (a === "--reset") reset = true;
     else if (a === "--scan") scan = args.slice(i + 1);
-    else rest.push(a);
-    if (forget !== null || scan !== null) break;
+    else if (a === "--queue") queue = args.slice(i + 1).join(" ").trim();
+    else if (a === "--plan") plan = true;
+    else if (a === "--projects") list = true;
+    else if (a === "--next") {
+      const n = Number(args[i + 1]);
+      next = Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 1;
+      if (Number.isInteger(n) && n > 0) i++;
+    } else rest.push(a);
+    if (forget !== null || scan !== null || queue !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, plan, list, next };
 }
 
 /**
@@ -187,6 +204,137 @@ async function scanSkills(dirs: string[]) {
   console.log(`\n  ${c.blue("◐")} ${keep.length} claimed${drop.size ? c.dim(`, ${drop.size} dropped`) : ""}. ${c.dim("dum --skills shows the tree.")}\n`);
 }
 
+/** A progress line that rewrites itself on a terminal, and stays quiet in a pipe. */
+function progress(label: string) {
+  let status = "";
+  const draw = () => stdout.isTTY && stdout.write(`\r\x1b[2K  ${c.dim(`${label}${status ? ": " + status : ""}`)}`);
+  const tick = setInterval(draw, 200);
+  return {
+    set: (s: string) => (status = s),
+    stop: () => {
+      clearInterval(tick);
+      if (stdout.isTTY) stdout.write("\r\x1b[2K");
+    },
+  };
+}
+
+/** Put a goal on the queue, as a note, and plan it. */
+async function queueProject(idea: string) {
+  if (!idea) {
+    console.error(`\n  usage: dum --queue "what you want to build"   (or drop a .md into ${projects.folder().replace(homedir(), "~")})\n`);
+    exit(1);
+  }
+  // Titled by its first line, cut short; the whole prompt is the body.
+  const title = idea.split("\n")[0]!.replace(/[.!?]+$/, "").slice(0, 60).trim().toLowerCase();
+  const note: projects.Project = { title, kind: "idea", unlocks: [], after: [], leadsTo: "", start: "", planned: "", body: idea };
+  projects.write([note]);
+  await planOne(note);
+}
+
+/** Plan every note in the queue that hasn't been planned - including ones written by hand. */
+async function planQueue() {
+  const todo = projects.read().filter((p) => projects.status(p, [], () => false) === "unplanned");
+  if (!todo.length) {
+    console.log(`\n  ${c.dim("nothing unplanned. dum --queue \"...\" adds a goal, dum --projects shows the queue.")}\n`);
+    return;
+  }
+  for (const p of todo) await planOne(p);
+}
+
+async function planOne(idea: projects.Project) {
+  const bar = progress(`planning ${idea.title}`);
+  const got = await planner.plan(idea, skills.read(), projects.read(), bar.set);
+  bar.stop();
+  if (!got) {
+    console.error(`\n  ${c.red("✗")} couldn't plan ${idea.title}. it's still in the queue - dum --plan tries again.\n`);
+    return;
+  }
+  projects.write([...got.steps, got.goal]);
+  const n = got.steps.length;
+  console.log(
+    `\n  ${c.green("✓")} ${got.goal.title}: ${
+      n
+        ? `${got.height} tiers above your tree, so ${n} step${n === 1 ? "" : "s"} first.`
+        : "close enough to your tree to start directly."
+    }`,
+  );
+  printProjects(got.goal.title);
+}
+
+const MARK: Record<projects.Status, string> = {
+  done: c.green("✓"),
+  ready: c.blue("▶"),
+  waiting: c.dim("·"),
+  unplanned: c.amber("?"),
+};
+
+/** The queue, each goal with its steps climbing up to it. Or just one goal. */
+function printProjects(only?: string) {
+  const all = projects.read();
+  if (!all.length) {
+    console.log(`\n  ${c.dim(`no projects yet. dum --queue "..." adds a goal, dum --next suggests one.`)}\n`);
+    return;
+  }
+  const holds = projects.holder(skills.read());
+  const st = (p: projects.Project) => projects.status(p, all, holds);
+  // How many steps sit under a step, so the list climbs from the bottom.
+  const depth = (p: projects.Project, seen = new Set<string>()): number => {
+    if (seen.has(p.title)) return 0;
+    seen.add(p.title);
+    const before = p.after.map((a) => all.find((q) => skills.key(q.title) === skills.key(a))).filter(Boolean) as projects.Project[];
+    return before.length ? 1 + Math.max(...before.map((q) => depth(q, seen))) : 0;
+  };
+  const line = (p: projects.Project, indent: string) => {
+    const s = st(p);
+    const unlocks = p.unlocks.length ? c.dim(`  ${p.unlocks.join(", ")}`) : "";
+    console.log(`${indent}${MARK[s]} ${s === "waiting" ? c.dim(p.title) : p.title}${unlocks}`);
+    if (s === "ready" && p.start) console.log(`${indent}  ${c.dim(`start: dum "${p.start}"`)}`);
+  };
+  console.log();
+  const goals = all.filter((p) => p.kind === "goal" && (!only || skills.key(p.title) === skills.key(only)));
+  for (const g of goals) {
+    const steps = all.filter((p) => p.kind === "step" && skills.key(p.leadsTo) === skills.key(g.title));
+    steps.sort((a, b) => depth(a) - depth(b));
+    for (const s of steps) line(s, "  ");
+    line(g, "  ");
+    console.log();
+  }
+  if (!only) {
+    const loose = all.filter((p) => p.kind === "idea");
+    for (const p of loose) line(p, "  ");
+    if (loose.length) console.log();
+  }
+  console.log(`  ${MARK.done} ${c.dim("done")}   ${MARK.ready} ${c.dim("ready")}   ${MARK.waiting} ${c.dim("waiting")}   ${MARK.unplanned} ${c.dim("not planned yet")}`);
+  console.log(`  ${c.dim(`done means its skills are on your tree. notes in ${projects.folder().replace(homedir(), "~")}/`)}\n`);
+}
+
+/** Project ideas that unlock the next skills on the tree, fastest first. */
+async function nextProjects(n: number) {
+  const t = skills.read();
+  const queue = projects.read();
+  const targets = planner.frontier(t, queue);
+  if (!targets.length) {
+    console.log(`\n  ${c.dim(`nothing on the frontier yet. dum --queue "..." sets a goal to climb toward.`)}\n`);
+    return;
+  }
+  const bar = progress(`finding the fastest unlock`);
+  const got = await planner.ideas(targets, n, t, bar.set);
+  bar.stop();
+  if (!got) {
+    console.error(`\n  ${c.red("✗")} couldn't come up with one this time. try again.\n`);
+    return;
+  }
+  projects.write(got);
+  console.log();
+  for (const p of got) {
+    console.log(`  ${c.blue("▶")} ${c.bold(p.title)}  ${c.dim(p.unlocks.join(", "))}`);
+    for (const l of wrap(p.body.replace(/\*\*/g, ""), "    ", 76)) console.log(c.dim(l));
+    if (p.start) console.log(`    start: dum "${p.start}"`);
+    console.log();
+  }
+  console.log(`  ${c.dim("saved to the queue. make a folder, git init, and start it there.")}\n`);
+}
+
 /** The repo root, or "" outside one. */
 function repoRoot(): string {
   try {
@@ -197,13 +345,17 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget, reset, scan } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, plan, list, next } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works
   // from anywhere - only "known here" needs a repo.
   if (show) return printSkills(repoRoot());
   if (reset) return resetSkills();
   if (scan !== null) return scanSkills(scan);
+  if (queue !== null) return queueProject(queue);
+  if (plan) return planQueue();
+  if (list) return printProjects();
+  if (next !== null) return nextProjects(next);
   if (forget !== null) {
     if (!forget) {
       console.error(`\n  usage: dum --forget <skill name>   (\`dum --skills\` lists them)\n`);

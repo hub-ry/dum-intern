@@ -12,7 +12,7 @@
 // vendored library or a file a friend wrote would otherwise hand you their
 // skills.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { oneShot, json } from "./oneshot.ts";
 import { z } from "zod";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -66,15 +66,7 @@ Reply with ONLY a JSON array, no prose and no code fence:
 
 /** The first JSON array in a reply, tolerating a fence or a sentence around it. */
 export function parse(text: string): Found[] {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start < 0 || end <= start) return [];
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return [];
-  }
+  const raw = json(text, "[");
   if (!Array.isArray(raw)) return [];
   const out: Found[] = [];
   for (const r of raw) {
@@ -102,34 +94,5 @@ export function checkDir(dir: string): { path: string } | { error: string } {
 
 /** Read one project and return what it shows. Empty on any failure - a scan is never worth a crash. */
 export async function scan(dir: string, tree: skills.Tree, onStatus?: (s: string) => void): Promise<Found[]> {
-  let out = "";
-  try {
-    const session = query({
-      prompt: prompt(tree),
-      options: {
-        model: MODEL,
-        cwd: dir,
-        tools: TOOLS,
-        allowedTools: TOOLS,
-        // Its whole job is this prompt. Their CLAUDE.md has no business here.
-        settingSources: [],
-        thinking: { type: "disabled" },
-      },
-    });
-    for await (const msg of session as AsyncIterable<any>) {
-      if (msg.type === "assistant") {
-        for (const b of msg.message?.content ?? []) {
-          if (b.type === "text" && b.text) out = b.text;
-          if (b.type === "tool_use") {
-            const p = b.input?.file_path ?? b.input?.pattern ?? "";
-            if (p) onStatus?.(`${b.name.toLowerCase()} ${String(p).replace(dir + "/", "")}`);
-          }
-        }
-      }
-      if (msg.type === "result" && typeof msg.result === "string" && msg.result) out = msg.result;
-    }
-  } catch {
-    return [];
-  }
-  return parse(out);
+  return parse(await oneShot(prompt(tree), { model: MODEL, cwd: dir, tools: TOOLS, onStatus }));
 }

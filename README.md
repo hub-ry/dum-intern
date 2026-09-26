@@ -115,6 +115,36 @@ So while the tree has fewer than five skills, the intern changes how it asks. Th
 On a fresh tree, "add a done command" to a tiny todo CLI got exactly one question: "`list` prints todos as 1., 2., 3. If you run `todo done 2`, which array index does that need to touch?" That's the one real trap in the build, asked as a prediction.
 
 
+### Projects to climb toward
+
+The tree says what I hold. A project I want to build can sit far above it. A browser multiplayer game rests on websockets, which rest on HTTP and TCP, which rest on things I may never have touched. dum won't build what I can't explain, so a goal eight tiers up is a goal I can't start. Unless something walks me up to it.
+
+```sh
+dum --queue "a multiplayer game server for a tiny browser tag game"
+```
+
+```
+  ✓ a multiplayer game server for a tiny browser tag game: 8 tiers above your tree, so 12 steps first.
+
+  ▶ turn based tag in one terminal  client-server model, event loop, game state modeling
+    start: dum "..."
+  ▶ vector bumper toy  2d vectors
+  · async tcp tick counter  tcp sockets, async await, game loop
+  · websocket drift box  websockets, json encoding, movement integration
+  ...
+```
+
+A model maps what the goal rests on, down to my tree. The tiers are counted in code: what I hold is tier 0, anything else is one above the highest thing it builds on. Each tier below the goal becomes stepping stones, three skills at most, an evening each. A step only waits on another when one of its skills builds on one of the other's, so separate branches can be climbed in any order.
+
+Nothing gets ticked off by hand. A project is done when the skills it unlocks are on my tree, and ready when what it comes after is done. Explaining something, or typing it into a hole, is what moves the queue.
+
+The queue is a folder of notes in `~/.dum/projects/`, beside the skills, so one Obsidian vault on `~/.dum` links projects to skills. A markdown file I drop in there by hand is a goal too, and `dum --plan` plans it.
+
+`dum --next` is the short version: one small project that unlocks the next skill fastest. It goes for what my queue's ready steps need, then what I've been taught but haven't shown, then prerequisites my tree names but nobody's recorded. `dum --next 3` gives three.
+
+Planning runs on Opus, not the Sonnet the voices use. It runs once, and everything after follows the map it draws. A wrong prerequisite is a project I get sent to build for nothing.
+
+
 ### The intern asks, the wizard tells
 
 Two voices. Questions I have to answer come from the intern. The wizard only fires on an answer I already gave, so it can't answer a pending question for me.
@@ -348,6 +378,10 @@ dum
 | `--forget <name>` | take a skill off the tree |
 | `--scan <folders>` | claim skills from projects I wrote myself |
 | `--reset` | start the tree over, the old one moved aside |
+| `--queue "<goal>"` | queue a project and plan the steps up to it |
+| `--plan` | plan goals I wrote into the queue by hand |
+| `--projects` | the queue, what's done, what's ready |
+| `--next [n]` | project ideas for the fastest next unlock |
 
 The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 
@@ -357,6 +391,7 @@ The tree flags work from anywhere. Everything else needs a git repo, since the i
 ```
 ~/.dum/
   skills/          the skill tree, one note per skill, shared by every repo (DUM_HOME moves it)
+  projects/        the project queue, one note per goal, step, or idea
   skills.json.migrated         the old single-file tree, read once into notes
 
 <repo>/.dum/
