@@ -5,7 +5,7 @@
 // never means adding another way for the agent to be heard - there is exactly
 // one, and it is the store.
 
-import React, { useEffect, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { Chat } from "./Chat.tsx";
 import { Stage } from "./Stage.tsx";
@@ -18,19 +18,46 @@ import type { Prompt, Store } from "../store.ts";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+type Focus = "input" | "tree" | "code";
+
 export function App({ store, layout }: { store: Store; layout: Node }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { stdout } = useStdout();
   const [tick, setTick] = useState(0);
-  // Only two things want the keyboard: the tree and the field. Tab is the
-  // whole focus model, which is as much as four panes should need.
-  const [focus, setFocus] = useState<"input" | "tree">("input");
+  // Three things want the keyboard: the field, the tree, and the file. Tab
+  // walks them in a ring and shift-tab walks it backwards, which is the whole
+  // focus model and as much as four panes should need.
+  const [focus, setFocus] = useState<Focus>("input");
+  // While the editor is taking text, tab is two spaces and not a focus change.
+  const [typing, setTyping] = useState(false);
+
+  // The file is only somewhere to go while the stage is showing one.
+  const hasCode = state.stage.kind === "code" && state.code !== null;
+  const ring: Focus[] = hasCode ? ["input", "code", "tree"] : ["input", "tree"];
 
   useInput((ch, key) => {
-    if (key.tab) return setFocus((f) => (f === "input" ? "tree" : "input"));
+    if (key.tab && !typing) {
+      const step = key.shift ? -1 : 1;
+      return setFocus((f) => ring[(ring.indexOf(f) + step + ring.length) % ring.length]!);
+    }
     // A chord, because the field owns every plain key while you are typing.
     if (key.ctrl && ch === "t") return store.toggleTranscript();
   });
+
+  useEffect(() => {
+    if (focus === "code" && !hasCode) setFocus("input");
+  }, [focus, hasCode]);
+
+  const toInput = useCallback(() => setFocus("input"), []);
+  const openFile = useCallback(
+    (p: string) => {
+      store.openFile(p);
+      setFocus("code");
+    },
+    [store],
+  );
+  const saveFile = useCallback((p: string, body: string) => store.saveFile(p, body), [store]);
+  const reloadFile = useCallback((p: string) => store.openFile(p), [store]);
 
   useEffect(() => {
     if (!state.busy) return;
@@ -52,8 +79,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             width={at.width}
             height={at.height}
             focused={focus === "tree"}
-            showing={state.code?.tool === "open" ? state.code.path : undefined}
-            onOpen={(p) => store.openFile(p)}
+            showing={state.code?.path}
+            onOpen={openFile}
           />
         );
       case "chat":
@@ -66,6 +93,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             transcript={state.transcript}
             width={at.width}
             height={at.height}
+            focused={focus === "code"}
+            onSave={saveFile}
+            onReload={reloadFile}
+            onLeave={toInput}
+            onTyping={setTyping}
           />
         );
       case "cast":
@@ -86,9 +118,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         <Text color="#87af87">{`${state.skills.known} known`}</Text>
         {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
         <Box flexGrow={1} />
-        <Text dimColor>
-          {focus === "tree" ? "tab: back   j/k   h/l   ⏎ open" : "tab: files   ? asks anything   ctrl-t: transcript"}
-        </Text>
+        <Text dimColor>{hint(focus, typing, hasCode)}</Text>
       </Box>
 
       <Box height={body}>
@@ -112,6 +142,14 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       </Box>
     </Box>
   );
+}
+
+function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
+  if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
+  if (focus === "code") {
+    return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   / find   esc: back";
+  }
+  return `tab: ${hasCode ? "file" : "files"}   ? asks anything   ctrl-t: transcript`;
 }
 
 function promptFor(p: Prompt): string {

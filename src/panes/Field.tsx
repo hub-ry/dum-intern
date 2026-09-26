@@ -33,7 +33,10 @@ export function Field({
     }
     if (key.leftArrow) return setAt(Math.max(0, at - 1));
     if (key.rightArrow) return setAt(Math.min(value.length, at + 1));
-    if (key.backspace || key.delete) {
+    // Ink tells the two apart: fn-delete on a Mac and the delete key on a
+    // PC keyboard remove the character under the cursor, not the one before.
+    if (key.delete) return setValue(value.slice(0, at) + value.slice(at + 1));
+    if (key.backspace) {
       if (!at) return;
       setValue(value.slice(0, at - 1) + value.slice(at));
       return setAt(at - 1);

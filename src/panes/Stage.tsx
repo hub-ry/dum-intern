@@ -18,14 +18,37 @@ export function Stage({
   transcript,
   width,
   height,
+  focused,
+  onSave,
+  onReload,
+  onLeave,
+  onTyping,
 }: {
   stage: StageT;
   code: CodeView | null;
   transcript: Entry[];
   width: number;
   height: number;
+  focused: boolean;
+  onSave: (path: string, body: string) => string | null;
+  onReload: (path: string) => void;
+  onLeave: () => void;
+  onTyping: (typing: boolean) => void;
 }) {
-  if (stage.kind === "code") return <Code code={code} width={width} height={height} />;
+  if (stage.kind === "code") {
+    return (
+      <Code
+        code={code}
+        width={width}
+        height={height}
+        focused={focused}
+        onSave={onSave}
+        onReload={onReload}
+        onLeave={onLeave}
+        onTyping={onTyping}
+      />
+    );
+  }
 
   if (stage.kind === "answer") {
     return (

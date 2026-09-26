@@ -644,6 +644,17 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
    */
   const openBlocks = new Map<number, { name: string; buf: string }>();
 
+  /**
+   * Writes the gate let through, by tool-use id, until their result arrives.
+   *
+   * The pane learns a write was allowed from canUseTool, which runs BEFORE
+   * the tool does. The file is only on disk once the tool result comes back,
+   * and that is the moment the pane may show the real file and let you edit
+   * it. A denied call gets a result too, but `landed` ignores anything the
+   * gate did not mark as ran.
+   */
+  const landing = new Map<string, string>();
+
   function onStreamEvent(ev: any) {
     if (ev?.type === "content_block_start" && ev.content_block?.type === "tool_use") {
       openBlocks.set(ev.index, { name: ev.content_block.name, buf: "" });
@@ -735,10 +746,24 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           if (b.type === "text" && b.text?.trim()) {
             store.say(b.text.trim());
           }
+          if (b.type === "tool_use" && b.id && WATCHED[b.name]) {
+            const path = detail(repo.root, b.input);
+            if (path) landing.set(b.id, path);
+          }
           // Tool calls are NOT rendered here. They are rendered from canUseTool,
           // which is the only place that knows whether the call was allowed or
           // refused - printing at this point shows a denied write exactly like a
           // successful one, which is a terminal that lies about what happened.
+        }
+        continue;
+      }
+      if (msg.type === "user") {
+        const content = msg.message?.content;
+        for (const b of Array.isArray(content) ? content : []) {
+          const path = b.type === "tool_result" ? landing.get(b.tool_use_id) : undefined;
+          if (!path) continue;
+          landing.delete(b.tool_use_id);
+          store.landed(path);
         }
         continue;
       }

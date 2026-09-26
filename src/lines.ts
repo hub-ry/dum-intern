@@ -139,6 +139,39 @@ export function clip(s: string, width: number): string {
   return out + "…\x1b[0m";
 }
 
+/**
+ * Columns [from, to) of a styled string.
+ *
+ * The colour in force at `from` is re-opened at the start and everything is
+ * closed at the end, so a window cut out of the middle of a coloured token
+ * renders in that token's colour and does not leak it into the next thing
+ * drawn. This is what lets the editor scroll sideways through highlighted
+ * lines and put a cursor in the middle of one.
+ */
+export function slice(s: string, from: number, to: number): string {
+  const ESC = /\x1b\[[0-9;]*m/y;
+  let out = "";
+  let seen = 0;
+  let active = "";
+  for (let i = 0; i < s.length && seen < to; ) {
+    ESC.lastIndex = i;
+    const esc = ESC.exec(s);
+    if (esc) {
+      active = esc[0] === "\x1b[0m" ? "" : esc[0];
+      if (seen > from) out += esc[0];
+      i += esc[0].length;
+      continue;
+    }
+    if (seen >= from) {
+      if (seen === from && active) out += active;
+      out += s[i];
+    }
+    seen++;
+    i++;
+  }
+  return out && active ? out + "\x1b[0m" : out;
+}
+
 /** Visible length, with the escape sequences discounted. */
 export function printable(s: string): string {
   // eslint-disable-next-line no-control-regex

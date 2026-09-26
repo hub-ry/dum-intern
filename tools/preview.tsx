@@ -122,6 +122,11 @@ if (scene === "spec") {
       "- what happens after N failed attempts (you said `probably just log it`)",
     ].join("\n"),
   );
+} else if (scene === "open") {
+  // A real file from this repo, so the gutter, the scrollbar and the
+  // sideways clipping are exercised by something with the shape of code.
+  store.openFile("src/store.ts");
+  void store.askQuestion("what next?", "");
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");
   store.toggleTranscript();

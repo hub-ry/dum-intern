@@ -12,7 +12,8 @@
 // into `session.ts` or `wizard.ts`. Two renderers subscribe to this today (Ink
 // and the plain line-printer) and neither one is visible from the agent side.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, normalize } from "node:path";
 import type { Mode } from "./session.ts";
 
 export type Outcome = "ran" | "held" | "refused";
@@ -59,6 +60,15 @@ export type CodeView = {
   body: string;
   live: boolean;
   outcome: Outcome | null;
+  /**
+   * True once `body` is the file as it is on disk, which is the only thing
+   * worth editing. False while a write streams, for a write that was held or
+   * refused (there is no file), and in the gap between the gate allowing a
+   * write and the write finishing.
+   */
+  onDisk: boolean;
+  /** The line to land on when the editor first shows this. */
+  at?: number;
 };
 
 /**
@@ -208,7 +218,51 @@ export class Store {
     if (code?.live && code.tool === tool && code.body === body && code.path === path) return;
     // Writing pulls the stage back to the code: whatever you were reading, the
     // intern putting a file on screen is the more urgent thing.
-    this.patch({ code: { tool, path, body, live: true, outcome: null }, stage: { kind: "code" } });
+    this.patch({ code: { tool, path, body, live: true, outcome: null, onDisk: false }, stage: { kind: "code" } });
+  }
+
+  /**
+   * A write the gate allowed has finished.
+   *
+   * Only now is the file on disk, so only now does the pane swap what the
+   * intern SAID it would write for what is actually there - for an Edit that
+   * is the whole file rather than the replaced fragment, opened at the edit.
+   * The gate's verdict fires before the tool runs, which is why this cannot
+   * happen in toolEvent.
+   */
+  landed(path: string) {
+    const code = this.state.code;
+    if (!code || code.path !== path || code.outcome !== "ran" || code.onDisk) return;
+    let file: string;
+    try {
+      file = readFileSync(`${this.state.root}/${path}`, "utf8");
+    } catch {
+      return;
+    }
+    const hit = code.body ? file.indexOf(code.body) : -1;
+    const at = hit >= 0 ? file.slice(0, hit).split("\n").length - 1 : 0;
+    this.patch({ code: { ...code, body: file, onDisk: true, at } });
+  }
+
+  /**
+   * Write a file you edited in the pane.
+   *
+   * Your edit, your file: it is not a tool call and the gate has no say. The
+   * one thing checked is that the path stays inside the repo, the same line
+   * the intern is held to. Returns what went wrong, or null.
+   */
+  saveFile(path: string, text: string): string | null {
+    if (!this.state.root) return "no repo to write into";
+    if (isAbsolute(path) || normalize(path).startsWith("..")) return `${path} is outside ${this.state.repo}`;
+    try {
+      writeFileSync(`${this.state.root}/${path}`, text);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    this.note(`you wrote ${path}`);
+    const code = this.state.code;
+    if (code && code.path === path) this.patch({ code: { ...code, body: text, onDisk: true } });
+    return null;
   }
 
   /**
@@ -221,13 +275,15 @@ export class Store {
    */
   openFile(path: string) {
     let body: string;
+    let onDisk = true;
     try {
       body = readFileSync(`${this.state.root}/${path}`, "utf8");
     } catch (err) {
       body = `could not read ${path}\n${(err as Error).message}`;
+      onDisk = false;
     }
     this.patch({
-      code: { tool: "open", path, body, live: false, outcome: null },
+      code: { tool: "open", path, body, live: false, outcome: null, onDisk },
       stage: { kind: "code" },
     });
   }

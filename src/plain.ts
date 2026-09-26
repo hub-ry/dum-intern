@@ -12,7 +12,6 @@
 
 import { stdout, stdin } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { readFileSync } from "node:fs";
 import { c, collapse, format } from "./lines.ts";
 import type { Prompt, Store } from "./store.ts";
 
@@ -48,21 +47,48 @@ export function thinking(label: string) {
  * answers are all sitting in memory.
  */
 export class Input {
-  private piped: string[] | null;
-  private rl: ReturnType<typeof createInterface> | null;
+  private rl: ReturnType<typeof createInterface> | null = null;
+  /** Piped lines that arrived before anyone asked. */
+  private queue: string[] = [];
+  private waiter: { resolve: (l: string) => void; reject: (e: Error) => void } | null = null;
+  private ended = false;
 
   constructor() {
-    this.piped = stdin.isTTY ? null : readFileSync(0, "utf8").split("\n");
-    while (this.piped?.length && this.piped[this.piped.length - 1] === "") this.piped.pop();
-    this.rl = this.piped ? null : createInterface({ input: stdin, output: stdout });
+    if (stdin.isTTY) {
+      this.rl = createInterface({ input: stdin, output: stdout });
+      return;
+    }
+    // Lines are read as they arrive, not slurped up front. A blocking read of
+    // fd 0 works for `echo y | dum` but throws EAGAIN on a pipe that is still
+    // open and non-blocking - which is every pipe from another process that is
+    // answering as it goes, the thing a script driving dum actually does.
+    // Queued because readline drops a line nobody is listening for.
+    const rl = createInterface({ input: stdin });
+    rl.on("line", (line) => {
+      if (this.waiter) {
+        const w = this.waiter;
+        this.waiter = null;
+        w.resolve(line);
+      } else this.queue.push(line);
+    });
+    rl.on("close", () => {
+      this.ended = true;
+      this.waiter?.reject(new Error("input ended - nothing was built"));
+      this.waiter = null;
+    });
+    this.rl = rl;
   }
 
   async ask(prompt: string): Promise<string> {
-    if (this.piped) {
-      if (!this.piped.length) throw new Error("input ended - nothing was built");
-      const line = this.piped.shift()!;
-      stdout.write(prompt + line + "\n");
-      return line;
+    if (!stdin.isTTY) {
+      const line =
+        this.queue.shift() ??
+        (this.ended
+          ? Promise.reject(new Error("input ended - nothing was built"))
+          : new Promise<string>((resolve, reject) => (this.waiter = { resolve, reject })));
+      const got = await line;
+      stdout.write(prompt + got + "\n");
+      return got;
     }
     return Promise.race([
       this.rl!.question(prompt),

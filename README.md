@@ -184,6 +184,21 @@ Paths get checked on the way through too. `cwd` doesn't confine the agent - it w
 Held and refused tool calls render differently from ones that ran. After a build, the wizard reads what got written against the spec I approved and only speaks up if they don't match.
 
 
+### The file is a buffer
+
+The wide pane used to `cat` the tail of whatever the intern was writing. Fine while it streams, useless the moment it stops: a 300-line file showed its last 30 and there was no way to see the rest.
+
+Now it is a buffer. Once a file is on disk it scrolls, searches and edits, and a file opened from the tree is that from the start. `tab` lands you in it, `i` types, `:w` writes, `esc` hands the keyboard back.
+
+The keys are vim's, because the tree beside it already speaks them. The arrows, page keys and home/end work in both modes anyway, so you can read a file without knowing any of it. Editing is `i`, `a`, `o`, `x`, `dd`, `u`, and the `/` and `:` lines. No visual mode, no counts, no registers beyond one line-wise one. It is for fixing the thing you just watched get written, not for living in.
+
+While a write streams the pane follows the tail and refuses edits. Once the write lands it swaps what the intern said it would write for the file as it is - for an Edit that means the whole file, opened at the edit, instead of the replaced fragment. The gate's verdict fires before the tool runs, so "landed" is its own signal, read off the tool result.
+
+Your edits are yours. Saving is not a tool call, the gate has no say, and the intern is not told. It sees the file the next time it reads it, which is the same rule as everything else here: nothing quietly feeds it context. A line in the transcript says `you wrote src/x.ts` so you can see it later.
+
+Buffers outlive the view. The intern starting a new file pulls the pane onto it, and unsaved edits to the last one stay where they were until you go back. If the intern writes a file you are mid-edit in, the pane says so and keeps yours; `:e` reloads and drops them. Dropping edits over a race the intern started is not a call the pane gets to make.
+
+
 ### Not done
 
 Quips render inline, not in a real second pane. Every quip gets written to `.dum/wizard.jsonl`, so the pane is a reader over that file.
@@ -197,16 +212,22 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 
 | Key | Action | Where |
 | :--- | :--- | :--- |
-| `tab` | switch between the input and the file tree | anywhere |
+| `tab` / `shift-tab` | input, file, file tree, and back around | anywhere |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `y` | approve the spec, anything else declines | spec |
 | `ctrl-t` | swap the stage to the full transcript and back | anywhere |
-| `j` / `k`, arrows | move | file tree |
+| `j` / `k`, arrows | move | file tree, file |
 | `h` / `l` | collapse / expand | file tree |
 | `enter` / `o` | open the file (only you see it, the intern doesn't) | file tree |
-| `g g` / `G` | top / bottom | file tree |
-| `ctrl-d` / `ctrl-u` | half page down / up | file tree |
+| `g g` / `G` | top / bottom | file tree, file |
+| `ctrl-d` / `ctrl-u` | half page down / up | file tree, file |
+| `h` / `l`, `w` / `b`, `0` / `$` | left / right, by word, line ends | file |
+| `/` text, `n` / `N` | find, next / previous | file |
+| `i` `a` `o` `O` | start typing; `esc` stops | file |
+| `x` `dd` `D` `J` `yy` `p` `u` `ctrl-r` | the usual | file |
+| `:w` or `ctrl-s`, `:q`, `:e`, `:` number | write, leave, reload from disk, go to line | file |
+| `esc` | back to the input | file |
 | `exit` or empty line | end the session | "what next?" |
 
 
