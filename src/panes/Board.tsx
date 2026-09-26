@@ -170,7 +170,7 @@ function Reading({
         <Text bold color={color}>
           {title}
         </Text>
-        <Text dimColor>{where || "   ⇧tab: back to the characters"}</Text>
+        <Text dimColor>{where || "   ⇧tab: back"}</Text>
       </Text>
       {subtitle ? <Text dimColor>{subtitle}</Text> : null}
       {shown.map((line, i) => (

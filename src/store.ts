@@ -486,7 +486,7 @@ export class Store {
   private park<T = string>(prompt: Prompt, entryId: number): Promise<T> {
     // dum asking something takes the characters' side back from help-type
     // boards. A lesson or reply stays up, with the question at its foot.
-    if (prompt?.type === "question" && this.state.stage.kind === "info") {
+    if (prompt?.type === "question" && prompt.choices && this.state.stage.kind === "info") {
       this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
     }
     const early = this.typedAhead.shift();
