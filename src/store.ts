@@ -129,6 +129,9 @@ export class Store {
   /** Set by the runner: `!cmd` - run it in a real shell. "" for an interactive shell. */
   onShell: ((cmd: string) => void) | null = null;
 
+  /** Set by the runner: add a skill they can write without AI, or take one off. */
+  onSkillEdit: ((action: "add" | "forget", name: string, lang: string) => void) | null = null;
+
   /** Set by the runner: a rule for their taste file. */
   onTaste: ((rule: string) => void) | null = null;
 
@@ -183,6 +186,17 @@ export class Store {
     const ex = /^:\s*(run|graph|log|help|shell)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
+      return;
+    }
+    // `:skill <name> [in <lang>]` and `:forget <name>`: their tree, edited by them.
+    const sk = /^:\s*skill\s+(.+?)(?:\s+in\s+([\w+#.]+))?\s*$/i.exec(text.trim());
+    if (sk) {
+      this.onSkillEdit?.("add", sk[1]!.trim(), sk[2] ?? "");
+      return;
+    }
+    const fg = /^:\s*forget\s+(.+)$/i.exec(text.trim());
+    if (fg) {
+      this.onSkillEdit?.("forget", fg[1]!.trim(), "");
       return;
     }
     // `:taste <rule>` - a rule in their words, for this session and every one after.
@@ -361,6 +375,8 @@ export class Store {
           ":graph    the skill graph, in your browser",
           ":log      everything said so far, and back",
           ":taste x  a rule for how dum should work, kept for every session",
+          ":skill x [in lang]  add a skill you can write from a blank file, no AI",
+          ":forget x  take a skill off your tree",
           "tab       input, file, file tree",
           "",
           "answering a question: your answer, idk, or type it",

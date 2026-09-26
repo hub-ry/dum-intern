@@ -41,6 +41,7 @@ type Args = {
   next: number | null;
   graph: boolean;
   learn: string[] | null;
+  add: string[] | null;
 };
 
 function parse(args: string[]): Args {
@@ -58,6 +59,7 @@ function parse(args: string[]): Args {
   let next: number | null = null;
   let graph = false;
   let learnArgs: string[] | null = null;
+  let addArgs: string[] | null = null;
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -74,14 +76,15 @@ function parse(args: string[]): Args {
     else if (a === "--projects") list = true;
     else if (a === "--graph" || a === "-g") graph = true;
     else if (a === "--learn") learnArgs = args.slice(i + 1);
+    else if (a === "--add") addArgs = args.slice(i + 1);
     else if (a === "--next") {
       const n = Number(args[i + 1]);
       next = Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 1;
       if (Number.isInteger(n) && n > 0) i++;
     } else rest.push(a);
-    if (forget !== null || scan !== null || queue !== null || rebuild !== null || learnArgs !== null) break;
+    if (forget !== null || scan !== null || queue !== null || rebuild !== null || learnArgs !== null || addArgs !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph, learn: learnArgs };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph, learn: learnArgs, add: addArgs };
 }
 
 /** The tree, printed. */
@@ -479,6 +482,43 @@ function openInBrowser(path: string) {
   }
 }
 
+const RULE = "only add what you can write from a blank file, completely without AI.";
+
+const EMPTY_TREE = [
+  "dum pitches everything at what's on your tree, so an empty one means",
+  "starting from the basics. If you already know some things, add them:",
+  "",
+  "  :skill for loops in python",
+  "  :skill structs in c",
+  "  :skill recursion",
+  "",
+  `The rule: ${RULE}`,
+  "Anything you add gets one quick check the first time a build leans on it.",
+  "",
+  "Then ask for something.",
+].join("\n");
+
+/** Put a skill on the tree as theirs, by their word. */
+function addSkill(name: string, lang: string): string {
+  const t = skills.read();
+  const hit = skills.find(t, name);
+  if (hit && hit.solid && !hit.claimed) return `${hit.name} is already on your tree.`;
+  // A fumble in front of dum outweighs a claim: show it instead.
+  if (hit && !hit.solid) return `${hit.name} is on your tree as shaky - it came up in a session and didn't hold. Explain it or type it next time it comes up, and it'll count.`;
+  skills.write(
+    skills.claim(t, { name, breadth: "general", requires: [], why: "added by hand: can write it without AI", ...(lang ? { lang } : {}) }, cwd()),
+  );
+  const l = lang ? skills.langName(lang) : "";
+  return `${name}${l ? ` (${l})` : ""} is on your tree.\n\nThe rule: ${RULE}\nThe first build that leans on it checks it once.`;
+}
+
+function forgetSkill(name: string): string {
+  const hit = skills.find(skills.read(), name);
+  if (!hit) return `no skill called "${name}".`;
+  skills.remove(hit.name);
+  return `${hit.name} is off your tree. dum will ask about it again.`;
+}
+
 /** The repo root, or "" outside one. */
 function repoRoot(): string {
   try {
@@ -489,7 +529,7 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs, add: addArgs } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works from anywhere -
   // only "known here" needs a repo.
@@ -503,6 +543,16 @@ async function main() {
   if (next !== null) return nextProjects(next);
   if (graph) return showGraph();
   if (learnArgs !== null) return learnTopic(learnArgs);
+  if (addArgs !== null) {
+    const at = addArgs.indexOf("--in");
+    const name = (at < 0 ? addArgs : addArgs.slice(0, at)).join(" ").trim();
+    if (!name) {
+      console.error(`\n  usage: dum --add "<skill>" [--in <language>]   (${RULE})\n`);
+      exit(1);
+    }
+    console.log(`\n  ${addSkill(name, at < 0 ? "" : addArgs[at + 1] ?? "").split("\n").join("\n  ")}\n`);
+    return;
+  }
   if (forget !== null) {
     if (!forget) {
       console.error(`\n  usage: dum --forget <skill name>   (\`dum --skills\` lists them)\n`);
@@ -526,6 +576,13 @@ async function main() {
   store.setSkills(skills.summary(skills.read(), repo.root));
   // Before a session starts; the session replaces it with one that also tells the intern.
   store.onTaste = (rule) => taste.add(rule);
+  store.onSkillEdit = (action, name, lang) => {
+    const msg = action === "add" ? addSkill(name, lang) : forgetSkill(name);
+    store.setSkills(skills.summary(skills.read(), repo.root));
+    store.show(action === "add" ? "added" : "forgot", msg);
+  };
+  // An empty tree is where people go wrong: say how to fill it, once, up front.
+  if (!skills.read().skills.length) store.show("your tree is empty", EMPTY_TREE);
   store.onGraph = () => {
     void showGraph(true).then((out) => store.note(out ? `graph opened in your browser: ${out.replace(homedir(), "~")}` : "couldn't draw the graph."));
   };

@@ -141,3 +141,17 @@ test("with a file open, :w in the input goes to the file, not the intern", async
   assert.deepEqual(ran, ["w", "31"]);
   assert.equal(await reply, ":w", "the first :w, with no file open, was an answer");
 });
+
+test(":skill and :forget edit the tree, and never reach the intern", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  const edits: string[][] = [];
+  s.onSkillEdit = (a, n, l) => void edits.push([a, n, l]);
+  const reply = s.askQuestion("q?", "");
+  s.submit(":skill for loops in python");
+  s.submit(":skill recursion");
+  s.submit(":forget recursion");
+  s.submit("an answer");
+  assert.deepEqual(edits, [["add", "for loops", "python"], ["add", "recursion", ""], ["forget", "recursion", ""]]);
+  assert.equal(await reply, "an answer");
+});

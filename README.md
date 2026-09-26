@@ -126,6 +126,33 @@ The trackpad scrolls the pane under the pointer, focused or not. Full-screen pro
 The cost is plain drag-to-select. Option-drag (iTerm, Terminal.app) or shift-drag (most others) still selects text, and in tmux selection is tmux's anyway.
 
 
+### Starting where I am
+
+"Teach me vectors in C++" with nothing on my tree used to get built as vectors in C++. Now the intern holds a request against my tree in its language first. If the request rests on things I haven't done, it says so in one line and offers the first rung: one small, whole program at my level that leads toward it. For that request it offered "a tiny program that reads numbers and prints the biggest, and vectors as the next step", and built this:
+
+```cpp
+int x;
+while (std::cin >> x) {
+    // TODO(dum): running maximum
+    // if x is larger than biggest, biggest becomes x
+}
+```
+
+One screen, and one gap: a single `if`. The idiom I couldn't have worked out cold, `while (std::cin >> x)`, is given and working, so the next gap can use it. The spec's "not doing" line says "storing the numbers - that's what vectors will add".
+
+This follows [mastery learning](https://en.wikipedia.org/wiki/Mastery_learning) (prerequisites before what builds on them) and the [4C/ID model](https://www.4cid.org/wp-content/uploads/2021/04/vanmerrienboer-4cid-overview-of-main-design-principles-2021.pdf) (whole tasks, simple to complex). Beginners get guidance, not discovery. Minimal guidance [works worse for novices](https://www.tandfonline.com/doi/abs/10.1207/s15326985ep4102_1).
+
+It only works if the tree is right. "The most important single factor influencing learning is what the learner already knows. Ascertain this and teach him accordingly" ([Ausubel, 1968](https://www.simplypsychology.org/expository-method-of-teaching.html)). So the tree is mine to edit:
+
+```
+:skill for loops in python     add one, in a session
+:forget recursion              take one off
+dum --add "structs" --in c     from the command line
+```
+
+The rule, shown every time: only add what I can write from a blank file, completely without AI. What I add counts toward my level right away, and gets one quick check the first time a build leans on it. An empty tree says all this on the first screen.
+
+
 ### Small enough to hold
 
 A hole is what the research calls a completion problem: working code with a part missing, which I finish. Completion problems were proposed for teaching programming by [van Merriënboer and Krammer in 1987](https://www.uky.edu/~gmswan3/544/Cognitive_Load_&_ID.pdf). They beat plain worked examples because you can't skim the given part and still fill the gap.
@@ -522,6 +549,8 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `:log` | the full transcript on the stage | input, file's `:` line |
 | `:help` | all of this, on the stage | input |
 | `:taste` + a rule | how dum should work, kept for every session | input |
+| `:skill` x [in lang] | add a skill I can write from a blank file, no AI | input |
+| `:forget` x | take a skill off my tree | input |
 | `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
@@ -571,6 +600,7 @@ dum
 | `--rebuild <dir> [target]` | rebuild a project from scratch, milestone by milestone |
 | `-g`, `--graph` | the tree and the queue as a graph, in the browser |
 | `--learn "<topic>" [folder]` | a small project to learn a topic fast, feature by feature |
+| `--add "<skill>" [--in <lang>]` | add a skill I can write without AI |
 
 The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 

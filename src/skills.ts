@@ -365,7 +365,8 @@ export type Level = { name: "novice" | "developing" | "fluent"; count: number; g
 export function level(t: Tree, lang: string): Level {
   // Tagged with the language, or typed in it: an idea explained in words
   // isn't C++ they've written, but a hole they filled in C++ is.
-  const count = t.skills.filter((s) => s.solid && !s.claimed && (!lang || s.lang === lang || s.shownIn.includes(lang))).length;
+  // Claimed counts: they added it saying they can write it without AI.
+  const count = t.skills.filter((s) => s.solid && (!lang || s.lang === lang || s.shownIn.includes(lang))).length;
   if (count < 3) return { name: "novice", count, gap: 3, scaffold: true };
   if (count < 10) return { name: "developing", count, gap: 8, scaffold: true };
   return { name: "fluent", count, gap: Infinity, scaffold: false };
