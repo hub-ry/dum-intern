@@ -224,6 +224,9 @@ ask for something dum does, name the command in one line:
   :help                   everything else
 
 HOW TO INTERROGATE
+- A request brings at most four new concepts - about what working memory
+  holds. If it needs more, the spec builds the first part and names the next
+  request in one line. The gate refuses a fifth hole.
 - One decision per question. If it contains "and" or a parenthetical
   follow-up, it is two questions - split them, or drop the weaker one.
 - A question is a question, not a briefing. One sentence wherever it will go.
@@ -463,6 +466,9 @@ const WIZARD_WAIT = 2500;
 
 /** How long a hole sits on screen before dum fills it or leaves it. Long enough to read the marker. */
 const FLASH_MS = 900;
+
+/** New holes one request may open. */
+const MAX_HOLES = 4;
 
 /** The most code one fill may carry. One concept, not a function's worth of them. */
 const FILL_MAX_LINES = 12;
@@ -1063,6 +1069,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   /** A hole from an earlier spec got filled this turn, by explaining it. */
   let filledLate = false;
 
+  /** TODO(dum) blocks written under this request so far. */
+  let holesThisTurn = 0;
+
   /**
    * Tool inputs still being generated, by content-block index.
    *
@@ -1129,9 +1138,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         // off the tree, which blocks it may fill. Asked for in the prompt,
         // the intern once wrote a whole C++ file for someone with an empty
         // tree. This is the version that can't be skipped.
+        // Four new holes a request, at most: about what working memory holds
+        // (Cowan, 2001). A seven-hole skeleton is seven new things at once.
+        const more = mode === "understand" ? newHoles(repo.root, name, args) : 0;
+        if (more && holesThisTurn + more > MAX_HOLES) {
+          store.toolEvent(name, detail(repo.root, args), "refused", `more than ${MAX_HOLES} holes at once`);
+          return {
+            behavior: "deny" as const,
+            message: `That's ${holesThisTurn + more} holes in one request - at most ${MAX_HOLES}, about what working memory holds at once. Don't merge blocks to fit: that's the same load in bigger pieces. Build the part that fits in ${MAX_HOLES} concepts, and name the rest as the next request in one line.`,
+          };
+        }
         const leak = mode === "understand" ? looseCode(name, args) : [];
         if (leak.length) {
-          store.toolEvent(name, detail(repo.root, args), "refused");
+          store.toolEvent(name, detail(repo.root, args), "refused", "code outside a hole");
           return {
             behavior: "deny" as const,
             message: `In understand mode, code only goes in through holes. These lines aren't in a ${todos.MARKER} block: ${leak
@@ -1140,8 +1159,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               .join(", ")}${leak.length > 3 ? ` (+${leak.length - 3} more)` : ""}. Write the file as comments and TODO(dum) blocks only - includes, imports and control flow too - then call fill_todo for each block. dum fills the ones on their tree; the rest are theirs to type or explain.`,
           };
         }
+        holesThisTurn += more;
         if (erasesHole(repo.root, name, args)) {
-          store.toolEvent(name, detail(repo.root, args), "refused");
+          store.toolEvent(name, detail(repo.root, args), "refused", "a hole is filled through dum, not edited");
           return {
             behavior: "deny" as const,
             message: "TODO(dum) blocks are filled through fill_todo, never edited directly.",
@@ -1236,6 +1256,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         if (!approved && gateEngaged) store.note(filledLate ? "nothing else was built - this turn had no spec of its own." : "spec not approved - nothing was built.");
         gateEngaged = false;
         filledLate = false;
+        holesThisTurn = 0;
 
         // The wizard catches. Fires after every build and says nothing unless
         // the work actually departs from the spec that authorised it - silence
@@ -1314,6 +1335,26 @@ export function notAnAnswer(reply: string): boolean {
   return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
     reply.trim(),
   );
+}
+
+/** How many TODO(dum) blocks a Write or Edit would add. */
+export function newHoles(root: string, name: string, args: Record<string, unknown>): number {
+  const count = (s: unknown) => todos.spans(String(s ?? "")).length;
+  if (name === "Write") {
+    let now = "";
+    try {
+      now = readFileSync(resolve(root, String(args.file_path ?? "")), "utf8");
+    } catch {
+      /* new file */
+    }
+    return Math.max(0, count(args.content) - count(now));
+  }
+  if (name === "Edit") return Math.max(0, count(args.new_string) - count(args.old_string));
+  if (name === "MultiEdit") {
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    return Math.max(0, edits.reduce((a: number, e: any) => a + count(e?.new_string) - count(e?.old_string), 0));
+  }
+  return 0;
 }
 
 /** Code lines a Write or Edit would add outside any hole, in a gated source file. */

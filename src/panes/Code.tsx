@@ -267,7 +267,7 @@ const VERB: Record<string, string> = {
 function status(c: CodeView, b: Buf): string {
   if (c.live || c.tool === "fill") return `${VERB[c.tool] ?? "writing"}…`;
   if (c.outcome === "held") return "held - no spec yet, this was not written";
-  if (c.outcome === "refused") return "refused - outside the repo, this was not written";
+  if (c.outcome === "refused") return `refused - ${c.why ?? "outside the repo"}, this was not written`;
   if (c.outcome === "ran") return c.onDisk ? "written" : "writing…";
   if (b.readOnly) return b.readOnly;
   return "";

@@ -272,14 +272,15 @@ function quipLines(text: string, about: string, width: number): string[] {
 /** Lines of a fill shown in the transcript before it points at the file. */
 const FILL_SHOWN = 12;
 
-function toolLine(name: string, detail: string, outcome: Outcome): string {
+function toolLine(name: string, detail: string, outcome: Outcome, why?: string): string {
   // A hole isn't a refusal of anything. It's dum deciding, off the tree, that
   // this piece is theirs - so it reads as an invitation, in the gutter's colour.
   if (name === "hole") return `${c.amber("▌")} ${c.bold("hole")}${c.dim("  " + detail)}${c.amber("  (yours to type)")}`;
   const mark = outcome === "ran" ? c.dim("·") : outcome === "held" ? c.amber("⊘") : c.red("✗");
   const label = outcome === "ran" ? c.dim(name) : c.bold(name);
-  const note =
-    outcome === "held"
+  const note = why
+    ? (outcome === "held" ? c.amber : c.red)(`  (${outcome} - ${why})`)
+    : outcome === "held"
       ? c.amber("  (held - no spec yet)")
       : outcome === "refused"
         ? c.red("  (refused - outside the repo)")
@@ -311,7 +312,7 @@ export function format(e: Entry, width: number): string[] {
     case "quip":
       return quipLines(e.text, e.about, width);
     case "tool":
-      return [toolLine(e.name, e.detail, e.outcome)];
+      return [toolLine(e.name, e.detail, e.outcome, e.why)];
     case "fill": {
       // The code itself, not just that it happened. A skill you hold lets you
       // skip typing a piece; it never lets the piece arrive unseen.

@@ -122,3 +122,16 @@ test("the stage flips back like alt-tab, and a long reply opens on it", async ()
   s.pageStage(-1);
   assert.equal(s.getSnapshot().stage.kind, "transcript");
 });
+
+test("holes a write would add are counted, not the ones already there", async () => {
+  const { newHoles } = await import("../src/session.ts");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const root = mkdtempSync(`${tmpdir()}/dum-holes-`);
+  const hole = (n: string) => `// TODO(dum): ${n}\n// does ${n}\n\n`;
+  assert.equal(newHoles(root, "Write", { file_path: "a.cpp", content: hole("a") + hole("b") + hole("c") }), 3);
+  writeFileSync(`${root}/a.cpp`, hole("a"));
+  assert.equal(newHoles(root, "Write", { file_path: "a.cpp", content: hole("a") + hole("b") }), 1);
+  assert.equal(newHoles(root, "Edit", { old_string: "x", new_string: hole("z") }), 1);
+  assert.equal(newHoles(root, "Read", {}), 0);
+});

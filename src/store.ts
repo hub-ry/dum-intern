@@ -37,7 +37,7 @@ export type Entry =
   | { kind: "lesson"; id: number; lesson: Lesson }
   | { kind: "quip"; id: number; text: string; about: string }
   | { kind: "spec"; id: number; spec: string; approved: boolean | null }
-  | { kind: "tool"; id: number; name: string; detail: string; outcome: Outcome }
+  | { kind: "tool"; id: number; name: string; detail: string; outcome: Outcome; why?: string }
   | { kind: "answer"; id: number; question: string; body: string }
   | { kind: "review"; id: number; text: string }
   | { kind: "fill"; id: number; path: string; concept: string; code: string }
@@ -71,6 +71,8 @@ export type CodeView = {
   body: string;
   live: boolean;
   outcome: Outcome | null;
+  /** What refused or held it, when it wasn't the usual reason. */
+  why?: string;
   /**
    * True once `body` is the file as it is on disk, which is the only thing
    * worth editing. False while a write streams, for a write that was held or
@@ -276,12 +278,13 @@ export class Store {
     this.append({ kind: "quip", text, about });
   }
 
-  toolEvent(name: string, detail: string, outcome: Outcome) {
-    this.append({ kind: "tool", name, detail, outcome });
+  /** `why` says what refused it, when it wasn't the usual reason for that outcome. */
+  toolEvent(name: string, detail: string, outcome: Outcome, why?: string) {
+    this.append({ kind: "tool", name, detail, outcome, ...(why ? { why } : {}) });
     // The gate has now ruled on the file the pane has been watching arrive.
     const code = this.state.code;
     if (code && code.path === detail) {
-      this.patch({ code: { ...code, live: false, outcome } });
+      this.patch({ code: { ...code, live: false, outcome, ...(why ? { why } : {}) } });
     }
   }
 
