@@ -34,8 +34,9 @@ export const DEFAULT: Node = {
   children: [
     { pane: "tree", size: 22 },
     { pane: "code", flex: 1 },
-    // Wide enough to hold a sentence under a face.
-    { pane: "cast", size: 38 },
+    // The characters' side, and the board when something's too big for a face:
+    // wide enough for a spec card.
+    { pane: "cast", size: 46 },
   ],
 };
 

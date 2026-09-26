@@ -100,6 +100,8 @@ export type State = {
    * help, a lesson, a spec.
    */
   reply: Stage | null;
+  /** What the middle shows: code only - the file or the shell. */
+  middle: "file" | "shell";
   /** Where a milestone folder stands: done of total, and what a unit is called. */
   progress: { done: number; total: number; unit: string } | null;
   /** The model behind each voice and the effort it runs at, as the SDK reported them. */
@@ -161,6 +163,7 @@ export class Store {
       suggestion: "",
       progress: null,
       reply: null,
+      middle: "file",
       models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
   }
@@ -505,12 +508,7 @@ export class Store {
 
   /** ←/→ on the stage: file, reply, log, whichever of them exist. */
   pageStage(step: 1 | -1) {
-    const pages: Stage[] = [
-      ...(this.state.code ? [{ kind: "code" as const }] : []),
-      ...(this.state.reply ? [this.state.reply] : []),
-      { kind: "transcript" as const },
-      { kind: "shell" as const },
-    ];
+    const pages: Stage[] = [...(this.state.code ? [{ kind: "code" as const }] : []), { kind: "shell" as const }];
     const fixed = (k: string) => k === "code" || k === "transcript" || k === "shell";
     const at = pages.findIndex((p) => (fixed(p.kind) ? p.kind === this.state.stage.kind : p === this.state.stage));
     this.patch({ stage: pages[(Math.max(0, at) + step + pages.length) % pages.length]! });
@@ -518,9 +516,12 @@ export class Store {
 
   /** Every mutation goes through here, so the snapshot identity is the signal. */
   private patch(p: Partial<State>) {
-    if (p.stage && p.stage !== this.state.stage) {
+    const next = p.stage;
+    if (next && next !== this.state.stage) {
       this.previous = this.state.stage;
-      if (isReply(p.stage)) p = { ...p, reply: p.stage };
+      if (isReply(next)) p = { ...p, reply: next };
+      if (next.kind === "code") p = { ...p, middle: "file" };
+      if (next.kind === "shell") p = { ...p, middle: "shell" };
     }
     this.state = { ...this.state, ...p };
     for (const fn of this.listeners) fn();

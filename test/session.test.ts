@@ -115,14 +115,13 @@ test("the stage flips back like alt-tab, and a long reply opens on it", async ()
   assert.equal(s.getSnapshot().stage.kind, "code");
   s.flipStage();
   assert.equal(s.getSnapshot().stage.kind, "reply");
-  s.pageStage(1);
-  assert.equal(s.getSnapshot().stage.kind, "transcript");
+  // The middle pages between code only: the file and the shell.
+  s.flipStage();
   s.pageStage(1);
   assert.equal(s.getSnapshot().stage.kind, "shell");
+  assert.equal(s.getSnapshot().middle, "shell");
   s.pageStage(1);
   assert.equal(s.getSnapshot().stage.kind, "code");
-  s.pageStage(-1);
-  assert.equal(s.getSnapshot().stage.kind, "shell");
 });
 
 test("holes a write would add are counted, not the ones already there", async () => {

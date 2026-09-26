@@ -6,6 +6,7 @@ import { Chat } from "./Chat.tsx";
 import { Stage } from "./Stage.tsx";
 import { Tree } from "./Tree.tsx";
 import { Cast } from "./Cast.tsx";
+import { Board, isBoard } from "./Board.tsx";
 import { Panes } from "./Panes.tsx";
 import { Field } from "./Field.tsx";
 import { allocate, type Box as Rect, type Node, type Pane } from "../layout.ts";
@@ -16,7 +17,7 @@ import { bar } from "../lines.ts";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-type Focus = "input" | "tree" | "stage";
+type Focus = "input" | "tree" | "stage" | "side";
 
 export function App({ store, layout }: { store: Store; layout: Node }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -28,7 +29,9 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   const [typing, setTyping] = useState(false);
 
   const hasCode = state.stage.kind === "code" && state.code !== null;
-  const ring: Focus[] = ["input", "stage", "tree"];
+  // The board is somewhere to go only while it's up.
+  const board = isBoard(state.stage);
+  const ring: Focus[] = board ? ["input", "side", "stage", "tree"] : ["input", "stage", "tree"];
 
   const inShell = focus === "stage" && state.stage.kind === "shell";
 
@@ -59,7 +62,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   // Opening the shell means you're about to type into it.
   useEffect(() => {
     if (state.stage.kind === "shell") setFocus("stage");
-  }, [state.stage.kind]);
+    if (focus === "side" && !board) setFocus("input");
+  }, [state.stage.kind, board, focus]);
 
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
   const cols = stdout?.columns ?? 80;
@@ -130,6 +134,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             height={at.height}
             focused={focus === "stage"}
             reply={state.reply}
+            last={state.middle}
             onPage={(step) => store.pageStage(step)}
             onSave={saveFile}
             onReload={reloadFile}
@@ -139,7 +144,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
           />
         );
       case "cast":
-        return <Cast state={state} width={at.width} />;
+        return isBoard(state.stage) ? (
+          <Board stage={state.stage} transcript={state.transcript} width={at.width} height={at.height} focused={focus === "side"} />
+        ) : (
+          <Cast state={state} width={at.width} />
+        );
     }
   };
 
@@ -202,7 +211,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
 function hint(focus: Focus, typing: boolean, hasCode: boolean, inShell = false): string {
   if (inShell) return "every key goes to the shell   ⇧tab: back";
   if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
-  if (focus === "stage" && !hasCode) return "tab: files   j/k   space/b   ←/→ pages   ⇧tab back";
+  if (focus === "side") return "tab: next   j/k   space/b   g/G   ⇧tab: characters";
   if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
