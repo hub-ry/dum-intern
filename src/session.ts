@@ -539,6 +539,25 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   }
   setOpen(open);
 
+  /**
+   * With holes open, what they say next might be explaining one instead of
+   * typing it. The intern is told which holes are open and what to do if so;
+   * whether it IS an explanation is its call, same as any answer.
+   */
+  function withHoles(text: string): string {
+    if (!open.length || text.startsWith("They say they've typed")) return text;
+    return [
+      `(Open holes they haven't filled: ${open.map((t) => `"${t.concept}" in ${t.path}`).join(", ")}.`,
+      "If what they say below explains one of those concepts, judge it like any answer. If it shows",
+      "they hold it, call note_understanding with solid=true and then fill_todo for that hole - dum",
+      "fills it in front of them. If it's close but missing something, ask ONE question that gets",
+      "them the rest, and don't fill it. If it's a new request instead, handle it as one; the holes",
+      "stay theirs.)",
+      "",
+      text,
+    ].join("\n");
+  }
+
   /** Put the first open hole under their cursor. */
   function handOff() {
     const t = open[0];
@@ -615,7 +634,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       mode === "understand" ? onboarding(skills.read()) : "",
       skills.describe(skills.read(), repo.root),
       describe(repo),
-      `THEIR REQUEST:\n${req}`,
+      `THEIR REQUEST:\n${withHoles(req)}`,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -643,7 +662,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       // would mean the second thing you asked for was never gated.
       approved = false;
       currentRequest = next;
-      yield userTurn(withAside(next));
+      yield userTurn(withAside(withHoles(next)));
     }
   }
 
@@ -774,9 +793,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         },
         async (args) => {
           const say = (text: string) => ({ content: [{ type: "text" as const, text }] });
-          if (!approved) return say("Not yet - holes are filled while building, after the spec is approved.");
           if (escapes(repo.root, args.path)) return say(`${args.path} is outside the repo.`);
           const path = rel(repo.root, args.path);
+          // A hole already left under an approved spec can be filled on any
+          // later turn - that's what explaining it afterwards is for.
+          const waiting = open.find((o) => o.path === path && skills.key(o.concept) === skills.key(args.concept));
+          if (!approved && !waiting) return say("Not yet - holes are filled while building, after the spec is approved.");
           const body = readRel(path);
           if (body === null) return say(`${path} doesn't exist. Write the file with its holes first.`);
           const at = todos.hole(body, args.concept);
@@ -821,6 +843,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           wrote.push(path);
           store.filled(path, args.concept.trim(), code);
           store.openFile(path, at);
+          if (!approved) filledLate = true;
+          if (waiting) {
+            setOpen(open.filter((o) => o !== waiting));
+            if (waiting.request && !open.some((o) => o.request === waiting.request)) hooks.onBuilt?.(waiting.request);
+          }
           return say("Filled.");
         },
       ),
@@ -943,6 +970,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
    * ever held.
    */
   let gateEngaged = false;
+
+  /** A hole from an earlier spec got filled this turn, by explaining it. */
+  let filledLate = false;
 
   /**
    * Tool inputs still being generated, by content-block index.
@@ -1096,8 +1126,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         await drainWizard();
         for (const why of blocked) store.note(`refused: ${why}`);
         blocked.length = 0;
-        if (!approved && gateEngaged) store.note("spec not approved - nothing was built.");
+        // A turn that filled an earlier hole did build something, even with
+        // no spec of its own - saying otherwise under the fill would be a lie.
+        if (!approved && gateEngaged) store.note(filledLate ? "nothing else was built - this turn had no spec of its own." : "spec not approved - nothing was built.");
         gateEngaged = false;
+        filledLate = false;
 
         // The wizard catches. Fires after every build and says nothing unless
         // the work actually departs from the spec that authorised it - silence

@@ -207,7 +207,7 @@ function currentLine(s: State): string {
   if (s.prompt?.type === "spec") return "that is the spec. build it?";
   if (s.prompt?.type === "next") {
     const t = s.todos[0];
-    if (t) return `your turn: ${t.concept} in ${t.path}. :w it, then say done.`;
+    if (t) return `your turn: ${t.concept} in ${t.path}. type it and say done, or explain it here.`;
     return s.suggestion ? `next up: ${s.suggestion}. say go, or ask for something else.` : "what next?";
   }
   if (s.busy) return "";

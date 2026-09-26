@@ -125,8 +125,8 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     stop = null;
     const v = (x: { model: string; effort: string }) => voiceName(x.model, x.effort);
     // Held until the effort is read back, which lands a beat after the
-    // model. If it never does, the first thing said releases it without.
-    const ready = s.models.intern.model && (s.models.intern.effort || s.transcript.length);
+    // model. If it never does, the intern's first line releases it without.
+    const ready = s.models.intern.model && (s.models.intern.effort || s.transcript.some((e) => e.kind === "say"));
     const said = ready
       ? `dum is ${v(s.models.intern)}${s.models.wizard.model ? `, the wizard is ${v(s.models.wizard)}` : ""}`
       : "";
@@ -162,7 +162,7 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
       hinted = s.prompt;
       // No editor here, so the hole is typed in yours - the line says where.
       const t = s.prompt.type === "next" ? s.todos[0] : undefined;
-      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - save it, then say done`)}`);
+      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - type it and say done, or explain it here`)}`);
       else if (s.prompt.type === "next" && s.suggestion) console.log(`  ${c.dim(`next up: ${s.suggestion} - say go`)}`);
       if (s.prompt.type === "question" && s.prompt.choices) console.log(`  ${c.dim("answer it · idk · type it")}`);
     }

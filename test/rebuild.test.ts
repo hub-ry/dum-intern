@@ -46,3 +46,20 @@ test("the target is a fresh git repo beside the original, never one with files",
   writeFileSync(`${base}/full/main.py`, "x");
   assert.match(prepare(`${base}/full`)!, /already has files/);
 });
+
+test("a learning project reads as one, and the old rebuild.json still loads", async () => {
+  const { slug, coverage } = await import("../src/learn.ts");
+  const text = context({ source: "", topic: "websockets", goal: "chat wall", milestones: r.milestones });
+  assert.match(text, /LEARNING PROJECT[\s\S]*learn websockets/);
+  assert.match(text, /Aim your questions\s+at websockets/);
+  assert.equal(slug("WebSockets & Server-Sent Events!"), "learn-websockets-server-sent-events");
+  assert.equal(slug("C++ templates"), "learn-c++-templates");
+  const tree = { skills: [{ name: "http", solid: true, claimed: false, breadth: "general" as const, requires: [], why: "", repos: [], at: "" }] };
+  assert.deepEqual(coverage([{ name: "HTTP", requires: [] }, { name: "websockets", requires: ["http"] }], tree), { held: ["http"], missing: ["websockets"] });
+  // Held only as a prerequisite still counts as something it rests on.
+  assert.deepEqual(coverage([{ name: "websockets", requires: ["http"] }], tree), { held: ["http"], missing: ["websockets"] });
+  const root = mkdtempSync(`${tmpdir()}/dum-rb-`);
+  mkdirSync(`${root}/.dum`);
+  writeFileSync(`${root}/.dum/rebuild.json`, JSON.stringify(r));
+  assert.deepEqual(load(root), r);
+});

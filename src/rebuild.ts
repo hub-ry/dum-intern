@@ -26,16 +26,33 @@ export const VOICE = { model: MODEL, effort: EFFORT };
 const TOOLS = ["Read", "Glob", "Grep"];
 
 export type Milestone = { request: string; done: boolean };
-export type Rebuild = { source: string; goal: string; milestones: Milestone[] };
+/**
+ * A folder built one milestone at a time. A rebuild has a `source` it was read
+ * from; a learning project has the `topic` it was designed to teach instead.
+ */
+export type Rebuild = { source: string; goal: string; milestones: Milestone[]; topic?: string };
 
-const file = (root: string) => `${root}/.dum/rebuild.json`;
+const file = (root: string) => `${root}/.dum/milestones.json`;
+/** Where rebuilds kept them before learning projects shared the format. */
+const legacy = (root: string) => `${root}/.dum/rebuild.json`;
 
 export function load(root: string): Rebuild | null {
+  let text: string;
   try {
-    const raw = JSON.parse(readFileSync(file(root), "utf8"));
+    text = readFileSync(file(root), "utf8");
+  } catch {
+    try {
+      text = readFileSync(legacy(root), "utf8");
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const raw = JSON.parse(text);
     if (!raw || typeof raw.goal !== "string" || !Array.isArray(raw.milestones)) return null;
     return {
       source: typeof raw.source === "string" ? raw.source : "",
+      ...(typeof raw.topic === "string" && raw.topic ? { topic: raw.topic } : {}),
       goal: raw.goal,
       milestones: raw.milestones
         .filter((m: any) => m && typeof m.request === "string")
@@ -70,13 +87,25 @@ export function built(r: Rebuild, request: string): Rebuild {
 export function context(r: Rebuild | null): string {
   if (!r) return "";
   const n = nextUp(r);
+  const list = r.milestones.map((m, i) => `${i + 1}. ${m.request}${m.done ? " (built)" : ""}`).join("  ");
+  if (r.topic) {
+    return `THIS IS A LEARNING PROJECT
+They asked to learn ${r.topic}, and "${r.goal}" was designed around it: small,
+and resting on skills they already hold wherever it could, so the new parts
+are the topic. Build it one feature at a time, the usual way - the gate, the
+questions, the holes. Pieces on skills they hold get filled in front of them.
+The rest are theirs: typed, or explained and then filled. Aim your questions
+at ${r.topic}, not at what's around it.
+Features: ${list}
+${n ? `Next up: ${n.index + 1}.` : "All features are built."}`;
+  }
   return `THIS IS A REBUILD
 They're rebuilding ${basename(r.source)} from scratch in this folder, to be able
 to explain every part of it. The original is not here and you can't read it -
 don't go looking. Build what each request asks, in this repo, the usual way:
 the gate, the questions, the holes. Pieces on skills they hold get filled in
 front of them; the rest are theirs to type.
-Milestones: ${r.milestones.map((m, i) => `${i + 1}. ${m.request}${m.done ? " (built)" : ""}`).join("  ")}
+Milestones: ${list}
 ${n ? `Next up: ${n.index + 1}.` : "All milestones are built."}`;
 }
 

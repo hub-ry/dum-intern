@@ -13,6 +13,7 @@ import * as projects from "./projects.ts";
 import * as planner from "./planner.ts";
 import * as rebuild from "./rebuild.ts";
 import * as graphs from "./graph.ts";
+import * as learn from "./learn.ts";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { c, wrap, voiceName } from "./lines.ts";
@@ -34,6 +35,7 @@ type Args = {
   list: boolean;
   next: number | null;
   graph: boolean;
+  learn: string[] | null;
 };
 
 function parse(args: string[]): Args {
@@ -52,6 +54,7 @@ function parse(args: string[]): Args {
   let list = false;
   let next: number | null = null;
   let graph = false;
+  let learnArgs: string[] | null = null;
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -67,14 +70,15 @@ function parse(args: string[]): Args {
     else if (a === "--plan") plan = true;
     else if (a === "--projects") list = true;
     else if (a === "--graph" || a === "-g") graph = true;
+    else if (a === "--learn") learnArgs = args.slice(i + 1);
     else if (a === "--next") {
       const n = Number(args[i + 1]);
       next = Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 1;
       if (Number.isInteger(n) && n > 0) i++;
     } else rest.push(a);
-    if (forget !== null || scan !== null || queue !== null || rebuild !== null) break;
+    if (forget !== null || scan !== null || queue !== null || rebuild !== null || learnArgs !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph, learn: learnArgs };
 }
 
 /**
@@ -373,6 +377,65 @@ async function rebuildProject(args: string[]) {
   console.log(`\n  cd ${target.replace(homedir(), "~")} && dum\n`);
 }
 
+/**
+ * A project designed to teach one topic fast, set up to build feature by
+ * feature. Nothing about what they know is assumed: the design reads the tree,
+ * and says how much of the project it already covers.
+ */
+async function learnTopic(args: string[]) {
+  const [topic, to] = args;
+  if (!topic?.trim()) {
+    console.error(`\n  usage: dum --learn "<topic>" [folder]   (the folder defaults to ./${learn.slug("websockets")} and friends)\n`);
+    exit(1);
+  }
+  const target = resolve(to ?? learn.slug(topic));
+  const why = rebuild.prepare(target);
+  if (why) {
+    console.error(`\n  ${c.red("✗")} ${why}\n`);
+    exit(1);
+  }
+  const t = skills.read();
+  const bar = progress(`designing a project for ${topic}`, learn.VOICE);
+  const d = await learn.design(topic, t, bar.set);
+  if (!d) {
+    bar.stop();
+    console.error(`\n  ${c.red("✗")} couldn't design one this time. try again.\n`);
+    exit(1);
+  }
+  bar.stop();
+  const { held, missing } = learn.coverage(d.needs, t);
+  // No stepping stones. Learning fast means the gaps are handled inside the
+  // project - typed, or explained and filled - not sent off to other ones.
+  projects.write([
+    {
+      title: d.title,
+      kind: "goal",
+      unlocks: missing,
+      after: [],
+      leadsTo: "",
+      start: d.features[0]!,
+      planned: new Date().toISOString().slice(0, 10),
+      body: `${d.summary}\n\n${d.why}\n\nLearning ${topic}, in ${target.replace(homedir(), "~")}.`,
+    },
+  ]);
+  rebuild.save(target, { source: "", topic, goal: d.title, milestones: d.features.map((request) => ({ request, done: false })) });
+
+  const total = held.length + missing.length;
+  const pct = total ? Math.round((held.length / total) * 100) : 0;
+  console.log(`\n  ${c.green("✓")} ${d.title}  ${c.dim(d.summary)}`);
+  if (d.why) for (const l of wrap(d.why, "    ", 76)) console.log(c.dim(l));
+  console.log();
+  d.features.forEach((f, i) => console.log(`  ${c.dim(String(i + 1).padStart(2))}  ${f}`));
+  console.log();
+  console.log(`  you hold ${held.length} of the ${total} skills it rests on (${pct}%). those get filled in front of you.`);
+  if (held.length) for (const l of wrap(`already yours: ${held.join(", ")}`, "  ", 78)) console.log(c.dim(l));
+  if (missing.length) {
+    for (const l of wrap(`new to you: ${missing.join(", ")}`, "  ", 78)) console.log(c.dim(l));
+    console.log(`  ${c.dim("type those when dum leaves them as holes, or explain them and dum fills them.")}`);
+  }
+  console.log(`\n  cd ${target.replace(homedir(), "~")} && dum\n`);
+}
+
 /** Project ideas that unlock the next skills on the tree, fastest first. */
 async function nextProjects(n: number) {
   const t = skills.read();
@@ -435,7 +498,7 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works
   // from anywhere - only "known here" needs a repo.
@@ -448,6 +511,7 @@ async function main() {
   if (list) return printProjects();
   if (next !== null) return nextProjects(next);
   if (graph) return showGraph();
+  if (learnArgs !== null) return learnTopic(learnArgs);
   if (forget !== null) {
     if (!forget) {
       console.error(`\n  usage: dum --forget <skill name>   (\`dum --skills\` lists them)\n`);
@@ -507,7 +571,7 @@ async function main() {
             if (next === r) return;
             rebuild.save(repo.root, next);
             const done = next.milestones.filter((m) => m.done).length;
-            store.note(`✓ milestone ${done} of ${next.milestones.length}: ${req}`);
+            store.note(`✓ ${next.topic ? "feature" : "milestone"} ${done} of ${next.milestones.length}: ${req}`);
           },
           suggest: () => {
             const r = rb();
@@ -518,9 +582,9 @@ async function main() {
     let request =
       fromArgs ||
       (holes.length
-        ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, "tab into the file, type it, :w, then say done. or ask for something else.")
+        ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, "tab into the file, type it, :w, and say done. or explain it here and dum fills it. or ask for something else.")
         : up
-          ? await store.askQuestion(`next up: ${up.request}`, `milestone ${up.index + 1} of ${rb()!.milestones.length} of ${rb()!.goal}. say go, or ask for something else.`)
+          ? await store.askQuestion(`next up: ${up.request}`, `${rb()!.topic ? "feature" : "milestone"} ${up.index + 1} of ${rb()!.milestones.length} of ${rb()!.goal}. say go, or ask for something else.`)
           : await store.askQuestion("what do you want?", "")
       ).trim();
     if (!request) {

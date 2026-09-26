@@ -158,6 +158,50 @@ The queue is a folder of notes in `~/.dum/projects/`, beside the skills, so one 
 Planning runs on Opus, not the Sonnet the voices use. It runs once, and everything after follows the map it draws. A wrong prerequisite is a project I get sent to build for nothing.
 
 
+### Asking to learn something
+
+```sh
+dum --learn "websockets"             # into ./learn-websockets
+dum --learn "websockets" ~/chat      # or anywhere empty
+```
+
+The fastest way to learn one thing is a project where it's the only new thing. So the designer reads my tree first and builds around what I already hold. The questions, holes and fills all land on the topic, not on whatever's around it.
+
+```
+  ✓ live chat room  A tiny Python websocket chat server and terminal client...
+
+   1  Start a websocket server that echoes back whatever a client sends.
+   2  Write a terminal client that connects, sends a typed line, and prints the reply.
+   ...
+
+  you hold 5 of the 14 skills it rests on (36%). those get filled in front of you.
+  already yours: http request-response, json encoding, python dictionaries, ...
+  new to you: asyncio basics, websocket handshake, websocket connection lifecycle, ...
+```
+
+Nothing about what I know is assumed. The percentage is counted against my tree in code, and the design is asked to list the skills of mine it uses by their tree names. The folder runs like a rebuild: `go` takes the next feature, and a feature is done once its holes are.
+
+No stepping stones, unlike a queued goal. Learning fast means the gaps get handled inside the project.
+
+
+### Explaining a hole fills it
+
+A hole doesn't have to be typed. At "your turn" I can explain the concept in plain words instead:
+
+```
+  your turn: websocket persistent connection in server.py
+  > unlike an http request, the websocket stays open after the handshake, so the handler
+    just loops over the connection: for each message, await sending it straight back...
+  + skill: websocket persistent connection   (not yet keeps it off)
+  ✓ fill  server.py: websocket persistent connection  (a skill you hold)
+    │     async for message in websocket:
+    │         await websocket.send(message)
+  ✓ feature 1 of 9: Start a websocket server that echoes back whatever a client sends.
+```
+
+The intern judges it like any answer. If I've got it, the skill goes on the tree, and since dum only fills what the tree holds, it now fills the hole, typed in where I can watch. If I'm close, I get one question. It works on any later turn, because the spec that left the hole was already approved. So if I hold half a project, that half fills as it's built, and the other half fills as I explain it.
+
+
 ### Rebuilding what I already have
 
 Having a project isn't the same as being able to explain it. Especially one I wrote fast, or with a model's help.
@@ -382,7 +426,8 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
 | `done` | check what I typed into the hole | "what next?" |
-| `go` | start the next milestone of a rebuild | "next up" |
+| `go` | start the next feature or milestone | "next up" |
+| an explanation | fills the hole it explains, if it holds up | "your turn" |
 | `not yet` [name] | don't count the skill just checked off | anywhere |
 | `y` | approve the spec, anything else declines | spec |
 | `ctrl-t` | swap the stage to the full transcript and back | anywhere |
@@ -427,6 +472,7 @@ dum
 | `--next [n]` | project ideas for the fastest next unlock |
 | `--rebuild <dir> [target]` | rebuild a project from scratch, milestone by milestone |
 | `-g`, `--graph` | the tree and the queue as a graph, in the browser |
+| `--learn "<topic>" [folder]` | a small project to learn a topic fast, feature by feature |
 
 The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 
@@ -444,7 +490,7 @@ The tree flags work from anywhere. Everything else needs a git repo, since the i
   session          so the next `dum` resumes the same intern
   wizard.jsonl     every quip
   todos.json       holes left for me to type
-  rebuild.json     a rebuild's milestones, and which are built
+  milestones.json  a rebuild's milestones or a learning project's features, and which are built
   debug.log        with DUM_DEBUG=1
   knowledge.json   the old per-repo record, folded into the tree once and left alone
 ```
