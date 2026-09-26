@@ -289,6 +289,16 @@ export class Wizard {
   }
 
   /**
+   * Which model is speaking. The pinned one straight away, then whatever the
+   * session reports - a session only says once its first turn runs, and a
+   * label that is blank until the first quip reads as nothing being there.
+   */
+  onModel(fn: (model: string) => void) {
+    fn(MODEL);
+    this.channel.onModel = fn;
+  }
+
+  /**
    * Started before the first question is even asked, so the process spawns
    * overlap the interrogation instead of being charged to the first answer.
    */

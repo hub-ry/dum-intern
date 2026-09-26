@@ -455,6 +455,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   }
 
   const wizard = new Wizard(repo);
+  wizard.onModel((m) => store.setModel("wizard", m));
   wizard.start();
 
   // Breadth: answers `?` questions and reviews finished builds. Started here
@@ -883,6 +884,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     for await (const msg of session as AsyncIterable<any>) {
       if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
         remember(repo, msg.session_id);
+        // Read off the session rather than assumed: the intern inherits the
+        // default model from their settings, so it's whatever that is today.
+        if (typeof msg.model === "string") store.setModel("intern", msg.model);
         continue;
       }
       if (msg.type === "stream_event") {

@@ -54,6 +54,8 @@ export class Channel {
   private closed = false;
   private label: string;
   private options: Options;
+  /** Called with the model the session actually resolved to, once it starts. */
+  onModel: ((model: string) => void) | null = null;
 
   // Written out rather than as parameter properties: Node strips types, it
   // does not compile them, and `constructor(private x: T)` needs compiling.
@@ -87,6 +89,10 @@ export class Channel {
       try {
         const session = query({ prompt: stream(), options: this.options });
         for await (const msg of session as AsyncIterable<any>) {
+          if (msg.type === "system" && msg.subtype === "init" && typeof msg.model === "string") {
+            this.onModel?.(msg.model);
+            continue;
+          }
           if (msg.type === "assistant") {
             // Only the last message counts. With a tool in play the model can
             // say "let me check" before the call, and that must never be glued

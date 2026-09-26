@@ -13,7 +13,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { load, framesFor, draw, type Sprite } from "../sprite.ts";
-import { wrap } from "../lines.ts";
+import { wrap, modelName } from "../lines.ts";
 import type { State } from "../store.ts";
 
 const ART = new URL("../art/", import.meta.url).pathname;
@@ -49,6 +49,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         state={wizardSaid.typing ? "talking" : "idle"}
         speaking={wizardSaid.typing}
         name="wizard"
+        model={state.models.wizard}
         nameColor="#d7a55f"
         text={wizardSaid.shown}
         width={inner}
@@ -60,6 +61,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         state={internState(state, internSaid.typing)}
         speaking={internSaid.typing}
         name="dum"
+        model={state.models.intern}
         nameColor="#87afd7"
         text={internSaid.shown}
         width={inner}
@@ -75,6 +77,7 @@ function Speaker({
   state,
   speaking,
   name,
+  model,
   nameColor,
   text,
   why,
@@ -86,6 +89,8 @@ function Speaker({
   state: string;
   speaking: boolean;
   name: string;
+  /** Which model is speaking, so a voice is never a mystery box. */
+  model?: string;
   nameColor: string;
   text: string;
   why?: string;
@@ -98,8 +103,11 @@ function Speaker({
     <Box flexDirection="column">
       <Face sprite={sprite} state={state} speaking={speaking} />
       <Box height={1} />
-      <Text color={nameColor} bold>
-        {name}
+      <Text wrap="truncate-end">
+        <Text color={nameColor} bold>
+          {name}
+        </Text>
+        {model ? <Text dimColor>{"  " + modelName(model)}</Text> : null}
       </Text>
       {(text ? wrap(text, "", width) : [""]).map((line, i) => (
         <Text key={i} dimColor={dim} wrap="truncate-end">

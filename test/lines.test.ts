@@ -42,3 +42,12 @@ test("a heading with inline code keeps the code's case and its colour", () => {
   assert.equal(printable(head!), "ADD median(xs) TO STATS.PY");
   assert.ok(!/\[\d+(;\d+)*M/.test(head!), "no uppercased escape codes");
 });
+
+test("model ids read the way people say them", async () => {
+  const { modelName } = await import("../src/lines.ts");
+  assert.equal(modelName("claude-opus-5-5"), "opus 5.5");
+  assert.equal(modelName("claude-sonnet-5"), "sonnet 5");
+  assert.equal(modelName("claude-haiku-4-5-20251001"), "haiku 4.5");
+  assert.equal(modelName("claude-fable-5-1"), "fable 5.1");
+  assert.equal(modelName("us.anthropic.claude-x"), "us.anthropic.claude-x");
+});

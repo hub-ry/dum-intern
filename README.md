@@ -153,6 +153,8 @@ Haiku got names wrong. Sonnet got that same lease case right 5 out of 5. Same wa
 
 The name is the whole product. A wrong one is worse than nothing, I'd repeat it in an interview.
 
+Each voice has its model next to its name, as the SDK reports it rather than as configured. The intern runs on whatever my default model is, so that label is how I find out it changed.
+
 Thinking off, effort medium, no settings files. Defaults took ~25s per quip, slower than me typing the next answer, so quips showed up after I'd moved on. Now a few seconds. Skipping settings also keeps my CLAUDE.md from overwriting the wizard's personality.
 
 

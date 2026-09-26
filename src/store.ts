@@ -109,6 +109,8 @@ export type State = {
   skills: { known: number; shaky: number };
   /** Holes the intern left for you to type, each one a skill to unlock. */
   todos: { concept: string; path: string }[];
+  /** The model behind each voice, as the SDK reported it. "" until known. */
+  models: { intern: string; wizard: string };
 };
 
 export class Store {
@@ -153,6 +155,7 @@ export class Store {
       stage: { kind: "code" },
       skills: { known: 0, shaky: 0 },
       todos: [],
+      models: { intern: "", wizard: "" },
     };
   }
 
@@ -336,6 +339,12 @@ export class Store {
   /** The skill tree changed. */
   setSkills(skills: { known: number; shaky: number }) {
     this.patch({ skills });
+  }
+
+  /** Which model is behind a voice. */
+  setModel(who: "intern" | "wizard", model: string) {
+    if (this.state.models[who] === model) return;
+    this.patch({ models: { ...this.state.models, [who]: model } });
   }
 
   /** The holes left for you to type changed. */

@@ -12,7 +12,7 @@
 
 import { stdout, stdin } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { c, collapse, format } from "./lines.ts";
+import { c, collapse, format, modelName } from "./lines.ts";
 import type { Prompt, Store } from "./store.ts";
 
 const WIDTH = 74;
@@ -112,6 +112,9 @@ export class Input {
  */
 export async function runPlain(store: Store, input: Input): Promise<void> {
   let printed = 0;
+  // Said once, when the intern's model is first known, and again only if a
+  // voice changes model - a line printer has no corner to keep it in.
+  let models = "";
   let wake: (() => void) | null = null;
   let stop: (() => void) | null = null;
 
@@ -120,6 +123,13 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     // Kill the spinner before printing: `\r` and fresh lines fight otherwise.
     stop?.();
     stop = null;
+    const said = s.models.intern
+      ? `dum is ${modelName(s.models.intern)}${s.models.wizard ? `, the wizard is ${modelName(s.models.wizard)}` : ""}`
+      : "";
+    if (said && said !== models) {
+      models = said;
+      console.log("  " + c.dim(said));
+    }
     for (; printed < s.transcript.length; printed++) {
       for (const line of collapse(format(s.transcript[printed]!, WIDTH)))
         console.log("  " + line);

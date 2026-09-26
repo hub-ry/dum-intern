@@ -39,6 +39,19 @@ export function wrap(text: string, indent = "", width = 74): string[] {
 }
 
 /**
+ * A model id as a person would say it: "claude-opus-5-5" is "opus 5.5".
+ *
+ * Only the claude-family-major-minor shape is shortened, with a trailing date
+ * stamp dropped. Anything else is shown as it came - an unfamiliar id printed
+ * in full beats a wrong guess at a friendly name.
+ */
+export function modelName(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[1m\])?$/.exec(id.trim());
+  if (!m) return id.trim();
+  return `${m[1]} ${m[2]}${m[3] ? "." + m[3] : ""}`;
+}
+
+/**
  * Markdown, rendered rather than shown.
  *
  * The spec is the one screen in this program you are asked to approve, and it
