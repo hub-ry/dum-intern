@@ -95,11 +95,6 @@ export type State = {
   todos: { concept: string; path: string }[];
   /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
   suggestion: string;
-  /**
-   * The last thing on the stage that wasn't the file or the log - a long reply, an answer,
-   * help, a lesson, a spec.
-   */
-  reply: Stage | null;
   /** Live comments on lines of files, by path: shown beside the code, never saved. */
   pins: Record<string, { line: number; text: string }[]>;
   /** A program running in the shell that your input goes to, by name. "" when none. */
@@ -115,7 +110,6 @@ export type State = {
 /** Past this, what dum says opens on the stage too. About six narrow lines. */
 const LONG_SAY = 170;
 
-const isReply = (s: Stage) => s.kind !== "code" && s.kind !== "transcript" && s.kind !== "shell";
 const isBoardKind = (s: Stage) => s.kind !== "code" && s.kind !== "shell";
 
 /** Words that are always for dum, even typed while the shell is showing. */
@@ -170,7 +164,6 @@ export class Store {
       todos: [],
       suggestion: "",
       progress: null,
-      reply: null,
       middle: "file",
       running: "",
       pins: {},
@@ -568,31 +561,10 @@ export class Store {
     this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
   }
 
-  /** The stage page before this one, for shift-tab. */
-  private previous: Stage | null = null;
-
-  /**
-   * shift-tab: back to the page you were just on, and again to come back - alt-tab for the
-   * stage.
-   */
-  flipStage() {
-    if (this.previous) this.patch({ stage: this.previous });
-  }
-
-  /** ←/→ on the stage: file, reply, log, whichever of them exist. */
-  pageStage(step: 1 | -1) {
-    const pages: Stage[] = [...(this.state.code ? [{ kind: "code" as const }] : []), { kind: "shell" as const }];
-    const fixed = (k: string) => k === "code" || k === "transcript" || k === "shell";
-    const at = pages.findIndex((p) => (fixed(p.kind) ? p.kind === this.state.stage.kind : p === this.state.stage));
-    this.patch({ stage: pages[(Math.max(0, at) + step + pages.length) % pages.length]! });
-  }
-
   /** Every mutation goes through here, so the snapshot identity is the signal. */
   private patch(p: Partial<State>) {
     const next = p.stage;
     if (next && next !== this.state.stage) {
-      this.previous = this.state.stage;
-      if (isReply(next)) p = { ...p, reply: next };
       if (next.kind === "code") p = { ...p, middle: "file" };
       if (next.kind === "shell") p = { ...p, middle: "shell" };
     }

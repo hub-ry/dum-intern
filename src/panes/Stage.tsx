@@ -10,7 +10,6 @@ import type { Entry, Stage as StageT, CodeView } from "../store.ts";
 export function Stage({
   stage,
   code,
-  reply,
   transcript,
   width,
   height,
@@ -20,13 +19,11 @@ export function Stage({
   onLeave,
   onTyping,
   onCommand,
-  onPage,
   last,
   pins,
 }: {
   stage: StageT;
   code: CodeView | null;
-  reply: StageT | null;
   transcript: Entry[];
   width: number;
   height: number;
@@ -36,7 +33,6 @@ export function Stage({
   onLeave: () => void;
   onTyping: (typing: boolean) => void;
   onCommand: (effect: string) => void;
-  onPage: (step: 1 | -1) => void;
   /** Which of file or shell was last up, while a board is showing. */
   last: "file" | "shell";
   pins: Record<string, { line: number; text: string }[]>;

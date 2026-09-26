@@ -47,6 +47,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       }
       return setFocus((f) => ring[(ring.indexOf(f) + 1) % ring.length]!);
     }
+    // PageUp/PageDown scroll the right side (the thread or a board) from the keyboard.
+    if (key.pageUp || key.pageDown) return void scrolls.emit("cast", key.pageUp ? -10 : 10);
     // esc from the input closes a board (help, a lesson, the log).
     if (key.escape && focus === "input" && board && state.stage.kind !== "spec") return store.closeBoard();
   });
@@ -157,10 +159,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             width={at.width}
             height={at.height}
             focused={focus === "stage"}
-            reply={state.reply}
             last={state.middle}
             pins={state.pins}
-            onPage={(step) => store.pageStage(step)}
             onSave={saveFile}
             onReload={reloadFile}
             onLeave={toInput}

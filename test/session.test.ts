@@ -103,25 +103,20 @@ test("an init without effort never wipes an effort already read back", async () 
   assert.deepEqual(s.getSnapshot().models.intern, { model: "claude-sonnet-5", effort: "" });
 });
 
-test("the stage flips back like alt-tab, and a long reply opens on it", async () => {
+test("shift-tab flips the middle between file and shell; a long reply opens the board, esc closes it", async () => {
   const { Store } = await import("../src/store.ts");
   const s = new Store("r", "understand", process.cwd());
   s.openFile("package.json");
+  s.toggleMiddle();
+  assert.equal(s.getSnapshot().stage.kind, "shell");
+  s.toggleMiddle();
+  assert.equal(s.getSnapshot().stage.kind, "code");
   s.say("short");
   assert.equal(s.getSnapshot().stage.kind, "code");
   s.say("x".repeat(400));
   assert.equal(s.getSnapshot().stage.kind, "reply");
-  s.flipStage();
-  assert.equal(s.getSnapshot().stage.kind, "code");
-  s.flipStage();
-  assert.equal(s.getSnapshot().stage.kind, "reply");
-  // The middle pages between code only: the file and the shell.
-  s.flipStage();
-  s.pageStage(1);
-  assert.equal(s.getSnapshot().stage.kind, "shell");
-  assert.equal(s.getSnapshot().middle, "shell");
-  s.pageStage(1);
-  assert.equal(s.getSnapshot().stage.kind, "code");
+  s.closeBoard();
+  assert.equal(s.getSnapshot().stage.kind, "code", "back to what the middle had");
 });
 
 test("holes a write would add are counted, not the ones already there", async () => {
