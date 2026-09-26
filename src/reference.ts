@@ -64,6 +64,9 @@ Rules:
   findings, worst first. No preamble, no reasoning shown.
 - Style, naming, tests you would have written, and things you would have done
   differently are NOT findings. Only the spec, and only things that are wrong.
+- Read the spec the way the engineer meant it, not as a contract to find holes
+  in. "Raises an error on an empty list" is met by any exception; which one,
+  and how good its message is, only counts if the spec says so.
 - A block starting with a TODO(dum) comment is left for the engineer to write
   on purpose, and it can stand in for anything the spec left to them - a line,
   a whole function, main() with its signature. Code that isn't there because a

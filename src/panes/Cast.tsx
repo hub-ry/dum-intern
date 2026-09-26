@@ -164,17 +164,21 @@ export function thread(s: State, width: number): Line[] {
     }
   });
 
-  // The turn is yours: say what's waiting, last, where the eye ends up.
+  // The turn is yours: say what's waiting, last, where the eye ends up. Wrapped, never cut.
+  const turn = (text: string, hint = "") => {
+    for (const l of wrap(text, "", width)) out.push({ text: blue(l) });
+    if (hint) note(hint);
+  };
   if (s.prompt?.type === "next") {
     const t = s.todos[0];
     gap();
-    if (t) out.push({ text: blue(`your turn: ${t.concept} in ${t.path}`) }, { text: c.dim("type it and say done, or explain it here") });
-    else if (s.suggestion) out.push({ text: blue(`next up: ${s.suggestion}`) }, { text: c.dim("say go, or ask for something else") });
-    else out.push({ text: c.dim("what next?") });
+    if (t) turn(`your turn: ${t.concept} in ${t.path}`, "type it and say done, or explain it here");
+    else if (s.suggestion) turn(`next up: ${s.suggestion}`, "say go, or ask for something else");
+    else note("what next?");
   }
   if (s.prompt?.type === "spec") {
     gap();
-    out.push({ text: blue("build this? y/n") });
+    turn("build this? y/n");
   }
   return out;
 }

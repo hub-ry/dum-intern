@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Scenario, checks, facts, type Run } from "../src/eval.ts";
+import { Scenario, checks, facts, judgePrompt, type Run } from "../src/eval.ts";
 
 const run = (transcript: string, written: Record<string, string> = {}, openHoles = 0): Run => ({ transcript, written, openHoles, timedOut: false });
 
@@ -58,4 +58,20 @@ test("off dum's own record: what the intern said, not the wizard or the notes", 
     { kind: "say", id: 7, text: "a.py runs.\nyour hole: a.py:3" },
   ] as never;
   assert.deepEqual(fromEntries(es), { questions: 1, specShown: true, holes: 1, fills: 1, replyLines: 2 });
+});
+
+test("the judge sees the tree, the mode and what was there before dum", () => {
+  const s = Scenario.parse({
+    name: "x",
+    request: "add median",
+    mode: "anti-vibe",
+    tree: [{ name: "geometric growth" }],
+    files: { "stats.py": "def mean(xs): ..." },
+  });
+  const p = judgePrompt([], s, { transcript: "", written: {}, openHoles: 0, timedOut: false });
+  assert.match(p, /Their tree: geometric growth/);
+  assert.match(p, /Mode: anti-vibe - dum writes the code itself/);
+  assert.match(p, /--- stats.py\ndef mean/);
+  const bare = Scenario.parse({ name: "y", request: "r" });
+  assert.match(judgePrompt([], bare, { transcript: "", written: {}, openHoles: 0, timedOut: false }), /Their tree: \(empty\)/);
 });

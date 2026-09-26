@@ -113,7 +113,9 @@ test("shift-tab flips the middle between file and shell; a long reply opens the 
   assert.equal(s.getSnapshot().stage.kind, "code");
   s.say("short");
   assert.equal(s.getSnapshot().stage.kind, "code");
-  s.say("x".repeat(400));
+  s.say("a two-sentence build summary. ".repeat(10));
+  assert.equal(s.getSnapshot().stage.kind, "code", "an ordinary reply stays in the thread");
+  s.say("x".repeat(700));
   assert.equal(s.getSnapshot().stage.kind, "reply");
   s.closeBoard();
   assert.equal(s.getSnapshot().stage.kind, "code", "back to what the middle had");

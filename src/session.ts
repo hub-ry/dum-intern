@@ -160,13 +160,13 @@ gained and what's next - never repeat any of it in words.
   the very end, or nothing.
 - a number beats a vague size: "about 15 minutes", never "a bit of work".
 
-AFTER A BUILD, three lines at most, in this order:
-  1. what works now, as something they can run or see: "echo server runs:
-     python server.py, then type into the client."
-  2. where their hole is, if any: "your hole: server.py:10".
-  3. nothing else. dum puts the one next action on screen itself.
-No list of files, no "still open" paragraph, no how-to-test essay. If
-something unresolved actually blocks, one line for it, not a section.
+AFTER A BUILD, one short paragraph: what works now, as something they can
+run or see. "echo server runs: python server.py, then type into the
+client." Only that paragraph is shown. Nothing you write before a tool call
+in a build is shown either, so don't narrate ("writing X now"). dum puts
+their hole and the next step on screen itself. No list of files, no "still
+open" paragraph, no how-to-test essay, no critique of code they didn't ask
+about.
 
 WHEN THEY ASK FOR IDEAS
 "Recommend me a project", "what should I build to learn X", "any ideas" is
@@ -768,7 +768,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             content: [
               {
                 type: "text" as const,
-                text: "Taught. Now re-ask your pending question - do not answer it for them.",
+                text: "Taught. If your question was a decision only they can make, put it back in one line with again: true - never answer it for them. If it only checked whether they knew something, the lesson just answered it: don't ask it again. The hole they type is the check.",
               },
             ],
           };
@@ -1065,6 +1065,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
 
   /** A hole of theirs was checked this turn. */
   let reviewed = false;
+  /** A build turn's latest text, not yet shown. */
+  let saying = "";
 
   /** TODO(dum) blocks written under this request so far. */
   let holesThisTurn = 0;
@@ -1213,7 +1215,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           if (b.type === "text" && b.text?.trim()) {
             // After a review it's told to say nothing more; if it does, it
             // would bury the verdict, so it's dropped.
-            if (!reviewed) store.say(b.text.trim());
+            if (reviewed) continue;
+            // Mid-build, text is held until we know whether a tool call follows it.
+            if (approved) saying = b.text.trim();
+            else store.say(b.text.trim());
+          }
+          if (b.type === "tool_use" && saying) {
+            // Text framing a question stays; "writing X now" before an edit is narration.
+            if (/(^|__)(ask|propose_spec)$/.test(b.name)) store.say(saying);
+            saying = "";
           }
           if (b.type === "tool_use" && b.id && WATCHED[b.name]) {
             const path = detail(repo.root, b.input);
@@ -1234,6 +1244,10 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         continue;
       }
       if (msg.type === "result") {
+        // What's left is the closing word on a build: its first paragraph. The spec, the
+        // hole and the next step are already on screen.
+        if (saying && !reviewed) store.say(saying.split(/\n\s*\n/)[0]!);
+        saying = "";
         await drainWizard();
         for (const why of blocked) store.note(`refused: ${why}`);
         blocked.length = 0;

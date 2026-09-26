@@ -107,8 +107,8 @@ export type State = {
   models: { intern: Voice; wizard: Voice };
 };
 
-/** Past this, what dum says opens on the stage too. About six narrow lines. */
-const LONG_SAY = 170;
+/** Past this, what dum says also opens as a board. The thread scrolls, so only a real wall. */
+const LONG_SAY = 600;
 
 const isBoardKind = (s: Stage) => s.kind !== "code" && s.kind !== "shell";
 
@@ -260,9 +260,7 @@ export class Store {
   /** `lead` marks the line that matters this turn - a review's verdict - over any chatter after it. */
   say(text: string, lead = false) {
     this.append({ kind: "say", text, ...(lead ? { lead } : {}) });
-    // Too long for the six lines under dum's face: it opens on the stage, where it scrolls,
-    // instead of hiding behind :log.
-    if (text.length > LONG_SAY || text.split("\n").length > 6) this.patch({ stage: { kind: "reply", text } });
+    if (text.length > LONG_SAY || text.split("\n").length > 10) this.patch({ stage: { kind: "reply", text } });
   }
 
   note(text: string) {

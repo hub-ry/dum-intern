@@ -212,7 +212,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         </Box>
         <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" marginLeft={2}>
           <Text dimColor wrap="truncate-end">
-            {hint(focus, typing, hasCode, inShell)}
+            {hint(focus, typing, hasCode)}
           </Text>
         </Box>
       </Box>
@@ -243,13 +243,12 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   );
 }
 
-function hint(focus: Focus, typing: boolean, hasCode: boolean, inShell = false): string {
-  void inShell;
+function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
   if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
   if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return "tab: move · ⇧tab: file ⇄ shell · ? ask · :help";
+  return "tab: move · ? ask · :help";
 }
 
 /** What typing does right now, shown grey in the empty input. */

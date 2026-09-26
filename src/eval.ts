@@ -182,6 +182,12 @@ WHAT'S INTENDED - don't mark these down
 THE SCENARIO: ${s.name}
 ${s.why}
 They asked: ${s.request}
+Mode: ${s.mode}${s.mode === "anti-vibe" ? " - dum writes the code itself here, with no holes; that's the mode, not a violation" : ""}
+Their tree: ${s.tree.length ? s.tree.map((k) => k.name + (k.lang ? ` (${k.lang})` : "")).join("; ") : "(empty)"}
+Already in the repo before dum started: ${Object.keys(s.files).join(", ") || "(nothing)"}
+${Object.entries(s.files).map(([p, t]) => `--- ${p}\n${t}`).join("\n")}
+The script gives the same answer to every question ("${s.answer}"). Grade how
+dum handles those answers, not the answers themselves.
 
 TRANSCRIPT (plain mode; [DRIVER] lines are the script answering)
 ${run.transcript.slice(-9000)}

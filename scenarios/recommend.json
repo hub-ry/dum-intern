@@ -1,6 +1,6 @@
 {
   "name": "recommend",
-  "why": "\"recommend me a project\" once built a whole project. It should recommend one in a few lines.",
+  "why": "\"recommend me a project\" once built a whole project. It should recommend one in a few lines. Their tree already covers vector growth and manual memory, so a hand-rolled vector is at their level.",
   "request": "recommend me a project to learn about vectors in c++",
   "tree": [
     { "name": "vector growth and reallocation" },

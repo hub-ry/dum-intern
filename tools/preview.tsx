@@ -151,7 +151,18 @@ if (scene === "spec") {
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");
   store.toggleTranscript();
-} else if (scene !== "lesson") {
+} else if (scene === "lesson") {
+  void store.askQuestion("Is it worse for a job to run twice, or to never run at all?", "Decides at-least-once versus at-most-once delivery.");
+  store.submit("idk");
+  store.teach({
+    concept: "delivery semantics",
+    what_it_is: "The guarantee a queue makes about how many times a job is handed to a worker: at-most-once or at-least-once.",
+    why_it_exists: "A worker can die after doing the work but before acknowledging it. The queue can't tell that from dying before, so it picks which mistake to make.",
+    in_industry: "SQS and most brokers are at-least-once and push idempotency onto you.",
+    here: "Nothing here writes to an external system yet, so at-least-once costs a dedupe key on the jobs table.",
+  });
+  void store.askQuestion("so: run twice, or never run?", "", true, true);
+} else {
   void store.askQuestion(
     "Is it worse for a job to run twice, or to never run at all?",
     "Decides at-least-once versus at-most-once delivery.",

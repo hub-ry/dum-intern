@@ -34,7 +34,7 @@ export function Board({
   const reserve = foot.length ? foot.length + 2 : 0;
   return (
     <Box flexDirection="column" width={width}>
-      <Reading {...page} width={width} height={height - reserve} focused={focused} />
+      <Reading {...page} closes={stage.kind !== "spec"} width={width} height={height - reserve} focused={focused} />
       {foot.length ? (
         <Box flexDirection="column" paddingX={2} marginTop={1}>
           <Text bold color="#87afd7">
@@ -107,7 +107,7 @@ function pageFor(stage: BoardStage, transcript: Entry[], width: number): Page {
       section("why it exists", l.why_it_exists);
       section("in industry", l.in_industry);
       section("here", l.here);
-      return { id: stage, title: "wizard", subtitle: "dum will ask again - it will not answer for you", color: "#d7a55f", lines };
+      return { id: stage, title: "wizard", subtitle: "you said idk - here it is", color: "#d7a55f", lines };
     }
     case "transcript": {
       const lines: string[] = [];
@@ -126,8 +126,9 @@ function Reading({
   width,
   height,
   tail,
+  closes,
   focused,
-}: Page & { width: number; height: number; focused: boolean }) {
+}: Page & { closes: boolean; width: number; height: number; focused: boolean }) {
   const head = subtitle ? 2 : 1;
   const room = Math.max(1, height - head);
   const last = Math.max(0, lines.length - room);
@@ -163,6 +164,8 @@ function Reading({
   const shown = lines.slice(top, top + room);
   const below = lines.length - top - shown.length;
   const where = lines.length > room ? `  ${top + 1}-${top + shown.length} of ${lines.length}${below ? "  ↓" : ""}` : "";
+  // A spec is answered, not dismissed.
+  const close = closes ? "   esc: close" : "";
 
   return (
     <Box width={width} flexDirection="column" paddingX={2}>
@@ -170,7 +173,10 @@ function Reading({
         <Text bold color={color}>
           {title}
         </Text>
-        <Text dimColor>{where || "   ⇧tab: back"}</Text>
+        <Text dimColor>
+          {where}
+          {close}
+        </Text>
       </Text>
       {subtitle ? <Text dimColor>{subtitle}</Text> : null}
       {shown.map((line, i) => (
