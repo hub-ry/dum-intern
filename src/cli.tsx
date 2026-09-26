@@ -14,6 +14,7 @@ import * as planner from "./planner.ts";
 import * as rebuild from "./rebuild.ts";
 import * as graphs from "./graph.ts";
 import * as learn from "./learn.ts";
+import * as taste from "./taste.ts";
 import * as shell from "./shell.ts";
 import { debugTo } from "./debug.ts";
 import { filtered, ON as MOUSE_ON, OFF as MOUSE_OFF } from "./mouse.ts";
@@ -21,7 +22,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { c, wrap, voiceName, minutes, cap, bar } from "./lines.ts";
 import { homedir } from "node:os";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { basename as repo, resolve } from "node:path";
 
 type Args = {
@@ -522,6 +523,8 @@ async function main() {
   debugTo(repo.root);
   const store = new Store(repo.name, mode, repo.root, repo.files);
   store.setSkills(skills.summary(skills.read(), repo.root));
+  // Before a session starts; the session replaces it with one that also tells the intern.
+  store.onTaste = (rule) => taste.add(rule);
   store.onGraph = () => {
     void showGraph(true).then((out) => store.note(out ? `graph opened in your browser: ${out.replace(homedir(), "~")}` : "couldn't draw the graph."));
   };
@@ -602,6 +605,14 @@ async function main() {
     await run(request, repo, mode, store, hooks);
   } finally {
     stop();
+    // For scripts: the session as entries with their kinds, not as drawn text.
+    if (process.env.DUM_TRANSCRIPT) {
+      try {
+        writeFileSync(process.env.DUM_TRANSCRIPT, JSON.stringify(store.getSnapshot().transcript));
+      } catch {
+        /* a missing record fails the eval, which is the right outcome */
+      }
+    }
   }
 }
 

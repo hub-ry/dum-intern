@@ -126,6 +126,9 @@ export class Store {
   /** Set by the runner: `!cmd` - run it in a real shell. "" for an interactive shell. */
   onShell: ((cmd: string) => void) | null = null;
 
+  /** Set by the runner: a rule for their taste file. */
+  onTaste: ((rule: string) => void) | null = null;
+
   /** Set by the renderer: run a `:` command on the open file. */
   onEditorCommand: ((cmd: string) => void) | null = null;
 
@@ -177,6 +180,13 @@ export class Store {
     const ex = /^:\s*(run|graph|log|help)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
+      return;
+    }
+    // `:taste <rule>` - a rule in their words, for this session and every one after.
+    const tasted = /^:\s*taste\s+(.+)$/is.exec(text.trim());
+    if (tasted) {
+      this.onTaste?.(tasted[1]!.trim());
+      this.show("taste", `noted: ${tasted[1]!.trim()}\n\nin ~/.dum/taste.md - dum reads it every session.`);
       return;
     }
     // Editor commands meant for the open file: never a message to the intern.
@@ -341,6 +351,7 @@ export class Store {
           ":run      run the file on screen (compiled languages: the line to type)",
           ":graph    the skill graph, in your browser",
           ":log      everything said so far, and back",
+          ":taste x  a rule for how dum should work, kept for every session",
           "tab       input, file, file tree",
           "",
           "answering a question: your answer, idk, or type it",

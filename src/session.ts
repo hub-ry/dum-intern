@@ -8,6 +8,8 @@ import { describe, type Repo } from "./repo.ts";
 import { peekString, WATCHED } from "./stream.ts";
 import * as skills from "./skills.ts";
 import * as todos from "./todos.ts";
+import * as taste from "./taste.ts";
+import { sentences } from "./lines.ts";
 import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
 import { Wizard, log as logQuip, type Quip } from "./wizard.ts";
@@ -161,8 +163,8 @@ something unresolved actually blocks, one line for it, not a section.
 
 WHEN THEY ASK FOR IDEAS
 "Recommend me a project", "what should I build to learn X", "any ideas" is
-a request for a suggestion, not a build. Three lines at most: the project in
-one line, what it teaches, and how to start - \`dum --learn "<topic>"\` turns
+a request for a suggestion, not a build. Under 200 characters: the project,
+what it teaches, and how to start - \`dum --learn "<topic>"\` turns
 a topic into a small project built feature by feature. Build nothing until
 they ask you to.
 
@@ -483,6 +485,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     return skills.holdsIn(skills.read(), concept, path, repo.root);
   }
 
+  store.onTaste = (rule: string) => {
+    taste.add(rule);
+    aside.push(`(They added to their taste: "${rule}". Follow it from now on.)`);
+  };
+
   store.onNotYet = (name: string) => {
     const target = name ? skills.find(skills.read(), name)?.name : checked[checked.length - 1];
     if (!target) return false;
@@ -611,6 +618,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   function opening(req: string): string {
     return [
       BAR[mode],
+      taste.describe(taste.read()),
       hooks.context?.() ?? "",
       levels(),
       mode === "understand" ? onboarding(skills.read()) : "",
@@ -888,6 +896,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           };
           setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
           handedOff = false;
+          store.toolEvent("hole", `${path}: ${t.concept}`, "held");
           return fail("Left. Tell them where it is in one line after the build.");
         },
       ),
@@ -906,7 +915,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           if (!t) {
             return { content: [{ type: "text" as const, text: `No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.` }] };
           }
-          store.say(args.feedback);
+          // A pass is one line; a miss is the one question. Anything after is a wrap-up.
+          store.say(sentences(args.feedback, 1));
           if (args.passed) {
             setOpen(open.filter((o) => o !== t));
             if (t.request && !open.some((o) => o.request === t.request)) hooks.onBuilt?.(t.request);
@@ -926,7 +936,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               {
                 type: "text" as const,
                 text: args.passed
-                  ? "Passed and recorded. They saw your line - say nothing else about it."
+                  ? "Passed and recorded. They saw your line - say nothing else about it. No wrap-up, no suggestions."
                   : "Still open. They saw your question - say nothing else this turn, and don't fix it for them.",
               },
             ],
@@ -1167,7 +1177,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             : "";
           const found = await reference.review(approvedSpec + holes, files);
           wdebug(found ? `review: found "${found.slice(0, 80)}"` : "review: ok");
-          if (found) store.review(found);
+          if (found) store.review(sentences(found, 2));
         }
 
         // The turn is over, not the session.

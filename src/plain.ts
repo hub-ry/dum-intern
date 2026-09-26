@@ -60,13 +60,15 @@ export class Input {
 
   async ask(prompt: string): Promise<string> {
     if (!stdin.isTTY) {
+      // The prompt goes out first, so a script driving dum can see it's waiting.
+      stdout.write(prompt);
       const line =
         this.queue.shift() ??
         (this.ended
           ? Promise.reject(new Error("input ended - nothing was built"))
           : new Promise<string>((resolve, reject) => (this.waiter = { resolve, reject })));
       const got = await line;
-      stdout.write(prompt + got + "\n");
+      stdout.write(got + "\n");
       return got;
     }
     return Promise.race([

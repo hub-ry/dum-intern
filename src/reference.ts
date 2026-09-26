@@ -60,8 +60,8 @@ Say ONLY what does not match. Specifically:
 Rules:
 - Read the actual files before saying anything. Never review from the spec
   alone.
-- Be specific and short. Name the file. One or two sentences per finding, at
-  most three findings, worst first.
+- Be specific and short. Name the file. ONE sentence per finding, at most two
+  findings, worst first. No preamble, no reasoning shown.
 - Style, naming, tests you would have written, and things you would have done
   differently are NOT findings. Only the spec, and only things that are wrong.
 - A block starting with a TODO(dum) comment is left for the engineer to write

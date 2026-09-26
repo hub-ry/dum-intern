@@ -51,6 +51,12 @@ export function minutes(m: number | undefined): string {
   return `~${h} h`;
 }
 
+/** The first `n` sentences of some text. */
+export function sentences(text: string, n: number): string {
+  const parts = text.trim().match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) ?? [text];
+  return parts.slice(0, n).join("").trim();
+}
+
 /** At most `n` items, and how many were left out: lists stay scannable. */
 export function cap<T>(items: T[], n = 5): { shown: T[]; more: number } {
   return { shown: items.slice(0, n), more: Math.max(0, items.length - n) };

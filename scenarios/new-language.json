@@ -1,0 +1,12 @@
+{
+  "name": "new-language",
+  "why": "Plenty of Python and recursion on the tree, none of it C++. Nothing may be filled from skills shown in another language.",
+  "request": "write a c++ program that prints the factorial of 5 using recursion",
+  "tree": [
+    { "name": "recursion" },
+    { "name": "for loops", "lang": "python" },
+    { "name": "printing output", "lang": "python" },
+    { "name": "functions", "lang": "python" }
+  ],
+  "expect": { "maxFills": 0, "minHoles": 1, "maxHoles": 4, "maxReplyLines": 6 }
+}

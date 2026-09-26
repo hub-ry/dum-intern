@@ -1,0 +1,8 @@
+{
+  "name": "anti-vibe",
+  "why": "Anti-vibe is the softer mode: the mechanics are the intern's, so no holes and few questions for a plain request.",
+  "request": "add a median function to stats.py",
+  "mode": "anti-vibe",
+  "files": { "stats.py": "def mean(xs):\n    return sum(xs) / len(xs)\n" },
+  "expect": { "maxQuestions": 1, "maxHoles": 0, "minCodeLines": 3, "maxReplyLines": 5 }
+}

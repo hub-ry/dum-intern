@@ -147,6 +147,24 @@ So the size of a gap depends on my level in that language. That counts the skill
 The gate measures the code the intern hands it for a hole, and sends back a gap that's too big for my level. Asked for a tiny vector class with no C++ on my tree, it wrote the class, `main` and the printing, and left two gaps: the grow condition in `push_back`, and copying into the new block and freeing the old one. It compiled as given.
 
 
+### My taste, and scenarios that check it
+
+dum should get better at being what I want, and I should be able to see whether it has. Two pieces.
+
+**Taste.** `~/.dum/taste.md` holds rules in my own words: "at the start the gaps are really small", "don't talk about dum's internals". The intern reads it every session. `:taste <rule>` adds one from inside a session, and it applies right away. It's my file, so it lives in `~/.dum` and never in the repo.
+
+**Scenarios.** `scenarios/*.json` are scripted sessions: a request, a skill tree, how to answer the questions, sometimes code to type into the first hole. Each one exists because dum got something wrong once. "Recommend me a project" used to build one. A C++ file used to get filled from Python skills.
+
+```sh
+npm run eval:scenarios              # all of them
+npm run eval:scenarios -- recommend # the ones whose name matches
+```
+
+Each scenario runs as a real session in a throwaway repo, with my real taste file copied in. Code checks the facts: questions before the spec, holes and fills, how much code dum wrote, how long its reply was, comment runs, and phrases it must never use. A judge on Sonnet then scores the transcript 1-5 against my taste and quotes the rules it broke. Results go to `~/.dum/evals/`, and each run prints what got better or worse since the last one.
+
+So the loop is: I react to something, it becomes a taste rule or a scenario, and the next change to dum has to hold up against both. Every bug from the session that produced this section would have been a failing check.
+
+
 ### Short, on purpose
 
 This is closer to a game than a document, and every long message is a turn I stop playing. The rules come from [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md), and they're kept in code wherever code can keep them:
@@ -499,6 +517,7 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `:graph` | the skill graph, in the browser | input, file's `:` line |
 | `:log` | the full transcript on the stage | input, file's `:` line |
 | `:help` | all of this, on the stage | input |
+| `:taste` + a rule | how dum should work, kept for every session | input |
 | `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
@@ -559,6 +578,8 @@ The tree flags work from anywhere. Everything else needs a git repo, since the i
   skills/          the skill tree, one note per skill, shared by every repo (DUM_HOME moves it)
   projects/        the project queue, one note per goal, step, or idea
   graph.html       the graph, redrawn by every --graph
+  taste.md         my rules for how dum should work
+  evals/           every scenario run, for comparing
   skills.json.migrated         the old single-file tree, read once into notes
 
 <repo>/.dum/

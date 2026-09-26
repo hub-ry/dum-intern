@@ -80,3 +80,11 @@ test("progress, time and lists read at a glance", async () => {
   assert.equal(minutes(undefined), "");
   assert.deepEqual(cap([1, 2, 3, 4, 5, 6, 7]), { shown: [1, 2, 3, 4, 5], more: 2 });
 });
+
+test("sentences keeps the first few, whole", async () => {
+  const { sentences } = await import("../src/lines.ts");
+  assert.equal(sentences("Correct. You sort twice though. Delete one.", 1), "Correct.");
+  assert.equal(sentences("Correct. You sort twice though. Delete one.", 2), "Correct. You sort twice though.");
+  assert.equal(sentences("no punctuation at all", 1), "no punctuation at all");
+  assert.equal(sentences("s[n // 2] is the middle. ok", 1), "s[n // 2] is the middle.");
+});

@@ -334,3 +334,14 @@ test("typing a hole in a language counts toward that language's level; explainin
   t = note(t, e("vector growth"), A);
   assert.deepEqual(find(t, "vector growth")!.shownIn, ["c++"], "kept across later notes");
 });
+
+test("taste is bullets in a markdown file, added to one at a time", async () => {
+  const { read, add, describe: tasteLines } = await import("../src/taste.ts");
+  const dir = mkdtempSync(`${tmpdir()}/dum-taste-`);
+  assert.deepEqual(read(dir), []);
+  assert.equal(tasteLines([]), "");
+  add("gaps tiny at the start", dir);
+  add("  no   jargon  ", dir);
+  assert.deepEqual(read(dir), ["gaps tiny at the start", "no jargon"]);
+  assert.match(tasteLines(read(dir)), /THEIR TASTE[\s\S]*- no jargon/);
+});

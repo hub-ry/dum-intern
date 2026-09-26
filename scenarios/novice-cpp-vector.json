@@ -1,0 +1,11 @@
+{
+  "name": "novice-cpp-vector",
+  "why": "No C++ on the tree. dum should write the scaffolding and leave a few small gaps on the concept - not write it all, and not leave it all.",
+  "request": "build me a tiny vector class in c++ so i can learn how vectors grow",
+  "tree": [
+    { "name": "vector growth and reallocation" },
+    { "name": "geometric growth" },
+    { "name": "manual memory management (new and delete)" }
+  ],
+  "expect": { "maxQuestions": 3, "minHoles": 1, "maxHoles": 4, "minCodeLines": 10, "maxReplyLines": 6 }
+}

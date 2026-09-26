@@ -1,0 +1,12 @@
+{
+  "name": "recommend",
+  "why": "\"recommend me a project\" once built a whole project. It should recommend one in a few lines.",
+  "request": "recommend me a project to learn about vectors in c++",
+  "tree": [
+    { "name": "vector growth and reallocation" },
+    { "name": "geometric growth" },
+    { "name": "pointer and iterator invalidation" },
+    { "name": "manual memory management (new and delete)" }
+  ],
+  "expect": { "noBuild": true, "maxReplyLines": 5 }
+}
