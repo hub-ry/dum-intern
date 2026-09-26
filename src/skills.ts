@@ -1,27 +1,4 @@
 // What you have already shown you understand, as a tree that follows you.
-//
-// This used to be a flat list per repo with a three-step ladder on top: prove
-// two topics and you were "trusted", six and you were "senior". Both halves
-// were wrong. A skill is something you have, not something a repo has, so
-// explaining leases in one project and being asked about them again in the
-// next is amnesia, not rigour. And a single level is gameable - six trivial
-// topics bought the same rope as six hard ones - and it is the opposite of
-// what a tree is for. Autonomy is local now: the intern stops asking about the
-// parts of a request that sit on skills you hold, and asks about the rest.
-//
-// The edges are grown, not curated. When a skill is recorded the intern names
-// what it builds on, so the tree takes the shape of what you actually build.
-// A prerequisite nobody has recorded yet still shows up, as a node you have
-// not shown - which is the frontier, for free.
-//
-// Breadth matters as much as the edges. General concepts (idempotency, Rust
-// ownership, SQL joins) transfer, so once shown they count everywhere. Niche
-// ones (one library's pagination quirks, a file format you touched once) fade,
-// so they only count in the repo where you showed them and get one quick
-// re-check anywhere else.
-//
-// What none of this buys is skipping the spec. The gate is absolute no matter
-// how big the tree gets.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
@@ -36,17 +13,14 @@ export type Skill = {
   /** True once they explained it. False when the intern had to teach it. */
   solid: boolean;
   /**
-   * They say they hold it - a scan of their own project, or a note they wrote
-   * - but never showed dum. Counts as solid for asking purposes except that
-   * the first build leaning on it gets one short check.
+   * They say they hold it - a scan of their own project, or a note they wrote - but never
+   * showed dum.
    */
   claimed: boolean;
   breadth: Breadth;
   /**
-   * The one language this skill is about, when it's syntax, a standard library
-   * or an idiom: "range-based for" is c++. Such a skill only counts in that
-   * language - knowing Python's for loops doesn't write C++'s. "" for ideas
-   * that carry across languages.
+   * The one language this skill is about, when it's syntax, a standard library or an idiom:
+   * "range-based for" is c++.
    */
   lang: string;
   /** Skills this one builds on directly, by name. May name skills not yet on the tree. */
@@ -66,7 +40,7 @@ export function home(): string {
   return process.env.DUM_HOME || `${homedir()}/.dum`;
 }
 
-/** The old single-file tree, read once to seed the notes and then left alone. */
+/** The old single-file tree, read once to seed the notes. */
 function legacy(dir: string) {
   return `${dir}/skills.json`;
 }
@@ -77,15 +51,8 @@ export function folder(dir = home()) {
 }
 
 /**
- * The identity of a skill name, loose enough that obvious respellings of one
- * idea land on one node.
- *
- * "Leases" and "lease", "Idempotency-Keys" and "idempotency keys", "Rust
- * macros (macro_rules!)" and "rust macros": same skill. Casing alone was the
- * old rule, and the tree grew near-duplicates next to each other. Kept
- * deliberately dumb - no stemming library, no embeddings - because merging two
- * different skills is worse than keeping two copies of one: "c" and "c++"
- * must never collapse, so + and # are part of a word.
+ * The identity of a skill name, loose enough that obvious respellings of one idea land on one
+ * node.
  */
 export function key(name: string): string {
   return words(name).join(" ");
@@ -112,15 +79,7 @@ function singular(w: string): string {
 
 const MINOR = new Set(["a", "an", "the", "of", "in", "on", "for", "to", "and", "with"]);
 
-/**
- * A skill already on the tree that might be this one under another name, or
- * undefined.
- *
- * "visibility timeout" and "sqs visibility timeout" share every word of the
- * shorter one. That is not proof they are the same skill - "rust macros" and
- * "rust procedural macros" pass the same test and are different - so this
- * only finds the candidate. Deciding is the intern's job.
- */
+/** A skill already on the tree that might be this one under another name, or undefined. */
 export function similar(t: Tree, name: string): Skill | undefined {
   const mine = new Set(words(name).filter((w) => !MINOR.has(w)));
   if (!mine.size) return undefined;
@@ -152,14 +111,7 @@ function clean(raw: unknown): Skill | null {
   };
 }
 
-/**
- * Every note in the folder, as a tree.
- *
- * The first read after the switch to notes seeds them from the old
- * skills.json, which is then renamed rather than deleted. A note that does not
- * parse is skipped, never fatal: it means fewer known skills, which means more
- * questions, which is the safe direction.
- */
+/** Every note in the folder, as a tree. */
 export function read(dir = home()): Tree {
   seed(dir);
   let names: string[];
@@ -197,7 +149,7 @@ function seed(dir: string) {
   try {
     renameSync(legacy(dir), `${legacy(dir)}.migrated`);
   } catch {
-    /* the notes exist now, so the old file is never read again anyway */
+    /* the notes exist now, so the old file is never read again */
   }
 }
 
@@ -219,14 +171,7 @@ function noteFor(dir: string, name: string): string | undefined {
   }
 }
 
-/**
- * Write every skill whose note changed, each through a temp file and a rename.
- *
- * Never deletes: a note another session added since this tree was read must
- * not vanish because this copy did not have it. Taking a skill off is
- * `remove`, on purpose, by name. A skill already living in a note you named
- * yourself is written back into that note rather than growing a second one.
- */
+/** Write every skill whose note changed, each through a temp file and a rename. */
 export function write(t: Tree, dir = home()) {
   try {
     mkdirSync(folder(dir), { recursive: true });
@@ -262,10 +207,7 @@ export function remove(name: string, dir = home()): boolean {
   }
 }
 
-/**
- * Start over. The old notes are moved aside, not deleted - a tree is months
- * of history, and "start from scratch" is something people take back.
- */
+/** Start over. */
 export function reset(dir = home()): string | null {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const aside = `${folder(dir)}.before-reset-${stamp}`;
@@ -292,24 +234,14 @@ export type Entry = {
   why: string;
 };
 
-/**
- * Record what a skill looks like now, as shown in `root`.
- *
- * Last write wins on whether it is solid, deliberately. A skill the intern had
- * to teach and that you later explained back should end up solid, and one you
- * fumbled after claiming to know should stop being solid. Keeping the
- * best-ever answer would let the tree drift permanently upward.
- *
- * Edges only accumulate. A prerequisite named once is still a prerequisite the
- * next time the skill comes up in a context that did not happen to mention it.
- */
+/** Record what a skill looks like now, as shown in `root`. */
 export function note(t: Tree, e: Entry, root: string): Tree {
   const k = key(e.name);
   if (!k) return t;
   const prev = t.skills.find((s) => key(s.name) === k);
 
-  // Prerequisites are spelled the way the tree already spells them, so a
-  // casing difference does not grow a second node.
+  // Prerequisites are spelled the way the tree already spells them, so a casing difference does
+  // not grow a second node.
   const canon = (n: string) => t.skills.find((s) => key(s.name) === key(n))?.name ?? n.trim();
   const requires: string[] = [];
   for (const r of [...(prev?.requires ?? []), ...e.requires]) {
@@ -317,8 +249,7 @@ export function note(t: Tree, e: Entry, root: string): Tree {
     if (name && key(name) !== k && !requires.some((x) => key(x) === key(name))) requires.push(name);
   }
 
-  // Where it was shown only means something while it is solid. A downgrade
-  // wipes it, so re-proving it later starts that list over from here.
+  // Where it was shown only means something while it is solid.
   const repos = e.solid
     ? [...new Set([...(prev?.solid ? prev.repos : []), root])]
     : [];
@@ -340,13 +271,7 @@ export function note(t: Tree, e: Entry, root: string): Tree {
 
 export type Claim = { name: string; breadth: Breadth; requires: string[]; why: string; lang?: string };
 
-/**
- * Add what they say they hold, from a scan of their own project.
- *
- * Only ever adds or refreshes a claim. It never touches a skill dum has a real
- * judgement on: a solid one is already better than a claim, and a shaky one
- * means they fumbled it in front of dum, which a scan cannot outvote.
- */
+/** Add what they say they hold, from a scan of their own project. */
 export function claim(t: Tree, c: Claim, root: string): Tree {
   const k = key(c.name);
   const prev = t.skills.find((s) => key(s.name) === k);
@@ -374,15 +299,7 @@ export function forget(t: Tree, name: string): Tree {
   return { skills: t.skills.filter((s) => key(s.name) !== key(name)) };
 }
 
-/**
- * How long a skill counts as known before it earns one quick re-check.
- *
- * Long for general skills, because the rule is that something general you
- * have done before is worth trusting - a year is a gap, not a lapse. Shorter
- * for niche ones, because one-off knowledge is exactly what fades. Either way
- * the cost of being stale is a single short question, and explaining it again
- * resets the clock.
- */
+/** How long a skill counts as known before it earns one quick re-check. */
 const FRESH_DAYS: Record<Breadth, number> = { general: 365, niche: 60 };
 
 /** Known, but long enough ago that one quick check is fair. */
@@ -417,10 +334,7 @@ export function langOf(path: string): string {
   return EXT_LANG[ext] ?? "";
 }
 
-/**
- * Whether a skill on the tree lets dum write code for it in this file. Solid
- * (or claimed), and if it's about one language, only in that language.
- */
+/** Whether a skill on the tree lets dum write code for it in this file. */
 export function holdsIn(t: Tree, name: string, path: string, root: string): boolean {
   const s = find(t, name);
   if (!s || !s.solid) return false;
@@ -428,9 +342,8 @@ export function holdsIn(t: Tree, name: string, path: string, root: string): bool
   const here = langOf(path);
   if (!here) return true;
   if (s.lang && s.lang !== here) return false;
-  // A language they've never shown anything in: every line of it is theirs,
-  // however well they know the idea. Holding "manual memory management" once
-  // filled a whole C++ file for someone who had never written an #include.
+  // A language they've never shown anything in: every line of it is theirs, however well they
+  // know the idea.
   return spoken(t, here);
 }
 
@@ -474,15 +387,7 @@ export function shaky(t: Tree): Skill[] {
   return t.skills.filter((s) => !s.solid);
 }
 
-/**
- * Fold a repo's old `.dum/knowledge.json` into the tree.
- *
- * Only adds skills the tree does not have yet, so running it every session is
- * harmless and a newer judgement on the tree is never overwritten by an older
- * one from a file. Old entries had no breadth; they come in as general, which
- * matches how they were treated before, and the intern re-records the breadth
- * the next time the skill comes up.
- */
+/** Fold a repo's old `.dum/knowledge.json` into the tree. */
 export function migrate(t: Tree, root: string): Tree {
   let old: unknown;
   try {
@@ -595,14 +500,7 @@ export type Row = {
   repeat: boolean;
 };
 
-/**
- * The tree as rows to draw, roots first.
- *
- * It is really a graph: a skill can build on two others, so it appears under
- * both, fully the first time and as a back-reference after that. A skill that
- * is only reachable through a cycle is drawn as a root at the end rather than
- * silently disappearing.
- */
+/** The tree as rows to draw, roots first. */
 export function rows(t: Tree): Row[] {
   const byKey = new Map(t.skills.map((s) => [key(s.name), s]));
   const ghosts = new Map<string, string>();
@@ -617,9 +515,8 @@ export function rows(t: Tree): Row[] {
   const nameOf = (k: string) => byKey.get(k)?.name ?? ghosts.get(k) ?? k;
   const byName = (a: string, b: string) => nameOf(a).localeCompare(nameOf(b));
 
-  // Real roots before ghosts, so a skill is drawn in full under the branch
-  // you actually built and only back-referenced under a prerequisite you
-  // have not shown yet.
+  // Real roots before ghosts, so a skill is drawn in full under the branch you actually built
+  // and only back-referenced under a prerequisite you have not shown yet.
   const all = [...byKey.keys(), ...ghosts.keys()];
   const roots = [
     ...[...byKey.keys()].filter((k) => !byKey.get(k)!.requires.length).sort(byName),

@@ -1,49 +1,15 @@
 // Pixel art, in a terminal.
-//
-// A cell is two pixels: `▀` painted with a foreground for the top half and a
-// background for the bottom. So a 9x8 sprite is 9 columns by 4 rows, which is
-// a character small enough to sit in a side pane and still read as a face.
-//
-// The art lives in .txt files rather than in here. They are meant to be
-// redrawn - the two characters ARE the personality of this program, and that
-// should not require touching TypeScript or a binary asset pipeline.
 
 import { readFileSync } from "node:fs";
 
 export type Frame = { name: string; rows: string[] };
 export type Sprite = { palette: Map<string, string | null>; frames: Frame[] };
 
-// Half-block glyphs. Which one a cell uses depends on which of its two pixels
-// are actually there:
-//
-//   both        ▀  foreground is the top pixel, background is the bottom
-//   top only    ▀  foreground is the top pixel, background left alone
-//   bottom only ▄  foreground is the bottom pixel, background left alone
-//   neither     ' ' nothing is painted at all
-//
-// Getting that last pair wrong is what puts a slab behind a sprite: drawing ▀
-// with no foreground set still paints an upper half-block in whatever the
-// terminal's default text colour is, so every transparent cell comes out as a
-// grey bar and the character appears to be sitting on a card.
+// Half-block glyphs.
 const UPPER = "\u2580";
 const LOWER = "\u2584";
 
-/**
- * Parse the art format:
- *
- *   palette
- *   . none
- *   o 1a1a22
- *   end
- *
- *   frame idle
- *   ..oooo..
- *   ...
- *
- * Blank lines inside a frame are significant - a sprite can have an empty row -
- * so a frame ends at the next `frame` header or at the end of the file, and
- * trailing blank rows are trimmed rather than guessed at.
- */
+/** Parse the art format. Blank rows inside a frame are significant; trailing ones are trimmed. */
 export function parse(text: string): Sprite {
   const palette = new Map<string, string | null>();
   const frames: Frame[] = [];
@@ -99,14 +65,7 @@ function rgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/**
- * One frame as terminal rows, each already carrying its escape codes.
- *
- * Emitted as pre-composed strings rather than as nested colour components:
- * a 9-wide sprite is 9 separately coloured cells per row, and expressing
- * that as elements costs far more than it buys when the whole thing is a
- * single `<Text>` either way.
- */
+/** One frame as terminal rows, each already carrying its escape codes. */
 export function draw(sprite: Sprite, frame: Frame): string[] {
   const width = Math.max(...frame.rows.map((r) => r.length), 0);
   const out: string[] = [];
@@ -133,9 +92,7 @@ export function draw(sprite: Sprite, frame: Frame): string[] {
         wantFg = bottom;
       }
 
-      // Only emit a colour when it changes. A sprite is mostly flat areas, and
-      // repeating the same truecolor pair per cell quadruples the bytes Ink
-      // has to diff on every animation tick.
+      // Only emit a colour when it changes.
       if (wantFg !== fg) {
         line += wantFg ? `\x1b[38;2;${rgb(wantFg).join(";")}m` : "\x1b[39m";
         fg = wantFg;

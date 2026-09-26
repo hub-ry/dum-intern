@@ -1,15 +1,4 @@
 // Where the panes go.
-//
-// Read from `.dum/layout.json` so the arrangement is yours: reorder the
-// columns, change the widths, drop a pane you do not want. A missing or
-// broken file falls back to the default rather than failing to start - a
-// layout is a preference, and a preference should never be able to stop the
-// program from running.
-//
-// Sizes are computed here rather than left to flexbox because the panes need
-// their width as a NUMBER: text is wrapped and clipped against it, and a pane
-// that has to render itself before it can find out how wide it is renders
-// wrong once and then corrects, which on a terminal is a visible flinch.
 
 import { z } from "zod";
 import { readFileSync } from "node:fs";
@@ -39,21 +28,13 @@ const Node: z.ZodType<Node> = z.lazy(() =>
   ]),
 );
 
-/**
- * Three columns, not four.
- *
- * The conversation used to have a pane of its own next to the code. It reads
- * better as the characters saying one thing at a time, with the wide pane
- * showing whatever is being discussed - so `chat` is still a pane you can put
- * back in this file, but it is no longer the default.
- */
+/** Three columns, not four. */
 export const DEFAULT: Node = {
   direction: "row",
   children: [
     { pane: "tree", size: 22 },
     { pane: "code", flex: 1 },
-    // Wide enough to hold a sentence under a face. The sprites themselves are
-    // 12 columns and cannot reflow; the rest is the text.
+    // Wide enough to hold a sentence under a face.
     { pane: "cast", size: 38 },
   ],
 };
@@ -75,13 +56,7 @@ export function isLeaf(n: Node): n is LeafT {
   return "pane" in n;
 }
 
-/**
- * Give every pane a concrete box.
- *
- * `gap` is the divider drawn between siblings, and it is charged to the
- * container rather than to a pane, so a pane's width is the space it may
- * actually draw in.
- */
+/** Give every pane a concrete box. */
 export type Box = { x: number; y: number; width: number; height: number };
 
 export function allocate(node: Node, box: Box, gap = 1): Placed[] {
@@ -116,8 +91,8 @@ export function split(
 
   let handed = 0;
   flexed.forEach((f, n) => {
-    // The last one absorbs the rounding, so the panes always fill the row
-    // exactly and no column of dead space appears on the right.
+    // The last one absorbs the rounding, so the panes always fill the row exactly and no column
+    // of dead space appears on the right.
     const share = n === flexed.length - 1 ? free - handed : Math.floor((free * f.flex) / weight);
     sizes[f.i] = share;
     handed += share;

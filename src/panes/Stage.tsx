@@ -1,16 +1,4 @@
 // The wide pane: whatever you are meant to be reading right now.
-//
-// The conversation used to have a column of its own. It does not any more -
-// the intern says one thing at a time, under its own face, and this pane shows
-// the artefact being discussed instead. Which means this pane inherits the
-// spec, and the spec is the one screen in the program that gates anything, so
-// it gets the room rather than a box wedged under a sprite.
-//
-// It has pages - the file, the latest reply, the log - with a bar on top so
-// you can see which one you're on. shift-tab flips back to the last one, like
-// alt-tab; ←/→ walks them. Every page scrolls: the wheel, j/k, space and b.
-// Before, a long answer landed in the log and the only way to it was typing
-// :log, and nothing but the file could scroll at all.
 
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
@@ -245,8 +233,8 @@ function Reading({
 
 function wrapAt(text: string, width: number): string[] {
   const out: string[] = [];
-  // Paragraph by paragraph, so an answer with a list or a blank line between
-  // thoughts does not arrive as one wall.
+  // Paragraph by paragraph, so an answer with a list or a blank line between thoughts does not
+  // arrive as one wall.
   for (const para of text.split("\n")) {
     if (!para.trim()) {
       out.push("");

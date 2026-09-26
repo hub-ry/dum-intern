@@ -1,9 +1,4 @@
 // What the intern knows about where it is.
-//
-// Deliberately shallow: a file listing and the README. The intern is not
-// supposed to read the whole codebase before asking you what you want - it is
-// supposed to ask you what you want. Deep context is the coding agent's job,
-// and that runs after the spec exists.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -15,9 +10,8 @@ const README_CHARS = 2000;
 export type Repo = { name: string; root: string; files: string[]; readme: string };
 
 function git(args: string[], cwd: string): string {
-  // Capture git's stderr rather than letting it inherit - outside a repo it
-  // prints its own "fatal:" line above ours, and two errors for one problem
-  // reads as a crash.
+  // Capture git's stderr rather than letting it inherit - outside a repo it prints its own
+  // "fatal:" line above ours, and two errors for one problem reads as a crash.
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
@@ -33,9 +27,7 @@ export function readRepo(cwd: string): Repo {
     throw new Error("not a git repository - dum works inside one. `git init` here, or cd into a repo");
   }
 
-  // Tracked files only. Untracked build output and node_modules would drown
-  // the signal, and .gitignore is the list of what you already decided doesn't
-  // matter.
+  // Tracked files only.
   const files = git(["ls-files"], root).split("\n").filter(Boolean);
 
   let readme = "";

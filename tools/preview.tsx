@@ -1,12 +1,4 @@
 // Draw the panes against a fabricated session, with no agent and no terminal.
-//
-// Ink's render takes its own stdout, so a fake one with a fixed size captures
-// exact frames. That matters more here than it sounds: this is a program whose
-// output IS the product, and checking it by hand means launching a real
-// interrogation and spending a real session to find out a box is one column
-// short. `npm run preview` answers that in a second.
-//
-// Not a test. It asserts nothing - it prints a frame for a person to look at.
 
 import React from "react";
 import { EventEmitter } from "node:events";
@@ -100,8 +92,7 @@ store.streaming(
   ].join("\n"),
 );
 
-// Which screen to draw. The stage shows a different thing in each case and
-// they are the states most worth eyeballing before shipping a change.
+// Which screen to draw.
 const scene = process.argv[5] ?? "ask";
 if (scene === "spec") {
   void store.proposeSpec(
@@ -125,8 +116,8 @@ if (scene === "spec") {
     ].join("\n"),
   );
 } else if (scene === "open") {
-  // A real file from this repo, so the gutter, the scrollbar and the
-  // sideways clipping are exercised by something with the shape of code.
+  // A real file from this repo, so the gutter, the scrollbar and the sideways clipping are
+  // exercised by something with the shape of code.
   store.openFile("src/store.ts");
   void store.askQuestion("what next?", "");
 } else if (scene === "hole") {

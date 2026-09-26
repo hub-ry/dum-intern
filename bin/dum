@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# dum-intern launcher.
-#
-# Loaded through tsx rather than Node's --experimental-strip-types, because the
-# panes are JSX and Node strips types without transforming JSX. tsx is a loader,
-# not a compiler, so there is still no build step and no dist/ - but it must be
-# the package's own tsx, not whatever the current directory happens to have.
-#
-# Resolve symlinks before locating src/. `npm link` installs this as a symlink
-# on PATH, so $BASH_SOURCE is the link, not the file - and macOS ships BSD
-# readlink with no -f, hence the loop.
+# dum-intern launcher. Runs the package's own tsx: the panes are JSX, which Node can't strip.
 set -euo pipefail
+
+# `npm link` makes this a symlink, and macOS readlink has no -f, hence the loop.
 
 target="${BASH_SOURCE[0]}"
 while [ -L "$target" ]; do
@@ -19,11 +12,7 @@ while [ -L "$target" ]; do
 done
 root="$(cd -P "$(dirname "$target")/.." && pwd)"
 
-# Anything written to stderr lands on top of the panes and stays there - Ink
-# owns the screen and does not know the line arrived. Node's warnings are the
-# usual source (the SDK warns that bare allowedTools entries shadow canUseTool,
-# which for the intern's own three tools is exactly what we want). DUM_DEBUG
-# puts them back, same seam the wizard uses.
+# Node warnings on stderr land on top of the panes; DUM_DEBUG brings them back.
 [ -n "${DUM_DEBUG:-}" ] || export NODE_NO_WARNINGS=1
 
 exec "$root/node_modules/.bin/tsx" "$root/src/cli.tsx" "$@"

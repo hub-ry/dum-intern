@@ -1,18 +1,4 @@
 // The voice off to the side.
-//
-// The wizard is not part of the interrogation and must never become part of it.
-// The intern asks; the wizard tells. Every question you are expected to answer
-// comes from the intern, and nothing crosses. The wizard's one kind of
-// question is rhetorical - a nudge at something you said that is wrong, always
-// followed by where the answer lives - so it never needs a reply.
-//
-// That rule is not decoration - it is what stops the wizard quietly answering
-// the pending question. If the intern asks "what happens when a worker dies
-// mid-job?" and the wizard volunteers "most people use a visibility timeout",
-// the engineer never had to decide anything. So the wizard is only ever fired
-// on an answer they have ALREADY given. Its subject is always something they
-// said, never something they were asked, and the timing enforces what a prompt
-// could only request.
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import type { Repo } from "./repo.ts";
@@ -20,19 +6,7 @@ import { Channel } from "./channel.ts";
 import { Checker } from "./checker.ts";
 import { debug } from "./debug.ts";
 
-/**
- * Sonnet, not Haiku, and this was measured rather than assumed.
- *
- * Haiku was the obvious pick - one sentence of trivia on every answer. It got
- * the names wrong. Asked about a worker reclaiming a dead worker's job (a lease
- * / visibility timeout) it answered "dead letter queue" in 2 runs out of 5, and
- * no amount of prompt work fixed it. Getting the name right is the entire
- * product here, because the name is what they go look up afterwards; a wizard
- * that is confidently wrong is worse than no wizard at all.
- *
- * Sonnet is 5 for 5 on that same case and costs nothing extra in wall time -
- * both land around 1.5s, because the latency is the round trip, not the model.
- */
+/** Sonnet, not Haiku: Haiku got the names wrong, and names are the product. */
 const MODEL = "claude-sonnet-5";
 /** Medium, with thinking off: a quip that lands after you've moved on is noise. */
 const EFFORT = "medium";
@@ -145,32 +119,19 @@ export type Kind = "fact" | "nudge";
 export type Quip = { text: string; about: string; kind: Kind };
 
 /**
- * Everything the wizard is allowed to know: what they are building, and the
- * sentence they just said. Notably NOT the question they were asked - see
- * `consider` for why that matters more than it looks.
+ * Everything the wizard is allowed to know: what they are building, and the sentence they just
+ * said.
  */
 export type Exchange = { request: string; answer: string };
 
-/**
- * Strip quotes the model wrapped the whole line in, and nothing else.
- *
- * This used to strip any leading or trailing quote character, which turned a
- * line opening with inline code - "`..=` is inclusive" - into "..=` is
- * inclusive".
- */
+/** Strip quotes the model wrapped the whole line in, and nothing else. */
 function clean(s: string): string {
   const t = s.trim();
   const m = /^(["'`])([\s\S]*)\1$/.exec(t);
   return (m && !m[2]!.includes(m[1]!) ? m[2]! : t).trim();
 }
 
-/**
- * Today, and what that means for what the model remembers.
- *
- * A model with a training cutoff that is not told the date will tell you a
- * release from after its cutoff "doesn't exist yet", confidently. The date
- * alone fixes some of that; the rule to search instead of deny fixes the rest.
- */
+/** Today, and what that means for what the model remembers. */
 export function lookup(now = new Date()): string {
   const today = now.toISOString().slice(0, 10);
   return `LOOKING THINGS UP
@@ -188,32 +149,15 @@ libraries, versions, models, and releases you've never heard of.
   release date, a price, a breaking change, a deprecation - that's your line.`;
 }
 
-/**
- * Whether the first sentence is a question.
- *
- * A sentence ends at . or ! followed by a space or the end - not at any dot,
- * or "what does 0.1 + 0.2 give you?" ends at "0." and never asks anything.
- */
+/** Whether the first sentence is a question. */
 export function opensWithQuestion(text: string): boolean {
   const end = /[.!?](\s|$)/.exec(text);
   return !!end && end[0][0] === "?";
 }
 
-/**
- * The line to show, or null for a pass.
- *
- * A pass is not always just `pass`. Seen in a real session: the wizard argued
- * itself out of a line in prose - "... not worth interrupting for." - and then
- * wrote `pass` underneath, and a check for a leading `pass` showed all of it
- * in the margin. So a `pass` anywhere at the end counts, and so does anything
- * with a paragraph break, because a quip is never two paragraphs. Dropping a
- * real line now and then is cheap; showing the wizard thinking out loud is not.
- */
+/** The line to show, or null for a pass. */
 export function parseLine(raw: string): { kind: Kind; text: string } | null {
-  // After a search the model appends a "Sources:" list, because the search
-  // tool tells it to. That turned every searched line into two paragraphs and
-  // got it dropped - which is why a wizard that searched well looked like one
-  // that always passed. The list goes; a link inside the line keeps its words.
+  // After a search the model appends a "Sources:" list, because the search tool tells it to.
   let text = clean(
     raw
       .replace(/\n\s*(?:\*\*)?(?:sources?|references?)(?:\*\*)?\s*:[\s\S]*$/i, "")
@@ -221,15 +165,8 @@ export function parseLine(raw: string): { kind: Kind; text: string } | null {
   );
   if (!text || /^pass\b/i.test(text) || /\bpass\W*$/i.test(text)) return null;
 
-  // A nudge must open with its question, and that is checked here rather than
-  // trusted to the prompt. Measured: asked nicely, the wizard still opened
-  // four corrections in five with the right answer, which takes the working
-  // out away from the person it was meant for. Dropping one costs little -
-  // the intern pushes back on a wrong answer by itself.
-  //
-  // The tag is required. An untagged line is the model skipping the format,
-  // and the one time it did in an eval run, what came out was a correction
-  // that opened with the answer - exactly what the tag exists to catch.
+  // A nudge must open with its question, and that is checked here rather than trusted to the
+  // prompt.
   const tag = /^(fact|nudge)\s*:\s*/i.exec(text);
   if (!tag) return null;
   const kind = tag[1]!.toLowerCase() as Kind;
@@ -237,8 +174,7 @@ export function parseLine(raw: string): { kind: Kind; text: string } | null {
   if (!text) return null;
   if (kind === "nudge" && !opensWithQuestion(text)) return null;
   if (/\n\s*\n/.test(text) || text.length > 320) return null;
-  // Asked for in the prompt, enforced here, because the prompt alone missed
-  // one in the first eval run.
+  // Em dashes are banned in the prompt too; this catches the ones it misses.
   return { kind, text: text.replace(/\s*\u2014\s*/g, " - ") };
 }
 
@@ -247,17 +183,7 @@ export function parse(raw: string): string | null {
   return parseLine(raw)?.text ?? null;
 }
 
-/**
- * One long-lived session, not a call per quip.
- *
- * Measured before writing this: a fresh `query` per exchange cost 13-50 seconds,
- * almost none of it generation - it is the CLI process starting up. At that
- * latency the quip lands two exchanges after the thing it is about, and a margin
- * note about something you already stopped thinking about is just noise.
- *
- * Keeping the session also gets the no-repeat rule for free: the wizard can see
- * what it has already said, which no stateless call could.
- */
+/** One long-lived session, not a call per quip. */
 export class Wizard {
   private channel: Channel;
   private checker: Checker;
@@ -267,22 +193,12 @@ export class Wizard {
     this.channel = new Channel("wizard", {
       model: MODEL,
       systemPrompt: `${VOICE}\n\n${lookup()}`,
-      // Search and nothing else. Most quips never touch it; it is there for
-      // the thing it does not recognise, which is exactly where a model with a
-      // training cutoff says "that doesn't exist".
+      // Search and nothing else.
       tools: ["WebSearch"],
       allowedTools: ["WebSearch"],
       cwd: repo.root,
-      // Every one of these is latency, and latency is the whole ballgame: a
-      // margin note that arrives after you have moved on is not a margin note.
-      // Measured at ~25s per quip with the defaults, which is slower than the
-      // person typing the next answer.
-      //
-      // `effort` defaults to high and thinking is on - both are for work, and
-      // this is one sentence. `settingSources: []` keeps the wizard out of the
-      // user's CLAUDE.md and project settings too, which it has no business
-      // reading: its whole character is one short system prompt, and a
-      // personal instructions file would quietly rewrite it.
+      // Every one of these is latency, and latency is the whole ballgame: a margin note that
+      // arrives after you have moved on is not a margin note.
       effort: EFFORT,
       thinking: { type: "disabled" },
       settingSources: [],
@@ -290,33 +206,22 @@ export class Wizard {
     this.checker = new Checker(repo);
   }
 
-  /**
-   * Which model is speaking. The pinned one straight away, then whatever the
-   * session reports - a session only says once its first turn runs, and a
-   * label that is blank until the first quip reads as nothing being there.
-   */
+  /** Which model is speaking. */
   onModel(fn: (model: string, effort: string) => void) {
     fn(MODEL, EFFORT);
     this.channel.onModel = fn;
   }
 
   /**
-   * Started before the first question is even asked, so the process spawns
-   * overlap the interrogation instead of being charged to the first answer.
+   * Started before the first question is even asked, so the process spawns overlap the
+   * interrogation instead of being charged to the first answer.
    */
   start() {
     this.channel.start();
     this.checker.start();
   }
 
-  /**
-   * Comment on one exchange, or return null.
-   *
-   * Serial by design. If a quip is still in flight the new exchange is dropped
-   * rather than queued, because a backlog of margin notes is exactly the
-   * wallpaper this is supposed to avoid - by the time a queued one printed, its
-   * subject would be two answers stale.
-   */
+  /** Comment on one exchange, or return null. */
   async consider(ex: Exchange): Promise<Quip | null> {
     if (this.busy || !this.channel.alive) {
       debug(`wizard skipped (${this.channel.alive ? "busy" : "closed"})`);
@@ -325,19 +230,6 @@ export class Wizard {
     this.busy = true;
     try {
       // The intern's question is deliberately NOT sent.
-      //
-      // It was, at first, as context. Measured: with the question included the
-      // wizard named the wrong pattern 2 times in 5 - the engineer described a
-      // worker reclaiming a dead worker's job (a lease) and the wizard called it
-      // a dead letter queue, because the QUESTION happened to mention retries
-      // and failures. It knew what a dead letter queue was; it was just
-      // answering the wrong sentence. Telling it not to in the prompt did not
-      // fix it.
-      //
-      // Dropping the question also enforces the specificity rule for free. An
-      // answer that means nothing on its own - "yes", "option A", "postgres" -
-      // now has nothing for the wizard to grab, which is exactly when it should
-      // have stayed quiet anyway.
       const reply = await this.channel.send(
         [`they are building: ${ex.request}`, ``, `they just said: ${ex.answer}`].join("\n"),
       );
@@ -362,12 +254,7 @@ export class Wizard {
   }
 }
 
-/**
- * Every quip also goes to a file.
- *
- * Costs nothing now and is the whole reason a side pane stays possible later:
- * `dum watch` tails this instead of the renderer having to move.
- */
+/** Every quip also goes to a file. */
 export function log(repo: Repo, quip: Quip) {
   try {
     mkdirSync(`${repo.root}/.dum`, { recursive: true });

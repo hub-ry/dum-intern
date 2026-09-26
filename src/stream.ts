@@ -1,17 +1,4 @@
 // Reading a tool call while it is still being written.
-//
-// With `includePartialMessages`, the SDK emits the intern's tool input as a
-// stream of JSON fragments: `{"file_path":"src/a.ts","content":"const x` and
-// so on, arriving a few characters at a time. That is the only feed that shows
-// a file being composed rather than announced, so the code pane is built on
-// it.
-//
-// The catch is that a fragment is not JSON. It cannot be parsed, it can stop
-// anywhere - mid-escape, mid-codepoint, before the key you want has even
-// appeared - and it is concatenated from chunks that split at arbitrary
-// offsets. So this walks it by hand and returns whatever is legible so far,
-// which is exactly what a live view wants: not the finished value, the value
-// up to now.
 
 /** The tools whose input is worth watching arrive. */
 export const WATCHED: Record<string, string> = {
@@ -32,13 +19,7 @@ const ESCAPES: Record<string, string> = {
   t: "\t",
 };
 
-/**
- * The value of a string key in a partial JSON object, decoded as far as it
- * goes. Null when the key has not arrived yet.
- *
- * Returning "" and returning null are different answers and the caller cares:
- * "" means the field exists and is empty so far, null means keep waiting.
- */
+/** The value of a string key in a partial JSON object, decoded as far as it goes. */
 export function peekString(buf: string, key: string): string | null {
   const start = findValue(buf, key);
   if (start < 0) return null;
@@ -70,14 +51,7 @@ export function peekString(buf: string, key: string): string | null {
   return out;
 }
 
-/**
- * Index of the first character of `key`'s string value, or -1.
- *
- * Scans rather than regexing because the key name can legally appear inside an
- * earlier string value - `{"old_string":"content: 3","content":"..."}` would
- * otherwise match the wrong one - so string bodies have to be skipped over
- * properly.
- */
+/** Index of the first character of `key`'s string value, or -1. */
 function findValue(buf: string, key: string): number {
   let i = 0;
   while (i < buf.length) {
@@ -89,8 +63,8 @@ function findValue(buf: string, key: string): number {
     if (end < 0) return -1; // unterminated string: nothing past it is readable
     i = end;
     if (text !== key) continue;
-    // Expect `:` then `"` for a string value; anything else and this was a
-    // matching string that happened to sit in value position.
+    // Expect `:` then `"` for a string value; anything else and this was a matching string that
+    // happened to sit in value position.
     let j = i;
     while (j < buf.length && /\s/.test(buf[j]!)) j++;
     if (buf[j] !== ":") continue;

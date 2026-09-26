@@ -1,15 +1,4 @@
 // The other way onto the skill tree: you type it.
-//
-// Explaining a concept was the only way to prove it, and that makes the whole
-// product a prompt-engineering problem - the tree is exactly as good as the
-// intern's judgement of your sentences. Writing the code is harder to fake. So
-// when a question comes up you can answer it, or say "type it": the intern
-// builds everything around that piece and leaves a marked hole, and filling the
-// hole is what unlocks the skill.
-//
-// The hole is a comment with a fixed marker so code can find it. The intern
-// still judges what you wrote - a deleted marker is not an implementation - but
-// "nothing changed yet" is settled here without spending a turn on it.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import type { Breadth } from "./skills.ts";
@@ -33,12 +22,7 @@ export type Todo = {
   lang?: string;
 };
 
-/**
- * A reply that hands the concept to your fingers instead of your words.
- *
- * Deliberately narrow, like `notAnAnswer`: "type it as a string" is an answer
- * to a question about types, and must not be read as opting out of it.
- */
+/** A reply that hands the concept to your fingers instead of your words. */
 export function wantsToType(reply: string): boolean {
   return /^(let me |i'?ll |i will |i wanna |i want to )?type (it|this|that)( myself| out)?[.!]*$|^type[.!]*$/i.test(
     reply.trim(),
@@ -57,11 +41,8 @@ export function hole(text: string, concept = ""): number {
 }
 
 /**
- * The lines a hole spans: the marker, the comment lines under it, and the one
- * stub line after those. [from, to] inclusive, or null if `at` is not a marker.
- *
- * The comment run is found by the marker's own prefix - `//`, `#`, `--` - so
- * it works in any language without knowing any of them.
+ * The lines a hole spans: the marker, the comment lines under it, and the one stub line after
+ * those.
  */
 export function span(lines: string[], at: number): [number, number] | null {
   const line = lines[at];
@@ -99,11 +80,7 @@ export function fill(text: string, concept: string, code: string): string | null
   return [...lines.slice(0, s[0]), ...body, ...lines.slice(s[1] + 1)].join("\n");
 }
 
-/**
- * How a language writes a line comment, by file extension. Only languages in
- * here are gated: without knowing what a comment looks like, "only holes and
- * comments" can't be checked, and `#include` would pass as one.
- */
+/** How a language writes a line comment, by file extension. */
 const COMMENTS: Record<string, RegExp> = {};
 for (const ext of ["c", "h", "cc", "cpp", "cxx", "hpp", "hh", "js", "mjs", "cjs", "ts", "tsx", "jsx", "java", "go", "rs", "swift", "kt", "cs", "php", "scala", "zig", "dart"])
   COMMENTS[ext] = /^(\/\/|\/\*|\*\/?)/;
@@ -121,11 +98,7 @@ export function gated(path: string): boolean {
   return lang(path) in COMMENTS;
 }
 
-/**
- * Lines in `text` that are code outside any hole - what "code just appearing"
- * looks like. Blank lines, comments and TODO(dum) blocks (with their one-line
- * stub) are fine; anything else is a line nobody typed or explained.
- */
+/** Lines in `text` that are code outside any hole - what "code just appearing" looks like. */
 export function loose(text: string, path: string): string[] {
   const comment = COMMENTS[lang(path)];
   if (!comment) return [];

@@ -1,16 +1,4 @@
 // The seam between the agent and whatever is drawing it.
-//
-// Before this existed, `session.ts` wrote to the terminal with console.log and
-// read from it with a blocking readline call made from inside an MCP tool
-// handler. That works exactly once: for one renderer, that owns the whole
-// screen, in a process where nothing else prints. A pane layout is none of
-// those things.
-//
-// So the agent no longer renders. It publishes state here and, where it needs
-// an answer, it publishes a question and waits on a promise. Who draws that,
-// and how, is not its business - which is why React must never be imported
-// into `session.ts` or `wizard.ts`. Two renderers subscribe to this today (Ink
-// and the plain line-printer) and neither one is visible from the agent side.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
@@ -56,15 +44,7 @@ export type Prompt =
   | { type: "next" }
   | null;
 
-/**
- * The file currently under the intern's hands.
- *
- * `live` is true while the tool call is still being generated, which is the
- * whole reason this exists: the pane shows the file being composed, and only
- * afterwards does the gate say whether it was allowed to happen. A held write
- * is therefore visible as code that almost existed, rather than as a one-line
- * denial with nothing behind it.
- */
+/** The file currently under the intern's hands. */
 export type CodeView = {
   tool: string;
   path: string;
@@ -73,32 +53,18 @@ export type CodeView = {
   outcome: Outcome | null;
   /** What refused or held it, when it wasn't the usual reason. */
   why?: string;
-  /**
-   * True once `body` is the file as it is on disk, which is the only thing
-   * worth editing. False while a write streams, for a write that was held or
-   * refused (there is no file), and in the gap between the gate allowing a
-   * write and the write finishing.
-   */
+  /** True once `body` is the file as it is on disk, which is the only thing worth editing. */
   onDisk: boolean;
   /** The line to land on when the editor first shows this. */
   at?: number;
   /**
-   * Set when something asks to land on `at` even if the buffer already exists
-   * - handing you a hole in a file the intern just wrote. A new value is a new
-   * jump; the buffer remembers which one it last obeyed.
+   * Set when something asks to land on `at` even if the buffer already exists - handing you a
+   * hole in a file the intern just wrote.
    */
   jump?: number;
 };
 
-/**
- * What the wide pane is showing.
- *
- * With the chat column gone, this pane is "the thing you are meant to be
- * reading right now": the file being written, a file you opened, the spec you
- * are being asked to approve, or a lesson. The spec especially needs the room
- * - it is the one screen in this program that gates anything, and it was never
- * going to fit under a sprite.
- */
+/** What the wide pane is showing. */
 export type Stage =
   | { kind: "code" }
   | { kind: "answer"; question: string; body: string; pending: boolean }
@@ -127,13 +93,13 @@ export type State = {
   /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
   suggestion: string;
   /**
-   * The last thing on the stage that wasn't the file or the log - a long
-   * reply, an answer, help, a lesson, a spec. The middle tab of the page bar.
+   * The last thing on the stage that wasn't the file or the log - a long reply, an answer,
+   * help, a lesson, a spec.
    */
   reply: Stage | null;
   /** Where a milestone folder stands: done of total, and what a unit is called. */
   progress: { done: number; total: number; unit: string } | null;
-  /** The model behind each voice and the effort it runs at, as the SDK reported them. "" until known. */
+  /** The model behind each voice and the effort it runs at, as the SDK reported them. */
   models: { intern: Voice; wizard: Voice };
 };
 
@@ -148,23 +114,10 @@ export class Store {
   private nextId = 1;
   private jumps = 0;
 
-  /**
-   * The promise the agent is parked on, and the entry to write the reply into.
-   *
-   * Only ever one. The interrogation is strictly one question at a time, and
-   * two live prompts would mean the person cannot tell which one their typing
-   * is about to answer.
-   */
+  /** The promise the agent is parked on, and the entry to write the reply into. */
   private waiting: { resolve: (v: any) => void; entryId: number } | null = null;
 
-  /**
-   * Anything typed before the agent got around to asking.
-   *
-   * Without this there is a real race: the person answers, the result arrives,
-   * and the keystroke lands in the gap between the prompt being cleared and
-   * the next one being published. Buffering makes type-ahead work instead of
-   * silently eating the line.
-   */
+  /** Anything typed before the agent got around to asking. */
   private typedAhead: string[] = [];
 
   /** Set by the runner: where a `?` question goes. */
@@ -209,24 +162,15 @@ export class Store {
     return () => void this.listeners.delete(fn);
   };
 
-  /**
-   * A person submitted a line.
-   *
-   * Routed to whatever is waiting, or held for whoever asks next. Never
-   * dropped - a swallowed answer in a program built on answering questions is
-   * the worst bug available to it.
-   */
+  /** A person submitted a line. */
   submit(text: string) {
-    // A `?` line is not an answer. It must never be routed to whatever dum is
-    // waiting on, or asking a question would silently cost you your turn and
-    // dum would be handed "? is this slow" as a decision.
+    // A `?` line is not an answer.
     if (text.startsWith("?")) {
       const question = text.slice(1).trim();
       if (question) this.onAsk?.(question);
       return;
     }
     // `:run`, `:graph`, `:log`, `:help` - dum's commands, vim's ex line.
-    // Only these exact words: `:yes` or `:)` is still an answer.
     const ex = /^:\s*(run|graph|log|help)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
@@ -237,11 +181,11 @@ export class Store {
       this.onShell(text.slice(1).trim());
       return;
     }
-    // Same rule as `?`: taking a skill back is not an answer to anything, and
-    // must never cost the turn or reach the intern as one.
+    // Same rule as `?`: taking a skill back is not an answer to anything, and must never cost
+    // the turn or reach the intern as one.
     const nope = /^not yet\b[\s:,-]*(.*)$/i.exec(text.trim());
-    // Returns false when there is nothing to take back, and then it was
-    // just an answer: "have you added tests?" "not yet".
+    // Returns false when there is nothing to take back, and then it was just an answer: "have
+    // you added tests?" "not yet".
     if (nope && this.onNotYet?.(nope[1]!.trim())) return;
     const w = this.waiting;
     if (!w) {
@@ -250,8 +194,7 @@ export class Store {
     }
     this.waiting = null;
     this.answer(w.entryId, text);
-    // They answered, so the intern is working again. Renderers key their
-    // spinner off this rather than each calling site remembering to say so.
+    // They answered, so the intern is working again.
     this.patch({ prompt: null, busy: true, status: "thinking" });
     w.resolve(text);
   }
@@ -260,8 +203,8 @@ export class Store {
 
   say(text: string) {
     this.append({ kind: "say", text });
-    // Too long for the six lines under dum's face: it opens on the stage,
-    // where it scrolls, instead of hiding behind :log.
+    // Too long for the six lines under dum's face: it opens on the stage, where it scrolls,
+    // instead of hiding behind :log.
     if (text.length > LONG_SAY || text.split("\n").length > 6) this.patch({ stage: { kind: "reply", text } });
   }
 
@@ -292,20 +235,12 @@ export class Store {
   streaming(tool: string, path: string, body: string) {
     const code = this.state.code;
     if (code?.live && code.tool === tool && code.body === body && code.path === path) return;
-    // Writing pulls the stage back to the code: whatever you were reading, the
-    // intern putting a file on screen is the more urgent thing.
+    // Writing pulls the stage back to the code: whatever you were reading, the intern putting a
+    // file on screen is the more urgent thing.
     this.patch({ code: { tool, path, body, live: true, outcome: null, onDisk: false }, stage: { kind: "code" } });
   }
 
-  /**
-   * A write the gate allowed has finished.
-   *
-   * Only now is the file on disk, so only now does the pane swap what the
-   * intern SAID it would write for what is actually there - for an Edit that
-   * is the whole file rather than the replaced fragment, opened at the edit.
-   * The gate's verdict fires before the tool runs, which is why this cannot
-   * happen in toolEvent.
-   */
+  /** A write the gate allowed has finished. */
   landed(path: string) {
     const code = this.state.code;
     if (!code || code.path !== path || code.outcome !== "ran" || code.onDisk) return;
@@ -320,13 +255,7 @@ export class Store {
     this.patch({ code: { ...code, body: file, onDisk: true, at } });
   }
 
-  /**
-   * Write a file you edited in the pane.
-   *
-   * Your edit, your file: it is not a tool call and the gate has no say. The
-   * one thing checked is that the path stays inside the repo, the same line
-   * the intern is held to. Returns what went wrong, or null.
-   */
+  /** Write a file you edited in the pane. */
   saveFile(path: string, text: string): string | null {
     if (!this.state.root) return "no repo to write into";
     if (isAbsolute(path) || normalize(path).startsWith("..")) return `${path} is outside ${this.state.repo}`;
@@ -341,14 +270,7 @@ export class Store {
     return null;
   }
 
-  /**
-   * Show a file that is not being written.
-   *
-   * Viewing only. Opening a file changes what YOU can see and nothing else -
-   * the intern's context is what you told it, in words, and browsing the repo
-   * must never quietly add to that. It sees the file LIST already; the
-   * contents are yours until you explain them.
-   */
+  /** Show a file that is not being written. */
   openFile(path: string, at?: number) {
     let body: string;
     let onDisk = true;
@@ -364,27 +286,14 @@ export class Store {
     });
   }
 
-  /**
-   * Swap the stage to the transcript and back.
-   *
-   * The conversation no longer has a pane of its own, so this is where "what
-   * did I already say" lives. On a key rather than always-on, because the
-   * point of dropping the column was to stop having two things competing to be
-   * read at once.
-   */
+  /** Swap the stage to the transcript and back. */
   toggleTranscript() {
     this.patch({
       stage: this.state.stage.kind === "transcript" ? { kind: "code" } : { kind: "transcript" },
     });
   }
 
-  /**
-   * Show a question being answered, then its answer.
-   *
-   * Rendered unattributed. It is a reference, not somebody talking - dum did
-   * not say it and neither did the wizard, and putting it in either mouth
-   * would mean one of them claiming knowledge that is not theirs.
-   */
+  /** Show a question being answered, then its answer. */
   asking(question: string) {
     this.patch({ stage: { kind: "answer", question, body: "", pending: true } });
   }
@@ -394,10 +303,7 @@ export class Store {
     this.patch({ stage: { kind: "answer", question, body, pending: false } });
   }
 
-  /**
-   * Something for you to read that isn't anyone speaking - help, a hint. On
-   * the stage, because a note under an open prompt is never seen.
-   */
+  /** Something for you to read that isn't anyone speaking - help, a hint. */
   show(title: string, body: string) {
     this.patch({ stage: { kind: "info", title, body } });
   }
@@ -436,10 +342,7 @@ export class Store {
     }
   }
 
-  /**
-   * :run - run the file on screen. Interpreted languages run; compiled ones
-   * get the line to type, because typing it is the lesson.
-   */
+  /** :run - run the file on screen. */
   runFile() {
     const path = this.state.code?.onDisk ? this.state.code.path : "";
     if (!path) return this.show(":run", "open a file first - :run runs the one on screen.");
@@ -459,10 +362,7 @@ export class Store {
     if (this.state.suggestion !== suggestion) this.patch({ suggestion });
   }
 
-  /**
-   * A hole being filled, one frame of it. The file as it will be with part of
-   * the code typed in - not on disk yet, and not yours to edit until it is.
-   */
+  /** A hole being filled, one frame of it. */
   typing(path: string, body: string, at: number) {
     const was = this.state.code;
     const same = was?.tool === "fill" && was.path === path;
@@ -551,8 +451,8 @@ export class Store {
   private previous: Stage | null = null;
 
   /**
-   * shift-tab: back to the page you were just on, and again to come back -
-   * alt-tab for the stage. The file, a reply and the log are a keystroke apart.
+   * shift-tab: back to the page you were just on, and again to come back - alt-tab for the
+   * stage.
    */
   flipStage() {
     if (this.previous) this.patch({ stage: this.previous });

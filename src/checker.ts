@@ -1,22 +1,4 @@
 // A second opinion on every line the wizard wants to say.
-//
-// The wizard's value is being right. A name you go and look up afterwards is
-// the whole product, and a confidently wrong one gets repeated in an
-// interview. The prompt asks it to be careful and mostly it is - but in a real
-// session it told someone who had just explained Rust macros that println! was
-// "monomorphization", and in eval runs it agreed with a wrong answer ("yeah,
-// ..= is inclusive" to someone who had just said exclusive) and produced the
-// odd garbled sentence. None of that went away by asking harder. So a separate
-// session, which did not write the line and has no stake in it, reads it
-// against what was actually said and can veto it.
-//
-// Lines the wizard searched for are not checked. They are about things newer
-// than either model's training, which a checker would reject for not
-// recognising - the exact failure search was added to fix.
-//
-// It fails open. A checker that is down is not a judgement on the line, and a
-// wizard that goes silent for a whole session because a second process died
-// is worse than one that goes unchecked for a while.
 
 import { Channel } from "./channel.ts";
 import { debug } from "./debug.ts";
@@ -68,20 +50,7 @@ export type Judgement = {
   reason: string;
 };
 
-/**
- * The checker's reply, reduced to a verdict, with two rules applied in code.
- *
- * A fact about something they got wrong is either agreeing with the mistake
- * ("yeah, ..= is inclusive" to someone who said exclusive) or a correction
- * wearing the wrong tag. The checker only has to read what they said; the rest
- * does not need a model. Anything that is not a clear ok is a drop.
- *
- * The mirror rule - a nudge on something they got right is a false alarm - was
- * here and came out. The checker reads a choice ("i'll store it as floats") as
- * "right" because nothing in it is a false claim, and the rule killed exactly
- * the nudges the wizard exists for. The wizard has not produced a false nudge
- * in any eval run, so the rule was paying for a problem nobody had.
- */
+/** The checker's reply, reduced to a verdict, with two rules applied in code. */
 export function judge(reply: string, kind: string): Judgement {
   const said = (/said:\s*(right|wrong|no claim)/i.exec(reply)?.[1]?.toLowerCase() ??
     null) as Judgement["said"];
@@ -101,8 +70,8 @@ export class Checker {
       tools: [],
       allowedTools: [],
       cwd: repo.root,
-      // Same reasoning as the wizard: it is one short judgement, and every
-      // second here is a second later that the line reaches the margin.
+      // Same reasoning as the wizard: it is one short judgement, and every second here is a
+      // second later that the line reaches the margin.
       effort: EFFORT,
       thinking: { type: "disabled" },
       settingSources: [],

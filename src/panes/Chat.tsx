@@ -1,9 +1,4 @@
 // The interrogation, as a scrolling column.
-//
-// Entries are flattened to styled lines by `lines.ts` and only the tail that
-// fits is drawn. Full-screen rendering costs you the terminal's own
-// scrollback, so a pane that overflows does not scroll - it silently loses the
-// question you were answering. The viewport is the floor, not a feature.
 
 import React from "react";
 import { Box, Text } from "ink";

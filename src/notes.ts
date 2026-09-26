@@ -1,16 +1,4 @@
 // One skill, as a markdown note you can open, edit, or write yourself.
-//
-// The tree used to be one JSON file. It worked for the program and was closed
-// to the person it is about: fixing a wrong entry meant hand-editing JSON, and
-// adding one meant knowing the schema. As a folder of notes it is something
-// you can read in any editor, and Obsidian opens it as a vault - "builds on"
-// is a [[link]], so its graph view draws the tree, and a prerequisite nobody
-// has recorded yet is an unresolved link, which Obsidian draws as a grey node.
-// That is the frontier, for free, again.
-//
-// Anything you write by hand counts as claimed: you say you hold it, and the
-// first build that leans on it gets one short check. A note with no
-// frontmatter at all is fine - the file name is the skill.
 
 import YAML from "yaml";
 import { langName, type Breadth, type Skill } from "./skills.ts";
@@ -21,11 +9,7 @@ export function stateOf(s: Skill): State {
   return s.claimed ? "claimed" : s.solid ? "solid" : "shaky";
 }
 
-/**
- * The file a skill lives in. Its name, minus what a file system or Obsidian
- * will not take in a file name. The real name is kept in the frontmatter, so
- * nothing is lost to this.
- */
+/** The file a skill lives in. */
 export function fileName(name: string): string {
   const safe = name
     .trim()
@@ -54,8 +38,7 @@ export function toNote(s: Skill): string {
   if (s.lang) front.lang = s.lang;
   if (s.repos.length) front.repos = s.repos;
   if (s.at) front.at = s.at;
-  // Tags, so Obsidian's graph can colour by state. Written, never read back:
-  // `state` is the source of truth and a stale tag must not override it.
+  // Tags, so Obsidian's graph can colour by state.
   front.tags = [`dum/${state}`, ...(s.breadth === "niche" ? ["dum/niche"] : [])];
   const body = [s.why.trim(), s.requires.length ? `builds on: ${s.requires.map(link).join(", ")}` : ""]
     .filter(Boolean)
@@ -65,14 +48,7 @@ export function toNote(s: Skill): string {
 
 const str = (v: unknown): v is string => typeof v === "string";
 
-/**
- * A note back into a skill, or null if it is not one.
- *
- * Forgiving on purpose, because people write these by hand: no frontmatter
- * means the file name is the skill and it is claimed, an unknown state is
- * claimed, and every [[link]] in the body is something it builds on - not
- * only the ones on the `builds on:` line dum writes.
- */
+/** A note back into a skill, or null if it is not one. */
 export function fromNote(text: string, file: string): Skill | null {
   let front: Record<string, unknown> = {};
   let body = text;

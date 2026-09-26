@@ -1,10 +1,4 @@
 // A text buffer with a cursor, and what every key does to it.
-//
-// Kept out of the component for the reason typing.ts is: it can be tested
-// without a terminal, and the pane stays a viewport that draws whatever this
-// says. Modal, with vim's keys, because the tree beside it already speaks
-// them - but the arrows, home/end and page keys work in both modes, so nobody
-// who never learned vim is locked out of reading a file. Editing needs `i`.
 
 export type Key = {
   upArrow: boolean;
@@ -81,11 +75,7 @@ export type Buf = {
 
 export type View = { rows: number; cols: number };
 
-/**
- * What a key asks of the world outside the buffer. `cmd:` is one of dum's own
- * commands typed on the `:` line (`:run`, `:graph`, `:log`), and `shell:` is
- * vim's `:!` - the pane passes both up rather than knowing what they do.
- */
+/** What a key asks of the world outside the buffer. */
 export type Effect = "save" | "leave" | "reload" | `cmd:${string}` | `shell:${string}`;
 
 /** dum's commands, the same on the input line and on the file's `:` line. */
@@ -136,14 +126,13 @@ export function vcol(line: string, col: number): number {
 }
 
 /**
- * Scroll the window by `n` lines, the way a wheel does in vim: the view moves,
- * and the cursor is dragged along only if it would fall off the screen.
+ * Scroll the window by `n` lines, the way a wheel does in vim: the view moves, and the cursor
+ * is dragged along only if it would fall off the screen.
  */
 export function scrollBy(b: Buf, n: number, view: View): Buf {
   const rows = Math.max(1, view.rows);
   const top = clamp(b.top + n, 0, Math.max(0, b.lines.length - rows));
-  // The same margin `scroll` keeps, or the next render pulls the view back
-  // to the cursor and the wheel looks dead - which is what it did.
+  // The same margin `scroll` keeps, or the next render pulls the view back.
   const off = Math.min(3, Math.floor((rows - 1) / 2));
   const lo = top === 0 ? 0 : top + off;
   const hi = top + rows - 1 >= b.lines.length - 1 ? b.lines.length - 1 : top + rows - 1 - off;
@@ -159,13 +148,7 @@ export function goto(b: Buf, row: number): Buf {
   return { ...b, row: r, col, want: col };
 }
 
-/**
- * Keep the cursor on screen.
- *
- * Scrolls only when the cursor leaves the window, with a few lines of margin,
- * rather than centring on every move the way the tree does - an editor that
- * recentres under you is one you cannot read while you move.
- */
+/** Keep the cursor on screen. */
 export function scroll(b: Buf, view: View): Buf {
   const rows = Math.max(1, view.rows);
   const cols = Math.max(1, view.cols);
@@ -358,8 +341,8 @@ function redo(b: Buf): Buf {
 /** Next match after the cursor (or before, backwards), wrapping once. */
 function find(b: Buf, back: boolean): Buf {
   if (!b.search) return tell(b, "nothing to search for - / first");
-  // Smart case: a pattern with no capitals ignores case, the way it does in
-  // vim and most editors' find boxes.
+  // Smart case: a pattern with no capitals ignores case, the way it does in vim and most
+  // editors' find boxes.
   const fold = b.search === b.search.toLowerCase();
   const norm = (s: string) => (fold ? s.toLowerCase() : s);
   const pat = norm(b.search);
@@ -397,8 +380,8 @@ function normal(b: Buf, ch: string, key: Key, view: View): Step {
     if (p === "g" && ch === "g") return { buf: to(b, 0, firstNonBlank(b.lines[0]!)) };
     if (p === "d" && ch === "d") return b.readOnly ? readOnly(b) : { buf: deleteLines(snap(b), b.row, 1) };
     if (p === "y" && ch === "y") return { buf: tell({ ...b, reg: [b.lines[b.row]!] }, "yanked 1 line") };
-    // A half-typed chord followed by something else is nothing, not a
-    // different command: `gj` must not move down.
+    // A half-typed chord followed by something else is nothing, not a different command: `gj`
+    // must not move down.
     return { buf: b };
   }
 
@@ -491,8 +474,7 @@ function insert(b: Buf, ch: string, key: Key, view: View): Step {
   if (key.delete) return { buf: forwardDelete(b) };
   if (key.tab) return { buf: insertText(b, "  ") };
   if (key.ctrl || key.meta || !ch) return { buf: b };
-  // A chunk can carry an Enter inside it - see typing.ts. Each one is a real
-  // line break here, indented like a typed Enter would be.
+  // A chunk can carry an Enter inside it - see typing.ts.
   let out = b;
   for (const part of ch.replace(/\r\n|\r/g, "\n").split(/(\n)/)) {
     if (part === "\n") out = newline(out);

@@ -42,9 +42,7 @@ type Args = {
 };
 
 function parse(args: string[]): Args {
-  // `understand` is the default because the skill tree makes it affordable:
-  // it asks about a mechanic once, and never again once you have explained
-  // it. anti-vibe is for the session where you only want to own the intent.
+  // `understand` is the default: the tree means it asks about a mechanic only once.
   let mode: Mode = "understand";
   let plain = false;
   let show = false;
@@ -84,13 +82,7 @@ function parse(args: string[]): Args {
   return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph, learn: learnArgs };
 }
 
-/**
- * The tree, printed.
- *
- * Plain lines rather than a pane, so it works from anywhere and pipes cleanly.
- * Shaky and not-yet-shown skills are kept visible on purpose: the gaps are
- * the useful part of a skill tree.
- */
+/** The tree, printed. */
 function printSkills(root: string) {
   const t = skills.read();
   if (!t.skills.length) {
@@ -138,7 +130,7 @@ async function line(prompt: string): Promise<string> {
   }
 }
 
-/** Start the tree over. Asks first, and moves the old one aside rather than deleting it. */
+/** Start the tree over. */
 async function resetSkills() {
   const n = skills.read().skills.length;
   if (n) {
@@ -153,12 +145,7 @@ async function resetSkills() {
   console.log(`  ${c.dim("dum --scan <folders> fills it from code you wrote yourself.")}\n`);
 }
 
-/**
- * Fill the tree from projects you say you wrote yourself.
- *
- * Nothing is written until you have seen the list and dropped what isn't
- * yours. What is kept lands as claimed, never known.
- */
+/** Fill the tree from projects you say you wrote yourself. */
 async function scanSkills(dirs: string[]) {
   if (!dirs.length) {
     console.error(`\n  usage: dum --scan <folder> [more folders]   (projects you wrote yourself, without AI)\n`);
@@ -324,10 +311,7 @@ function printProjects(only?: string) {
   console.log(`  ${c.dim(`done means its skills are on your tree. notes in ${projects.folder().replace(homedir(), "~")}/`)}\n`);
 }
 
-/**
- * Set up a rebuild: read the original, queue it as a goal with whatever steps
- * it needs under it, and make the empty folder it gets rebuilt in.
- */
+/** Read the original, queue it as a goal, and make the empty folder it's rebuilt in. */
 async function rebuildProject(args: string[]) {
   const [from, to] = args;
   if (!from) {
@@ -389,11 +373,7 @@ function printSteps(title: string, steps: { request: string; minutes?: number }[
   console.log();
 }
 
-/**
- * A project designed to teach one topic fast, set up to build feature by
- * feature. Nothing about what they know is assumed: the design reads the tree,
- * and says how much of the project it already covers.
- */
+/** A project designed to teach one topic fast, set up to build feature by feature. */
 async function learnTopic(args: string[]) {
   const [topic, to] = args;
   if (!topic?.trim()) {
@@ -416,8 +396,7 @@ async function learnTopic(args: string[]) {
   }
   bar.stop();
   const { held, missing } = learn.coverage(d.needs, t);
-  // No stepping stones. Learning fast means the gaps are handled inside the
-  // project - typed, or explained and filled - not sent off to other ones.
+  // No stepping stones: a learning project handles its gaps in-project.
   projects.write([
     {
       title: d.title,
@@ -510,8 +489,8 @@ function repoRoot(): string {
 async function main() {
   const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs } = parse(argv.slice(2));
 
-  // The tree is yours, not the repo's, so looking at it or editing it works
-  // from anywhere - only "known here" needs a repo.
+  // The tree is yours, not the repo's, so looking at it or editing it works from anywhere -
+  // only "known here" needs a repo.
   if (show) return printSkills(repoRoot());
   if (reset) return resetSkills();
   if (scan !== null) return scanSkills(scan);
@@ -546,15 +525,12 @@ async function main() {
     void showGraph(true).then((out) => store.note(out ? `graph opened in your browser: ${out.replace(homedir(), "~")}` : "couldn't draw the graph."));
   };
 
-  // A pane layout needs a terminal it can own. Without one - a pipe, a CI log,
-  // `dum | less` - the line-printer is not a downgrade, it is the only thing
-  // that works, and it is also how this program is scripted in a test.
+  // A pane layout needs a terminal it can own.
   const tui = !plain && stdout.isTTY && stdin.isTTY;
 
   const ui = tui ? await startInk(store, readLayout(repo.root)) : null;
   const stop = ui ? ui.stop : startPlain(store, repo.name, mode);
-  // `!cmd`: the panes step aside while it runs, and come back after. In plain
-  // mode there are no panes to move, so it just runs.
+  // `!cmd`: the panes step aside while it runs, and come back after.
   let shelling = false;
   store.onShell = (cmd) => {
     if (shelling) return;
@@ -629,16 +605,14 @@ async function main() {
 }
 
 async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () => void; suspend: (fn: () => Promise<void>) => Promise<void> }> {
-  // Imported lazily so the plain path never pays to load React and Ink, which
-  // matters for `dum` in a pipe and for the startup cost of `--plain`.
+  // Imported lazily so the plain path never pays to load React and Ink, which matters for `dum`
+  // in a pipe and for the startup cost of `--plain`.
   const [{ render }, React, { App }] = await Promise.all([
     import("ink"),
     import("react"),
     import("./panes/App.tsx"),
   ]);
-  // Mouse reports on, and a filtered stdin so Ink never sees them. Off again
-  // on every way out, or the shell afterwards prints "[<65;40;12M" whenever
-  // you touch the trackpad.
+  // Mouse reports on, and a filtered stdin so Ink never sees them.
   const input = filtered(stdin);
   const mouseOn = () => stdout.write(MOUSE_ON);
   const mouseOff = () => stdout.write(MOUSE_OFF);
@@ -654,14 +628,7 @@ async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () =>
       input.close();
       mouseOff();
     },
-    // Unmounting hands the terminal back - raw mode off, input released - so
-    // the command gets it whole. The store keeps everything; the panes are
-    // drawn fresh from it after.
-    //
-    // Unmounting also lets go of stdin, and with nothing else holding the
-    // event loop Node simply exits - mid "enter to go back". Found in tmux:
-    // dum quit the moment the command finished. So the suspend holds the
-    // process open itself until the panes are back.
+    // Unmounting releases stdin and Node would exit mid-prompt; `hold` keeps it alive.
     suspend: async (fn) => {
       const hold = setInterval(() => {}, 1 << 30);
       app.unmount();
@@ -683,10 +650,7 @@ async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () =>
 function startPlain(store: Store, repo: string, mode: Mode): () => void {
   banner(repo, mode);
   const input = new Input();
-  // Runs for the life of the process: it is a renderer, not a step. If it
-  // dies, the agent is left parked on a promise nobody will ever resolve, so
-  // this is fatal rather than something to log - a session that silently
-  // stops answering is worse than one that says why it stopped.
+  // Runs for the life of the process: it is a renderer, not a step.
   void runPlain(store, input).catch((err: Error) => {
     console.error(`\n  \x1b[38;5;167m✗\x1b[0m ${err.message}\n`);
     exit(1);

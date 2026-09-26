@@ -1,8 +1,4 @@
 // The layout tree, rendered.
-//
-// Walks the same structure `layout.ts` sized, so what is drawn and what was
-// measured can never disagree. Dividers are drawn between siblings rather than
-// around panes, because a border on every pane doubles every interior line.
 
 import React from "react";
 import { Box, Text } from "ink";

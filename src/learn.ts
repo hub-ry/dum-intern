@@ -1,15 +1,4 @@
 // Ask to learn a topic, and get a project that teaches it fast.
-//
-// The fastest way to learn one new thing is a project where it's the only new
-// thing. Everything around it should be something you already hold - so the
-// questions, the holes and the fills all land on the topic, and the rest gets
-// filled in front of you. That only works if the designer can see your tree,
-// which it can: nothing about what you know is assumed.
-//
-// What comes back is a small project cut into features, each one a request to
-// dum, and it runs like a rebuild: an empty folder, `go` for the next feature.
-// Some of it you'll already hold. That part gets filled as you go. The rest
-// you type, or explain - and once you've explained it, it gets filled too.
 
 import { z } from "zod";
 import * as skills from "./skills.ts";
@@ -92,13 +81,7 @@ Reply with ONLY JSON, no prose and no fence:
   };
 }
 
-/**
- * How much of what a project rests on is already on the tree.
- *
- * A held skill named only as something a new one builds on still counts: a
- * design that says "message envelopes build on json encoding" is resting on
- * json encoding, whether or not it listed it on its own line.
- */
+/** How much of what a project rests on is already on the tree. */
 export function coverage(needs: projects.Need[], t: skills.Tree): { held: string[]; missing: string[] } {
   const holds = projects.holder(t);
   const held: string[] = [];

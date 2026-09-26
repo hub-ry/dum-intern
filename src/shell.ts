@@ -1,17 +1,4 @@
 // A real shell, a keystroke away.
-//
-// Learning to build something includes learning to run it, and the panes made
-// that awkward: compiling meant leaving dum. So `!cmd` runs a command the way
-// vim's `:!` and Claude Code's `!` do - the panes step aside, the program gets
-// the terminal (input too, so interactive programs work), and Enter brings you
-// back. A bare `!` is your own shell until you `exit`.
-//
-// What runs here is yours. The intern isn't told and doesn't see the output,
-// same rule as the file pane: nothing quietly feeds its context.
-//
-// :run runs the open file, for languages where running is one obvious
-// command. Compiled ones don't get that: typing the compiler line yourself is
-// part of learning the language, so dum shows you the line instead.
 
 import { spawn } from "node:child_process";
 import { basename, extname } from "node:path";
@@ -60,21 +47,13 @@ export function runnerFor(path: string): { cmd: string } | { hint: string } | nu
   return null;
 }
 
-/**
- * Run a command with the terminal handed over, and wait for Enter after.
- *
- * Async, not spawnSync: the intern may still be working, and it keeps
- * publishing to the store while the panes are away. SIGINT is ignored here
- * while the child runs - ctrl-c belongs to the program, and without a
- * listener Node would take the whole of dum down with it.
- */
+/** Run a command with the terminal handed over, and wait for Enter after. */
 export async function run(cmd: string, cwd: string, wait = true): Promise<number> {
   const shell = process.env.SHELL || "/bin/sh";
   const args = cmd.trim() ? ["-c", cmd] : ["-i"];
   const ignore = () => {};
   process.on("SIGINT", ignore);
-  // The child reads the terminal directly. Anything of ours still reading
-  // stdin would race it for keystrokes, so ours stops until it's done.
+  // Stop reading stdin while the child has it, or we race it for keys.
   const flowing = !stdin.isPaused();
   stdin.pause();
   stdout.write("\x1b[?25h");

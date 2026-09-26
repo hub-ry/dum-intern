@@ -1,14 +1,4 @@
 // The line-printer renderer.
-//
-// What dum-intern looked like before the panes, kept for two reasons that are
-// not nostalgia. Ink needs a TTY, and this program is deliberately drivable
-// from a pipe - `Input` reads a whole piped stdin up front so a scripted
-// session works end to end. So this is the renderer for `--plain` and for any
-// non-TTY stdout.
-//
-// It subscribes to the store exactly like the Ink renderer does, and formats
-// with the same `lines.ts`. `session.ts` cannot tell which one is attached,
-// which is why there is no second path through the agent loop to keep in sync.
 
 import { stdout, stdin } from "node:process";
 import { createInterface } from "node:readline/promises";
@@ -24,7 +14,7 @@ export function banner(repo: string, mode: string) {
   console.log();
 }
 
-/** Something to look at while the intern thinks. No-op off a TTY - `\r` does not erase in a pipe. */
+/** Something to look at while the intern thinks. */
 export function thinking(label: string) {
   if (!stdout.isTTY) return () => {};
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -38,14 +28,7 @@ export function thinking(label: string) {
   };
 }
 
-/**
- * Terminal input, with a piped mode for testing.
- *
- * Two modes because they fail differently. At a terminal, a closed stdin means
- * you walked away and nothing should get built. Through a pipe, EOF arrives the
- * instant the data is buffered - racing there would kill a session whose
- * answers are all sitting in memory.
- */
+/** Terminal input, with a piped mode for testing. */
 export class Input {
   private rl: ReturnType<typeof createInterface> | null = null;
   /** Piped lines that arrived before anyone asked. */
@@ -58,11 +41,7 @@ export class Input {
       this.rl = createInterface({ input: stdin, output: stdout });
       return;
     }
-    // Lines are read as they arrive, not slurped up front. A blocking read of
-    // fd 0 works for `echo y | dum` but throws EAGAIN on a pipe that is still
-    // open and non-blocking - which is every pipe from another process that is
-    // answering as it goes, the thing a script driving dum actually does.
-    // Queued because readline drops a line nobody is listening for.
+    // Lines are read as they arrive, not slurped up front.
     const rl = createInterface({ input: stdin });
     rl.on("line", (line) => {
       if (this.waiter) {
@@ -103,17 +82,11 @@ export class Input {
   }
 }
 
-/**
- * Drive a session with nothing but lines.
- *
- * The transcript is append-only, so a high-water mark is the entire diff this
- * renderer needs: no keys, no reconciliation, and no redrawing a line that has
- * already scrolled off.
- */
+/** Drive a session with nothing but lines. */
 export async function runPlain(store: Store, input: Input): Promise<void> {
   let printed = 0;
-  // Said once, when the intern's model is first known, and again only if a
-  // voice changes model - a line printer has no corner to keep it in.
+  // Said once, when the intern's model is first known, and again only if a voice changes model
+  // - a line printer has no corner to keep it in.
   let models = "";
   let shown: unknown = null;
   let wake: (() => void) | null = null;
@@ -125,8 +98,7 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     stop?.();
     stop = null;
     const v = (x: { model: string; effort: string }) => voiceName(x.model, x.effort);
-    // Held until the effort is read back, which lands a beat after the
-    // model. If it never does, the intern's first line releases it without.
+    // Held until the effort is read back, which lands a beat after the model.
     const ready = s.models.intern.model && (s.models.intern.effort || s.transcript.some((e) => e.kind === "say"));
     const said = ready
       ? `dum is ${v(s.models.intern)}${s.models.wizard.model ? `, the wizard is ${v(s.models.wizard)}` : ""}`
@@ -164,8 +136,7 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
       await new Promise<void>((r) => (wake = r));
       continue;
     }
-    // Once per prompt. A `?` or a `not yet` leaves the same prompt standing,
-    // and printing its hints again reads as a second question.
+    // Once per prompt.
     if (s.prompt !== hinted) {
       hinted = s.prompt;
       // Where things stand, every turn: nobody should have to remember it.

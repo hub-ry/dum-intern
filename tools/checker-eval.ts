@@ -1,16 +1,4 @@
-// Runs the checker over lines with a known verdict and counts how often it
-// agrees.
-//
-// Two numbers matter and they pull against each other. How many bad lines it
-// catches, because a wrong name in the margin is the worst thing the wizard
-// can do. And how many good lines it drops, because a checker that vetoes
-// everything is just a slower way to have no wizard.
-//
-//   npm run eval:checker          every line, 3 runs each
-//   npm run eval:checker -- 5     5 runs each
-//
-// The bad lines marked "real" came out of the wizard in a session or an eval
-// run. The rest are the near-miss names the wizard is prone to.
+// Runs the checker over lines with a known verdict and counts how often it agrees.
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -105,8 +93,8 @@ const LINES: Line[] = [
     text: "what does 0.1 + 0.2 give you as a float? money usually lives in integer cents to avoid rounding errors." },
   { ...SHA, kind: "nudge", good: true, note: "real",
     text: "what happens if someone steals the password table - does a bare hash slow them down at all? plain sha256 is fast to brute-force, so people use bcrypt or argon2, which are built to be slow." },
-  // Either verdict is defensible: it reads as a claim about THEIR setup rather
-  // than as practice. Printed, not scored.
+  // Either verdict is defensible: it reads as a claim about THEIR setup rather than as
+  // practice.
   { ...WEBHOOK, kind: "fact", good: null, note: "real, gray area",
     text: "that's idempotency keying - storing the event id in a unique-constrained column so retries get rejected by the db itself, not just app logic." },
   { ...NODE, kind: "nudge", good: true, note: "real",
@@ -121,8 +109,8 @@ const runs = Number(process.argv[2]) || 3;
 const root = mkdtempSync(`${tmpdir()}/dum-checker-eval-`);
 const repo = { name: "eval", root, files: [], readme: "" };
 
-// A few checkers side by side, each taking lines in turn, the way the wizard
-// uses one: a long-lived session that has seen earlier lines.
+// A few checkers side by side, each taking lines in turn, the way the wizard uses one: a
+// long-lived session that has seen earlier lines.
 const WORKERS = 3;
 const verdicts = new Map<number, { ok: boolean; reason: string }[]>();
 const jobs: { i: number }[] = [];

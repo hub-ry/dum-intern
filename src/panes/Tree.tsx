@@ -1,14 +1,4 @@
 // The repo, walkable.
-//
-// Viewing only. Opening a file changes what YOU can see and nothing else - the
-// intern's context is what you told it, in words. An earlier version let you
-// attach a file from here, and it was the wrong idea in a program whose whole
-// premise is that you can explain what you want: browsing a repo is not
-// explaining, and a pane that quietly fed the intern context would have made
-// "it builds what you can explain" false in a way you could not see.
-//
-// Keys follow neo-tree, because a file tree in a terminal is a solved problem
-// and nobody wants to learn a fourth set of bindings for one.
 
 import React, { useMemo, useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";

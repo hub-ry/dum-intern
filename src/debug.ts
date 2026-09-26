@@ -1,14 +1,4 @@
 // A log you can tail, for the voices that fail silently on purpose.
-//
-// The wizard fails silently by design - garnish that apologises is worse than
-// garnish that is absent. But silent failure is indistinguishable from a wizard
-// that simply had nothing to say, which makes it undebuggable. `DUM_DEBUG=1`
-// is the seam between those two.
-//
-// Goes to a file, not to stderr. Under the panes there is no stderr to write
-// to: Ink owns the screen, and a line printed behind its back sits there until
-// the next full redraw. A log you can `tail -f` in another window is also just
-// better for a thing that fires once per answer.
 
 import { appendFileSync, mkdirSync } from "node:fs";
 

@@ -1,32 +1,12 @@
-// The breadth. Not a character.
-//
-// dum builds and dum explains its own work. It is early-career on purpose and
-// has no business telling you what the industry does - that was the bug where
-// it answered "is vector search slow in Python" with a survey of the field.
-//
-// So this is where breadth lives, and it does two jobs:
-//
-//   asking    You typed a question with `?`. It answers properly, at whatever
-//             length the question needs, and the answer is rendered
-//             unattributed - it is a reference, not somebody talking.
-//   reviewing dum finished a build. It checks what was written against the
-//             spec you approved and says only what does not match. That check
-//             is the wizard catching things, so it renders in the wizard's
-//             voice.
-//
-// One session for both because they are the same brain doing the same kind of
-// work, and a second process would double the startup cost to serve two things
-// that are never busy at once. The wizard's own quip session is left strictly
-// alone: its persona is one short prompt, it is the part of this program that
-// most depends on tone, and it is not worth risking to save a process.
+// Industry context the intern shouldn't claim: `?` answers and build review.
 
 import type { Repo } from "./repo.ts";
 import { Channel } from "./channel.ts";
 
 const MODEL = "claude-sonnet-5";
 /**
- * High, pinned rather than left to the default: it answers what you typed a
- * `?` for and reviews finished builds, and neither sits in anyone's way.
+ * High, pinned rather than left to the default: it answers what you typed a `?` for and reviews
+ * finished builds, and neither sits in anyone's way.
  */
 const EFFORT = "high";
 
@@ -99,14 +79,7 @@ For a question, the answer alone. For a review, the findings alone, or exactly
 
 const TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
 
-/**
- * Today, and the rule that comes with it.
- *
- * Stricter than the wizard's version because this is where you ask about
- * things directly. "what changed in X 5.5" answered from memory is either
- * stale or a denial that X 5.5 exists, and neither is acceptable in a coding
- * tool.
- */
+/** Today, and the rule that comes with it. */
 function lookup(now = new Date()): string {
   const today = now.toISOString().slice(0, 10);
   return `LOOKING THINGS UP
@@ -122,14 +95,7 @@ Today is ${today}. Your memory stops well before that.
 }
 
 export class Reference {
-  /**
-   * Requests run one at a time, but they QUEUE rather than being dropped.
-   *
-   * The opposite of the wizard, deliberately. A quip that arrives late is
-   * noise and gets thrown away; a question you typed is something you are
-   * sitting there waiting for, and dropping it would look like the program
-   * ignored you. Queueing is what the channel does on its own.
-   */
+  /** Requests run one at a time, but they QUEUE rather than being dropped. */
   private channel: Channel;
   private repo: Repo;
 
@@ -138,11 +104,7 @@ export class Reference {
     this.channel = new Channel("reference", {
       model: MODEL,
       systemPrompt: `${VOICE}\n\n${lookup()}`,
-      // Read-only, plus the web. It has to be able to open the files it is
-      // reviewing, or a "review" is just the spec read back to you with
-      // opinions - and it has to be able to look past its training cutoff, or
-      // a question about anything recent gets "that doesn't exist" as an
-      // answer.
+      // Read-only, plus the web.
       tools: TOOLS,
       allowedTools: TOOLS,
       cwd: repo.root,
@@ -170,12 +132,7 @@ export class Reference {
     );
   }
 
-  /**
-   * Check a finished build against the spec that authorised it.
-   *
-   * Null when the build matches - and null is the common case, so the caller
-   * must treat silence as normal rather than as a failure.
-   */
+  /** Check a finished build against the spec that authorised it. */
   async review(spec: string, wrote: string[]): Promise<string | null> {
     if (!wrote.length) return null;
     const reply = await this.send(

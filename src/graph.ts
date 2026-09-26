@@ -1,16 +1,4 @@
 // The tree and the queue as one picture you can move around in.
-//
-// Two traditions, on purpose. The Rust project's skill-tree draws a roadmap as
-// Graphviz boxes, each a group of items with a box to tick, climbing from what
-// exists toward what's planned - which is exactly what a project is here: a
-// group of skills it unlocks. Obsidian's graph is how you actually live in a
-// vault: hover to see what touches what, click to read the note. So the layout
-// is Graphviz's and the interaction is Obsidian's.
-//
-// It's one HTML file with everything inside it. Graphviz runs here, in Node, as
-// WebAssembly from npm, and the SVG goes into the page already laid out; the
-// pan-and-zoom script is inlined from node_modules. Nothing loads from a CDN,
-// so it opens on a plane.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -23,7 +11,10 @@ export type Node = {
   id: string;
   kind: "skill" | "project";
   title: string;
-  /** solid | claimed | shaky | ghost for a skill; done | ready | waiting | unplanned for a project. */
+  /**
+   * solid | claimed | shaky | ghost for a skill; done | ready | waiting | unplanned for a
+   * project.
+   */
   state: string;
   /** Skill: goal/step/idea is empty. Project: its kind. */
   sub: string;
@@ -43,15 +34,7 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const SKILL_MARK: Record<string, string> = { solid: "☑", claimed: "◐", shaky: "☐", ghost: "☐" };
 const PROJECT_MARK: Record<string, string> = { done: "✓", ready: "▶", waiting: "·", unplanned: "?" };
 
-/**
- * The graph, and the DOT that lays it out.
- *
- * A skill lives in exactly one place: as a row in the first project that
- * unlocks it, or as a node of its own if no project does. Its prerequisites
- * point at wherever they live - a node, or a row in some project's box - so
- * the tree you've grown and the climb you've queued are one graph, not two
- * pictures side by side.
- */
+/** The graph, and the DOT that lays it out. */
 export function build(t: skills.Tree, ps: projects.Project[], home = skills.home()): Graph {
   const holds = projects.holder(t);
   const nodes: Node[] = [];
@@ -63,10 +46,8 @@ export function build(t: skills.Tree, ps: projects.Project[], home = skills.home
   const pid = new Map<string, string>();
   ps.forEach((p, i) => pid.set(skills.key(p.title), `p-${i}`));
   const rows = new Map<string, { key: string; name: string; port: string }[]>();
-  // Every project lists everything it unlocks, the way a skill-tree group
-  // lists its items even when another group has them too. One of those rows
-  // is where the skill "lives" for its prerequisite edges: the first in a
-  // step or goal, since that's the climb; an idea only when nothing else has it.
+  // Every project lists everything it unlocks, the way a skill-tree group lists its items even
+  // when another group has them too.
   const order = ps.map((p, i) => ({ p, i })).sort((a, b) => Number(a.p.kind === "idea") - Number(b.p.kind === "idea"));
   for (const { p, i } of order) {
     const id = `p-${i}`;
@@ -166,8 +147,7 @@ export function build(t: skills.Tree, ps: projects.Project[], home = skills.home
     return `  ${q(nd.id)} [id="${nd.id}" class="project ${nd.state} ${nd.sub}" shape=plain label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" STYLE="ROUNDED">${head}${body}</TABLE>>]`;
   };
 
-  // A goal and the steps that lead to it share a frame, like a roadmap
-  // section. The tree you've grown gets its own. Ideas float.
+  // A goal and the steps that lead to it share a frame, like a roadmap section.
   const clusters: string[] = [];
   const inCluster = new Set<string>();
   ps.forEach((p, i) => {

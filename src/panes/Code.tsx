@@ -1,15 +1,4 @@
 // The file: being written, or open under your hands.
-//
-// One pane for both, because they are the same thing at different moments.
-// While the intern writes, this follows the tail with no cursor - the
-// interesting end of a file that is still arriving is the end. Once the file
-// is on disk it is a buffer you can scroll, search and edit, and a file you
-// open from the tree is that from the start. What every key does lives in
-// editor.ts; this draws it.
-//
-// Buffers outlive the view. The intern starting a new file pulls the pane
-// onto it, and your unsaved edits to the last one must not go with it, so
-// each path keeps its buffer here until the file is saved or reloaded.
 
 import React, { useEffect, useReducer, useRef } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
@@ -22,10 +11,7 @@ import { scrolls } from "../mouse.ts";
 
 type Entry = { source: string; buf: Buf; jump?: number };
 
-/**
- * Every buffer, outside the component. Running a shell command takes the panes
- * down and puts them back, and unsaved edits must be there when they return.
- */
+/** Every buffer, outside the component. */
 const BUFFERS = new Map<string, Entry>();
 
 export function Code({
@@ -57,8 +43,8 @@ export function Code({
   const buffers = useRef(BUFFERS);
   const [, bump] = useReducer((n: number) => n + 1, 0);
 
-  // The gutter is sized off the text before the buffer exists, because the
-  // buffer's width depends on it. A trailing newline is not a line.
+  // The gutter is sized off the text before the buffer exists, because the buffer's width
+  // depends on it.
   const count = code ? Math.max(1, code.body.split("\n").length - (code.body.endsWith("\n") ? 1 : 0)) : 0;
   const gutter = Math.max(2, String(count).length);
   // margin, gutter, space, text, space, scrollbar, margin
@@ -120,14 +106,13 @@ export function Code({
     );
   }
 
-  // Without the trailing newline, or the highlighter hands back a 17th,
-  // empty line for a 16-line file and the gutter counts it.
+  // Without the trailing newline, or the highlighter hands back a 17th, empty line for a
+  // 16-line file and the gutter counts it.
   const lines = highlight(buf.lines.join("\n"), code.path);
   const shown = lines.slice(buf.top, buf.top + view.rows);
   const bar = scrollbar(buf.lines.length, buf.top, view.rows);
   const where = `${buf.row + 1}:${vcol(buf.lines[buf.row]!, buf.col) + 1}`;
-  // TODO(dum) blocks, painted in the gutter. Off the live buffer, so a block
-  // you are typing over stops being painted once its marker is gone.
+  // TODO(dum) blocks, painted in the gutter.
   const holes = spans(buf.lines.join("\n"));
   const inHole = (n: number) => holes.some(([a, b]) => n >= a && n <= b);
 
@@ -179,15 +164,7 @@ function whyReadOnly(c: CodeView): string {
   return "not on disk yet";
 }
 
-/**
- * The buffer for what the pane is showing, made or refreshed.
- *
- * Rebuilt when the text under it changes and nothing of yours is in it: a
- * streaming write changes on every chunk, a landed write swaps the fragment
- * for the file. If you HAVE edited it and the disk moved anyway, the buffer
- * stays yours and says so - dropping edits over a race the intern started is
- * not a call this pane gets to make. `:e` is the explicit version.
- */
+/** The buffer for what the pane is showing, made or refreshed. */
 function buffer(map: Map<string, Entry>, code: CodeView, view: View): Entry {
   const key = keyOf(code);
   const readOnly = whyReadOnly(code);
@@ -209,8 +186,8 @@ function buffer(map: Map<string, Entry>, code: CodeView, view: View): Entry {
   }
   if (code.jump !== undefined && entry.jump !== code.jump && code.at !== undefined && !code.live) {
     entry.jump = code.jump;
-    // A third of the way down, like vim landing on a far jump: the hole and
-    // what leads into it, rather than the hole on the bottom edge.
+    // A third of the way down, like vim landing on a far jump: the hole and what leads into it,
+    // rather than the hole on the bottom edge.
     const g = goto(entry.buf, code.at);
     entry.buf = { ...g, top: Math.max(0, g.row - Math.floor(view.rows / 3)) };
   }

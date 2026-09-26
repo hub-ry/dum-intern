@@ -1,16 +1,4 @@
 // Fill the tree from code you wrote yourself.
-//
-// An empty tree means dum asks about everything, and the first sessions pay for
-// every skill you already had before dum existed. So you can point it at
-// projects you say you wrote without AI, and it reads them for the concepts
-// the code actually rests on.
-//
-// What it finds is a claim, not proof. You say you wrote it; nobody watched.
-// So nothing lands as known: each one is claimed, and the first build that
-// leans on it gets one short check. And nothing lands at all until you have
-// read the list and dropped what you don't actually own - a scan that reads a
-// vendored library or a file a friend wrote would otherwise hand you their
-// skills.
 
 import { oneShot, json } from "./oneshot.ts";
 import { z } from "zod";
@@ -94,7 +82,7 @@ export function checkDir(dir: string): { path: string } | { error: string } {
   return { path };
 }
 
-/** Read one project and return what it shows. Empty on any failure - a scan is never worth a crash. */
+/** Read one project and return what it shows. */
 export async function scan(dir: string, tree: skills.Tree, onStatus?: (s: string) => void): Promise<Found[]> {
   return parse(await oneShot(prompt(tree), { model: MODEL, effort: EFFORT, cwd: dir, tools: TOOLS, onStatus }));
 }

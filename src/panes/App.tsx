@@ -1,9 +1,4 @@
 // The screen.
-//
-// A header, the panes, and the field. Everything below the header is a pure
-// function of store state and the layout tree, so adding or moving a pane
-// never means adding another way for the agent to be heard - there is exactly
-// one, and it is the store.
 
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
@@ -27,10 +22,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { stdout } = useStdout();
   const [tick, setTick] = useState(0);
-  // Three things want the keyboard: the field, the stage, and the tree. Tab
-  // walks them in a ring. shift-tab doesn't walk it backwards - with three
-  // stops that's two tabs - it flips the stage back to the page you were on,
-  // alt-tab style, because that's the move you make ten times a session.
+  // Three things want the keyboard: the field, the stage, and the tree.
   const [focus, setFocus] = useState<Focus>("input");
   // While the editor is taking text, tab is two spaces and not a focus change.
   const [typing, setTyping] = useState(false);
@@ -43,13 +35,10 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       if (key.shift) return store.flipStage();
       return setFocus((f) => ring[(ring.indexOf(f) + 1) % ring.length]!);
     }
-    // No other global chords, on purpose. They collide: ctrl-g belongs to a
-    // browser extension, ctrl-e to every shell's end-of-line. dum's commands
-    // are typed instead - `:run`, `:graph`, `:log` - like vim's ex line.
+    // No other global chords, on purpose.
   });
 
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
-  // Terminal rows and columns are 1-based, and the header takes row 1.
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
   const body = Math.max(3, rows - 3);

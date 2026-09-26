@@ -1,16 +1,4 @@
 // Rebuild a project you already have, from nothing, without vibecoding it.
-//
-// Having a project is not the same as being able to explain it - especially
-// one that got written quickly, or with a model's help. So you point dum at it,
-// and it becomes a goal like any other: mapped for what it rests on, laddered
-// against your tree, and cut into milestones you build one by one in a fresh
-// folder.
-//
-// The original stays out of reach. The rebuild folder is its own repo and the
-// intern's path gate refuses anything outside it, so the one way the code gets
-// there is the usual way: explained, typed into a hole, or - for skills you
-// already hold - filled in front of you. Skipping the parts you know is fine.
-// Code turning up without you seeing it isn't.
 
 import { z } from "zod";
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, readdirSync } from "node:fs";
@@ -26,10 +14,7 @@ export const VOICE = { model: MODEL, effort: EFFORT };
 const TOOLS = ["Read", "Glob", "Grep"];
 
 export type Milestone = { request: string; done: boolean; minutes?: number };
-/**
- * A folder built one milestone at a time. A rebuild has a `source` it was read
- * from; a learning project has the `topic` it was designed to teach instead.
- */
+/** A folder built one milestone at a time. */
 export type Rebuild = { source: string; goal: string; milestones: Milestone[]; topic?: string };
 
 const file = (root: string) => `${root}/.dum/milestones.json`;

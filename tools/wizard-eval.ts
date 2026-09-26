@@ -1,15 +1,4 @@
-// Runs the wizard over fixed exchanges, several times each, and prints what it
-// said.
-//
-// The wizard's behaviour was tuned by measuring it - "lease, not dead letter
-// queue, 5 out of 5" - and a prompt change can quietly undo that. So this is
-// how a change to its voice gets checked: run it, read the lines, count.
-//
-//   npm run eval:wizard            every case, 3 runs each
-//   npm run eval:wizard -- 5 lease 5 runs of the cases whose id contains "lease"
-//
-// Each run is a fresh wizard, because a long-lived one passes on a topic it
-// already commented on, which would make the second run meaningless.
+// Runs the wizard over fixed exchanges, several times each, and prints what it said.
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,7 +31,6 @@ const CASES: Case[] = [
     kind: "fact",
   },
   {
-    // Verbatim from a real session, where it answered "that's monomorphization".
     id: "name-macro",
     request: "print hello world in rust",
     answer:
@@ -168,8 +156,8 @@ async function once(c: Case): Promise<{ line: string | null; kind: Kind | null; 
 }
 
 let failed = 0;
-// Cases run concurrently, a few at a time: one at a time takes minutes, and all
-// at once spawns a process per run.
+// Cases run concurrently, a few at a time: one at a time takes minutes, and all at once spawns
+// a process per run.
 const settled = new Map<string, Awaited<ReturnType<typeof once>>[]>();
 const queue = [...cases];
 await Promise.all(

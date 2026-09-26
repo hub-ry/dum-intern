@@ -1,16 +1,4 @@
 // One long-lived model session: send a message, get one reply back.
-//
-// The wizard, the reference, and the checker are all this shape. Each keeps a
-// session open for the life of the run rather than starting one per message -
-// measured before the wizard was written, a fresh `query` per exchange cost
-// 13-50 seconds, almost none of it generation. It is the CLI process starting
-// up, and at that latency a margin note lands two exchanges after the thing it
-// is about.
-//
-// Replies come back in order, one at a time. A message sent while another is in
-// flight waits its turn. Whether waiting is right (a `?` question you are
-// sitting there for) or wrong (a margin note that would be stale by the time it
-// printed) is the caller's decision, which is why nothing is dropped here.
 
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { debug } from "./debug.ts";
@@ -47,11 +35,7 @@ export function lastText(msg: any): string {
   return text.trim();
 }
 
-/**
- * The model and effort a live session is actually using, or null if the SDK
- * can't say. Read, not assumed: an unpinned effort resolves per model, and a
- * pinned one can still be capped by settings or the organisation.
- */
+/** The model and effort a live session is actually using, or null if the SDK can't say. */
 export async function applied(session: unknown): Promise<{ model: string; effort: string } | null> {
   try {
     const s = await (session as { getSettings?: () => Promise<any> }).getSettings?.();
@@ -70,15 +54,11 @@ export class Channel {
   private closed = false;
   private label: string;
   private options: Options;
-  /**
-   * Called with the model and effort the session actually runs at, once it
-   * starts. The init message carries the model; effort is read back from the
-   * session's applied settings, since that is after every default and cap.
-   */
+  /** Called with the model and effort the session actually runs at, once it starts. */
   onModel: ((model: string, effort: string) => void) | null = null;
 
-  // Written out rather than as parameter properties: Node strips types, it
-  // does not compile them, and `constructor(private x: T)` needs compiling.
+  // Written out rather than as parameter properties: Node strips types, it does not compile
+  // them, and `constructor(private x: T)` needs compiling.
   constructor(label: string, options: Options) {
     this.label = label;
     this.options = options;
@@ -115,9 +95,7 @@ export class Channel {
             continue;
           }
           if (msg.type === "assistant") {
-            // Only the last message counts. With a tool in play the model can
-            // say "let me check" before the call, and that must never be glued
-            // onto the front of what it says afterwards.
+            // Only the last message counts: text before a tool call isn't the answer.
             const text = lastText(msg);
             if (text) out = text;
             if (msg.message?.content?.some((b: any) => b?.type === "tool_use")) searched = true;

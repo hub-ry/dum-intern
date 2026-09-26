@@ -1,20 +1,4 @@
 // Projects you want to build, and the ones you have to build first.
-//
-// The tree says what you hold. A project needs more than that, sometimes far
-// more: a multiplayer game server rests on sockets, which rest on processes
-// and byte streams, which rest on things you may never have touched. dum won't
-// build what you can't explain, so a goal eight tiers above your tree is a
-// goal you can't start - unless something walks you up to it.
-//
-// So each queued project gets a plan. The skills it rests on are mapped (a
-// model's job), then tiered against your tree (this file's job, in code):
-// what you know is tier 0, and anything else sits one above the highest thing
-// it builds on. Every tier below the goal becomes stepping-stone projects, each
-// small enough to unlock a few skills in an evening.
-//
-// Nothing here is ticked off by hand. A project is done when the skills it
-// unlocks are known on the tree, and ready when what it comes after is done -
-// so explaining something, or typing it into a hole, is what moves the queue.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync } from "node:fs";
 import YAML from "yaml";
@@ -64,8 +48,7 @@ export function toNote(p: Project): string {
   if (p.planned) front.planned = p.planned;
   if (p.minutes) front.minutes = p.minutes;
   front.tags = [`dum/project/${p.kind}`];
-  // The same edges again as links, for the graph view. Frontmatter is what
-  // gets read back; these are regenerated on every write.
+  // The same edges again as links, for the graph view.
   const links = [
     p.unlocks.length ? `unlocks: ${p.unlocks.map(link).join(", ")}` : "",
     p.after.length ? `after: ${p.after.map(link).join(", ")}` : "",
@@ -154,15 +137,7 @@ export function write(ps: Project[], dir = skills.home()) {
 
 export type Need = { name: string; requires: string[] };
 
-/**
- * How far above the tree each needed skill sits.
- *
- * Known (or claimed - they said so, and planning is not an exam) is 0.
- * Anything else is one more than the highest thing it builds on. A
- * prerequisite the map named but did not describe counts as a leaf: one above
- * what they know. A cycle is cut where it closes rather than recursing
- * forever - the map is a model's output, and models draw cycles.
- */
+/** How far above the tree each needed skill sits. */
 export function tiers(needs: Need[], holds: (name: string) => boolean): Map<string, number> {
   const byKey = new Map(needs.map((n) => [skills.key(n.name), n]));
   const tier = new Map<string, number>();
@@ -191,13 +166,8 @@ export const PER_STEP = 3;
 export type Step = { tier: number; unlocks: string[]; after: number[] };
 
 /**
- * The stepping stones under a goal: every missing tier below the top, cut
- * into groups of at most PER_STEP skills. The goal itself takes the top tier.
- *
- * A step comes after another only when one of its skills builds on one of the
- * other's - so two independent branches can be climbed in either order,
- * instead of a single line that makes you learn SQL before you're allowed to
- * touch sockets.
+ * The stepping stones under a goal: every missing tier below the top, cut into groups of at
+ * most PER_STEP skills.
  */
 export function ladder(
   needs: Need[],
@@ -207,8 +177,8 @@ export function ladder(
   const missing = needs.filter((n) => (t.get(n.name) ?? 0) > 0);
   const height = Math.max(0, ...missing.map((n) => t.get(n.name)!));
   const top = missing.filter((n) => t.get(n.name) === height).map((n) => n.name);
-  // Everything tier 1 can be learned inside the goal itself when that's all
-  // there is: dum asks about it, or leaves it as a hole.
+  // Everything tier 1 can be learned inside the goal itself when that's all there is: dum asks
+  // about it, or leaves it as a hole.
   if (height <= 1) return { steps: [], top: missing.map((n) => n.name), topAfter: [], height };
   const steps: Step[] = [];
   const stepOf = new Map<string, number>();

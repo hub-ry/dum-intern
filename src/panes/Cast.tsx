@@ -1,14 +1,4 @@
 // The two voices, with faces, and what they are saying underneath.
-//
-// This is the conversation now. The wizard sits on top because it speaks
-// least: a voice that interrupts rarely reads as an aside, and putting it
-// above the intern keeps it out of the path between a question and the answer
-// you are typing.
-//
-// Lines type themselves out. That is not only decoration - a line that appears
-// all at once is indistinguishable from a line that was already there, and the
-// whole point of two speakers in one column is being able to tell that
-// somebody just said something.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "ink";
@@ -134,10 +124,7 @@ function Speaker({
   );
 }
 
-/**
- * What dum says, cut to what fits in working memory. The whole of it is in the
- * transcript; a wall of text here is a turn nobody reads.
- */
+/** What dum says, cut to what fits in working memory. */
 const SAY_LINES = 6;
 
 function clamped(lines: string[], n?: number): string[] {
@@ -176,13 +163,7 @@ function Face({
   );
 }
 
-/**
- * Reveal text a few characters at a time, restarting whenever it changes.
- *
- * Deliberately not animated per-render: the visible length lives in a ref so a
- * re-render caused by anything else - a keystroke, a sprite frame - does not
- * rewind or jump the reveal.
- */
+/** Reveal text a few characters at a time, restarting whenever it changes. */
 function useTypewriter(text: string): { shown: string; typing: boolean } {
   const [n, setN] = useState(0);
   const last = useRef(text);
@@ -211,12 +192,7 @@ function lastQuip(s: State): string {
   return "";
 }
 
-/**
- * What the intern is saying right now.
- *
- * A pending question wins over anything else: it is the thing blocking you,
- * and it must be the thing under its face.
- */
+/** What the intern is saying right now. */
 function currentLine(s: State): string {
   if (s.prompt?.type === "question") return s.prompt.question;
   if (s.prompt?.type === "spec") return "that is the spec. build it?";

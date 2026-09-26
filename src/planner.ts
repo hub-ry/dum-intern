@@ -1,17 +1,11 @@
-// The model's half of planning: what a goal rests on, and what to build on
-// the way up. Tiering and ordering are code, in projects.ts - a model is good
-// at knowing that websockets sit on HTTP and TCP, and bad at counting.
+// The model's half of planning: what a goal rests on, and what to build on the way up.
 
 import { z } from "zod";
 import * as skills from "./skills.ts";
 import * as projects from "./projects.ts";
 import { oneShot, json } from "./oneshot.ts";
 
-/**
- * Opus, not the Sonnet the voices use. Those are about latency; this runs
- * once, prints, and everything after it follows the map it draws - a wrong
- * prerequisite here is a project you're sent to build for nothing.
- */
+/** Opus, not the Sonnet the voices use. */
 const MODEL = "claude-opus-5-5";
 export const EFFORT = "high";
 export const VOICE = { model: MODEL, effort: EFFORT };
@@ -120,16 +114,13 @@ export function body(w: Written): string {
   return [w.brief.trim(), w.done_when.trim() ? `**done when:** ${w.done_when.trim()}` : ""].filter(Boolean).join("\n\n");
 }
 
-/**
- * Plan a goal: map it, cut the ladder, write the steps. Returns the notes to
- * write - the goal itself last - or null if the model gave nothing usable.
- */
+/** Plan a goal: map it, cut the ladder, write the steps. */
 export async function plan(
   idea: { title: string; body: string },
   t: skills.Tree,
   existing: projects.Project[],
   onStatus?: (s: string) => void,
-  /** Already mapped - a rebuild reads the original and maps it in one go. */
+  /** Already mapped: a rebuild reads the original and maps it in one go. */
   mapped?: Mapped,
 ): Promise<{ goal: projects.Project; steps: projects.Project[]; height: number } | null> {
   const text = idea.body.trim() ? `${idea.title}\n\n${idea.body}` : idea.title;
@@ -194,9 +185,8 @@ export async function plan(
 }
 
 /**
- * The skills to unlock next, cheapest first: what the queue's ready steps
- * need, then what they were taught but haven't shown, then prerequisites the
- * tree names but nobody has recorded.
+ * The skills to unlock next, cheapest first: what the queue's ready steps need, then what they
+ * were taught but haven't shown, then prerequisites the tree names but nobody has recorded.
  */
 export function frontier(t: skills.Tree, queue: projects.Project[]): string[] {
   const holds = projects.holder(t);

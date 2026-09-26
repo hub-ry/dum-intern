@@ -1,9 +1,4 @@
 // A one-line text field.
-//
-// Hand-rolled rather than pulled in, because the input is where the whole
-// program is used and it should not look like a generic widget. It keeps a
-// cursor rather than being append-only: answers here are sentences, and a
-// sentence you cannot fix a typo in the middle of is a sentence you retype.
 
 import React, { useState } from "react";
 import { Text, useInput, usePaste } from "ink";
@@ -31,8 +26,8 @@ export function Field({
       setAt(0);
       return;
     }
-    // The readline keys every shell has, so a sentence can be fixed the way
-    // your fingers already fix one.
+    // The readline keys every shell has, so a sentence can be fixed the way your fingers
+    // already fix one.
     if (key.ctrl) {
       const next = readline(ch, { value, at });
       if (next) {
@@ -43,8 +38,8 @@ export function Field({
     }
     if (key.leftArrow) return setAt(Math.max(0, at - 1));
     if (key.rightArrow) return setAt(Math.min(value.length, at + 1));
-    // Ink tells the two apart: fn-delete on a Mac and the delete key on a
-    // PC keyboard remove the character under the cursor, not the one before.
+    // Ink tells the two apart: fn-delete on a Mac and the delete key on a PC keyboard remove
+    // the character under the cursor, not the one before.
     if (key.delete) return setValue(value.slice(0, at) + value.slice(at + 1));
     if (key.backspace) {
       if (!at) return;

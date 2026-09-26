@@ -1,19 +1,4 @@
 // One intern, one conversation.
-//
-// The interrogation is not a form. The intern calls `ask`, that tool parks on a
-// promise the renderer resolves, and your reply comes back as the tool result
-// inside the same session - so it can push back, follow up, or answer a
-// question you asked it, all with full memory of everything said so far. A
-// text-box-to-output design cannot do any of that, because every exchange
-// starts from nothing.
-//
-// Nothing in this file renders. It publishes to the store and waits; whether
-// that is drawn as panes or as lines is decided elsewhere, and deliberately
-// cannot be seen from here.
-//
-// It also means there is no spec handoff. By the time the intern builds, the
-// decisions are already in its context; the spec is a checkpoint you approve,
-// not an artifact shipped between two processes that never met.
 
 import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -29,22 +14,7 @@ import { Wizard, log as logQuip, type Quip } from "./wizard.ts";
 import { debug as wdebug, debugTo } from "./debug.ts";
 import { applied } from "./channel.ts";
 
-/**
- * How high the bar is - the level of abstraction you must explain yourself at.
- *
- * "print hello world in rust" is the clarifying case. Under `anti-vibe` that
- * request is COMPLETE: the concept is language-independent, you obviously hold
- * it, and every implementation detail is the intern's problem. Under
- * `understand` it has holes the first time - what `println!` is, why the `!` -
- * and none the second, because by then you explained macros and that is on
- * the tree.
- *
- * That second half is why `understand` can be the default. It used to be the
- * mode you reached for on purpose, because it asked about everything every
- * time, and a tool that interrogates you over a one-line change is one you
- * turn off in a week. With the tree, the friction shrinks as you learn instead
- * of staying flat.
- */
+/** How high the bar is - the level of abstraction you must explain yourself at. */
 export type Mode = "understand" | "anti-vibe";
 
 const BAR: Record<Mode, string> = {
@@ -92,29 +62,7 @@ produce genuinely different software and only they can say which they meant.
 the correct response far more often than you expect.`,
 };
 
-/**
- * The first sessions, while the tree is small.
- *
- * The bar is the same as later. What changes is how the questions land,
- * because a first session decides whether there is a second one, and a tool
- * that makes you feel tested on day one gets closed on day one. Every rule
- * here comes from how people actually learn and not from wanting to be nice:
- *
- * - The intern asks to be taught. Students put in more effort for a teachable
- *   agent than for themselves, and the gain was largest for the ones who
- *   started furthest behind (Chase, Chin, Oppezzo & Schwartz, 2009, "Teachable
- *   agents and the protege effect"). The intern is literally a teachable agent;
- *   this just stops it sounding like an examiner.
- * - Predicting beats recalling. A two-way question is easier to start on, and
- *   a wrong guess followed by the answer is remembered better than being told
- *   outright (Kornell, Hays & Bjork, 2009, "Unsuccessful retrieval attempts
- *   enhance subsequent learning").
- * - The first question is the easiest real one, so the first thing that
- *   happens is getting something right.
- *
- * Only examples of the shape we want are quoted. A prompt that quotes what not
- * to say gets it said back - measured on the wizard.
- */
+/** The first sessions, while the tree is small. */
 export function onboarding(t: skills.Tree): string {
   const n = t.skills.length;
   if (n >= 5) return "";
@@ -388,30 +336,10 @@ Build it. Stay inside this repository. If following the spec would produce
 something broken, say so before building it - wrong-but-specified is the only
 thing worse than unspecified.`;
 
-/**
- * Paths the intern may touch.
- *
- * Learned by testing, not by reading: passing `cwd` does NOT confine the agent.
- * It wrote to $HOME while cwd was a scratch directory - `cwd` sets where the
- * session starts, not a boundary. So the boundary is enforced here, on the way
- * through, or there is not one.
- */
+/** Paths the intern may touch. */
 const PATH_FIELDS = ["file_path", "path", "notebook_path"];
 
-/**
- * Tools that can change something, denied until the spec is approved.
- *
- * This is enforcement, not instruction. The first version told the intern in
- * its system prompt to call `propose_spec` before building; on the very first
- * real run it skipped the gate, wrote two files, and the session still reported
- * "nothing was built". A gate that exists only in a prompt is a suggestion, and
- * the one thing this program must never do is claim it stopped something it
- * did not.
- *
- * Bash is on the list because `echo x > file` is a write. Pre-approval the
- * intern still has Read, Glob, and Grep, which is enough to understand a repo
- * well enough to spec against it.
- */
+/** Tools that can change something, denied until the spec is approved. */
 const MUTATING = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Task"]);
 
 function escapes(root: string, p: unknown): boolean {
@@ -459,20 +387,10 @@ const REQUIRES = z
 
 const QUIT = new Set(["exit", "quit", ":q", "bye"]);
 
-/**
- * How long a render point will wait on the wizard before moving on.
- *
- * Short on purpose. The wizard is fired the moment you answer and the intern
- * then spends its own ten-odd seconds forming the next question, so by the time
- * anything is about to print the quip is usually already sitting there and this
- * wait costs nothing. When it is not ready, the quip is not dropped - it lands
- * at the next render point instead, anchored to the answer it was about.
- * Blocking the intern's next question on a margin note would invert what the
- * margin is.
- */
+/** How long a render point will wait on the wizard before moving on. */
 const WIZARD_WAIT = 2500;
 
-/** How long a hole sits on screen before dum fills it or leaves it. Long enough to read the marker. */
+/** How long a hole sits on screen before dum fills it or leaves it. */
 const FLASH_MS = 900;
 
 /** New holes one request may open. */
@@ -486,10 +404,7 @@ const FILL_MIN_MS = 700;
 const FILL_MAX_MS = 2500;
 const FILL_FRAME_MS = 50;
 
-/**
- * What a caller can wrap around a session without the session knowing why.
- * A rebuild uses all four; a plain `dum` uses none.
- */
+/** What a caller can wrap around a session without the session knowing why. */
 export type Hooks = {
   /** Told to the intern with the opening turn. */
   context?: () => string;
@@ -505,20 +420,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   let approved = false;
 
   // The wizard runs beside the session, never inside it.
-  //
-  // Fired on an answer, awaited at the next point where something is about to
-  // be printed. That ordering is the whole design: by the time a quip appears
-  // the engineer has already committed to an answer, so the wizard cannot have
-  // influenced it.
-  //
-  // Started here, before the first question, so its process spawn overlaps the
-  // interrogation rather than being charged to the first answer you give.
   debugTo(repo.root);
 
-  // The tree is shared by every dum session on the machine, so every change
-  // re-reads it first rather than writing back a copy loaded at startup - two
-  // sessions in two repos would otherwise erase each other's skills. Old
-  // per-repo records fold in once, here, and are left where they were.
+  // The tree is shared by every dum session on the machine, so every change re-reads it first
+  // rather than writing back a copy loaded at startup - two sessions in two repos would
+  // otherwise erase each other's skills.
   {
     const t = skills.read();
     const m = skills.migrate(t, repo.root);
@@ -526,8 +432,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     store.setSkills(skills.summary(m, repo.root));
   }
 
-  // "not yet": skills they've said not to check off, this session. The intern
-  // may be right that they hold it; they still get to say it doesn't count.
+  // "not yet": skills they've said not to check off, this session.
   const held = new Set<string>();
   /** What each skill looked like before this session changed it, for undoing. */
   const was = new Map<string, skills.Skill | null>();
@@ -544,8 +449,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   let hinted = false;
 
   function record(entry: skills.Entry) {
-    // Capped here rather than in the schema: a fourth prerequisite is not
-    // worth failing the tool call over.
+    // Capped here rather than in the schema: a fourth prerequisite is not worth failing the
+    // tool call over.
     entry = { ...entry, requires: entry.requires.slice(0, 3) };
     const k = skills.key(entry.name);
     if (entry.solid && held.has(k)) return;
@@ -554,8 +459,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     const t = skills.note(skills.read(), entry, repo.root);
     skills.write(t);
     store.setSkills(skills.summary(t, repo.root));
-    // Shown, so a wrong entry can be disputed while it is fresh rather than
-    // discovered weeks later as a question that stopped being asked.
+    // Shown, so a wrong entry can be disputed while it is fresh rather than discovered weeks
+    // later as a question that stopped being asked.
     if (entry.solid && (!before?.solid || before.claimed)) {
       const name = skills.find(t, entry.name)?.name ?? entry.name;
       checked.push(name);
@@ -565,12 +470,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     }
   }
 
-  /**
-   * Is this skill theirs, for writing code on it in this file? Claimed counts:
-   * they said so. A skill about one language only counts in that language -
-   * decided off the file's extension, so a new language starts from nothing
-   * however much of another one they know.
-   */
+  /** Is this skill theirs, for writing code on it in this file? */
   function holds(concept: string, path: string): boolean {
     if (held.has(skills.key(concept))) return false;
     return skills.holdsIn(skills.read(), concept, path, repo.root);
@@ -598,8 +498,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     );
     return true;
   };
-  // Holes left for them to type. Kept on disk, since typing one is often the
-  // next session's work, and the review turn goes to the resumed intern.
+  // Holes left for them to type.
   let open = todos.load(repo.root);
   let handedOff = false;
   const readRel = (p: string) => {
@@ -616,11 +515,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   }
   setOpen(open);
 
-  /**
-   * With holes open, what they say next might be explaining one instead of
-   * typing it. The intern is told which holes are open and what to do if so;
-   * whether it IS an explanation is its call, same as any answer.
-   */
+  /** With holes open, what they say next might be explaining one instead of typing it. */
   function withHoles(text: string): string {
     if (!open.length || text.startsWith("They say they've typed")) return text;
     return [
@@ -647,9 +542,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   wizard.onModel((m, e) => store.setModel("wizard", m, e));
   wizard.start();
 
-  // Breadth: answers `?` questions and reviews finished builds. Started here
-  // with the wizard so its process spawn overlaps the interrogation rather
-  // than being charged to the first question you ask it.
+  // Breadth: answers `?` questions and reviews finished builds.
   const reference = new Reference(repo);
   reference.start();
 
@@ -689,21 +582,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   }
 
   // The session outlives a single request.
-  //
-  // The first version ended after one build, so when the intern said "want me
-  // to also handle X?" the only way to answer was to run `dum` again - which
-  // is exactly the text-box-to-output shape this is supposed to not be. Now
-  // the query stays open and each reply is fed in as another user turn, so a
-  // follow-up costs a sentence instead of a restart.
   const pending: { deliver: ((text: string) => void) | null } = { deliver: null };
 
-  /**
-   * The first turn: the bar, the skill tree, the repo, and the request.
-   *
-   * The tree goes in under both modes. Under anti-vibe it matters less, but it
-   * still tells the intern which concepts to name back to them without
-   * explaining.
-   */
   /** Their level in each language this repo or their tree touches, for the intern. */
   function levels(): string {
     if (mode !== "understand") return "";
@@ -720,6 +600,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     ].join("\n");
   }
 
+  /** The first turn: the bar, the skill tree, the repo, and the request. */
   function opening(req: string): string {
     return [
       BAR[mode],
@@ -735,8 +616,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   }
 
   async function* turns(): AsyncGenerator<any> {
-    // Coming back to finish a hole: "done" as the first thing said is the
-    // review, not a request to build something called done.
+    // Coming back to finish a hole: "done" as the first thing said is the review, not a request
+    // to build something called done.
     if (open.length && /^done[.!]*$/i.test(request.trim())) {
       const typed = open.filter((t) => !todos.untouched(open, readRel).includes(t));
       if (typed.length) {
@@ -752,8 +633,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     for (;;) {
       const next = await new Promise<string>((res) => (pending.deliver = res));
       if (!next || QUIT.has(next.toLowerCase())) return; // ends the query cleanly
-      // Each new request earns its own spec. Carrying approval across turns
-      // would mean the second thing you asked for was never gated.
+      // Each new request earns its own spec.
       approved = false;
       currentRequest = next;
       yield userTurn(withAside(withHoles(next)));
@@ -763,10 +643,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   const tools = createSdkMcpServer({
     name: "dum",
     version: "1.0.0",
-    // Never behind tool search. Deferred, the intern loaded these one at a
-    // time as it happened to need them - and in a real session it never
-    // loaded fill_todo at all, so holes weren't an option it could see and it
-    // wrote a whole file instead.
+    // Never deferred: behind tool search the intern never loaded fill_todo.
     alwaysLoad: true,
     tools: [
       tool(
@@ -820,8 +697,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         async ({ breadth, requires, lang, ...lesson }) => {
           await drainWizard();
           store.teach(lesson);
-          // Recorded here rather than left to the model: it just taught the
-          // concept, so "they did not hold this" is a fact, not a judgement.
+          // Recorded here rather than left to the model: it just taught the concept, so "they
+          // did not hold this" is a fact, not a judgement.
           record({ name: lesson.concept, solid: false, breadth, requires, lang, why: "taught in session" });
           return {
             content: [
@@ -854,8 +731,6 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         },
         async (args) => {
           // A near-duplicate is caught before it lands, and the intern decides.
-          // Merging on word overlap alone would fold "rust procedural macros"
-          // into "rust macros"; recording blindly grows two nodes for one idea.
           const near = args.distinct ? undefined : skills.similar(skills.read(), args.concept);
           if (near) {
             return {
@@ -898,16 +773,16 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           const say = (text: string) => ({ content: [{ type: "text" as const, text }] });
           if (escapes(repo.root, args.path)) return say(`${args.path} is outside the repo.`);
           const path = rel(repo.root, args.path);
-          // A hole already left under an approved spec can be filled on any
-          // later turn - that's what explaining it afterwards is for.
+          // A hole already left under an approved spec can be filled on any later turn - that's
+          // what explaining it afterwards is for.
           const waiting = open.find((o) => o.path === path && skills.key(o.concept) === skills.key(args.concept));
           if (!approved && !waiting) return say("Not yet - holes are filled while building, after the spec is approved.");
           const body = readRel(path);
           if (body === null) return say(`${path} doesn't exist. Write the file with its holes first.`);
           const at = todos.hole(body, args.concept);
           if (at < 0) return say(`There's no ${todos.MARKER} line for that in ${path}. Write the hole first.`);
-          // The block is on screen before anything happens to it, whichever
-          // way it goes: that's how you see what the build rested on.
+          // The block is on screen before anything happens to it, whichever way it goes: that's
+          // how you see what the build rested on.
           store.openFile(path, at);
           await new Promise((r) => setTimeout(r, FLASH_MS));
           if (mode === "understand" && !holds(args.concept, path)) {
@@ -939,9 +814,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               : `"${t.concept}" isn't known on their tree${lang ? ` for ${lang}` : ""}, so the hole stays for them to type.`;
             return say(`${why} Don't write it any other way.`);
           }
-          // A fill is one concept's worth of code. Anything bigger is several
-          // things under one name - it once carried a whole main() in under
-          // a skill they held.
+          // A fill is one concept's worth of code.
           const size = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
           if (size > FILL_MAX_LINES) {
             return say(
@@ -950,9 +823,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           }
           const filled = todos.fill(body, args.concept, args.code);
           if (filled === null) return say(`Couldn't find the block for that in ${path}.`);
-          // Typed in, not swapped in. A skill you hold is one you may skip
-          // writing, never one you may skip seeing: the code arrives in the
-          // block at a pace you can follow, then lands.
+          // Animate the fill so held-skill code is seen, not just dropped in.
           const code = args.code.replace(/\n+$/, "");
           const ms = Math.min(FILL_MAX_MS, Math.max(FILL_MIN_MS, code.length * 12));
           const frames = Math.max(1, Math.round(ms / FILL_FRAME_MS));
@@ -1088,15 +959,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   const wrote: string[] = [];
 
   /**
-   * Whether the gate was engaged at all this turn - a write held, or a spec
-   * shown and turned down.
-   *
-   * Both directions matter. Without it, every turn ending without an approved
-   * spec claims "nothing was built", including turns where nothing was
-   * attempted, so the line lands directly under the intern saying it already
-   * built the thing. But a declined spec DOES deserve the confirmation, even
-   * though the intern obediently wrote nothing afterwards and so nothing was
-   * ever held.
+   * Whether the gate was engaged at all this turn - a write held, or a spec shown and turned
+   * down.
    */
   let gateEngaged = false;
 
@@ -1106,23 +970,10 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   /** TODO(dum) blocks written under this request so far. */
   let holesThisTurn = 0;
 
-  /**
-   * Tool inputs still being generated, by content-block index.
-   *
-   * Indexed rather than kept as a single current block because one assistant
-   * message can open several, and the deltas for them are interleaved.
-   */
+  /** Tool inputs still being generated, by content-block index. */
   const openBlocks = new Map<number, { name: string; buf: string }>();
 
-  /**
-   * Writes the gate let through, by tool-use id, until their result arrives.
-   *
-   * The pane learns a write was allowed from canUseTool, which runs BEFORE
-   * the tool does. The file is only on disk once the tool result comes back,
-   * and that is the moment the pane may show the real file and let you edit
-   * it. A denied call gets a result too, but `landed` ignores anything the
-   * gate did not mark as ran.
-   */
+  /** Writes the gate let through, by tool-use id, until their result arrives. */
   const landing = new Map<string, string>();
 
   function onStreamEvent(ev: any) {
@@ -1152,28 +1003,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       cwd: repo.root,
       systemPrompt: { type: "preset", preset: "claude_code", append: CONTRACT },
       mcpServers: { dum: tools },
-      // The feed the code pane is built on. Without it a file only exists once
-      // it has been written, and "watch it being written" is a replay.
+      // The feed the code pane is built on.
       includePartialMessages: true,
       ...(resume ? { resume } : {}),
-      // dum's own tools are let through here rather than listed in
-      // allowedTools. Listing them made the SDK warn, on every run, that
-      // canUseTool is shadowed for them - and that warning lands on the
-      // screen. They are how the intern talks to you, so they are never
-      // gated and never drawn as tool calls.
+      // dum's own tools are let through here rather than listed in allowedTools.
       canUseTool: async (name: string, args: Record<string, unknown>) => {
         if (name.startsWith("mcp__dum__")) {
           return { behavior: "allow" as const, updatedInput: args };
         }
-        // Filling a hole is dum's call, made off the tree in fill_todo. An
-        // Edit that rewrites a block would be the intern making it instead.
-        // Understand mode: code only enters through a hole. The intern writes
-        // the shape - comments and TODO(dum) blocks - and fill_todo decides,
-        // off the tree, which blocks it may fill. Asked for in the prompt,
-        // the intern once wrote a whole C++ file for someone with an empty
-        // tree. This is the version that can't be skipped.
-        // Four new holes a request, at most: about what working memory holds
-        // (Cowan, 2001). A seven-hole skeleton is seven new things at once.
+        // Filling a hole is dum's call, made off the tree in fill_todo.
         const more = mode === "understand" ? newHoles(repo.root, name, args) : 0;
         if (more && holesThisTurn + more > MAX_HOLES) {
           store.toolEvent(name, detail(repo.root, args), "refused", `more than ${MAX_HOLES} holes at once`);
@@ -1182,8 +1020,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             message: `That's ${holesThisTurn + more} holes in one request - at most ${MAX_HOLES}, about what working memory holds at once. Don't merge blocks to fit: that's the same load in bigger pieces. Build the part that fits in ${MAX_HOLES} concepts, and name the rest as the next request in one line.`,
           };
         }
-        // Comments in their code are short: the code is theirs to read, not
-        // an essay to scroll past. Any mode, any source file.
+        // Comments in their code are short: the code is theirs to read, not an essay to scroll
+        // past.
         const essay = wordyCode(name, args);
         if (essay.length) {
           store.toolEvent(name, detail(repo.root, args), "refused", "comments too long");
@@ -1236,9 +1074,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           }
         }
         const what = detail(repo.root, args);
-        // Only things with a real path field. `detail` falls back to the
-        // command for Bash, and handing the reviewer a shell one-liner as a
-        // "file it wrote" makes the review read a file that does not exist.
+        // Only things with a real path field.
         if (MUTATING.has(name)) {
           for (const f of PATH_FIELDS) {
             const v = args[f];
@@ -1258,12 +1094,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     for await (const msg of session as AsyncIterable<any>) {
       if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
         remember(repo, msg.session_id);
-        // Read off the session rather than assumed: the intern inherits the
-        // default model from their settings, so it's whatever that is today.
+        // Read off the session rather than assumed: the intern inherits the default model from
+        // their settings, so it's whatever that is today.
         if (typeof msg.model === "string") {
           store.setModel("intern", msg.model);
-          // Effort too: it follows their own /effort setting, so it's
-          // whatever that resolves to for this model today.
+          // Effort too: it follows their own /effort setting, so it's whatever that resolves to
+          // for this model today.
           void applied(session).then((a) => a && store.setModel("intern", a.model || msg.model, a.effort));
         }
         continue;
@@ -1281,10 +1117,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             const path = detail(repo.root, b.input);
             if (path) landing.set(b.id, path);
           }
-          // Tool calls are NOT rendered here. They are rendered from canUseTool,
-          // which is the only place that knows whether the call was allowed or
-          // refused - printing at this point shows a denied write exactly like a
-          // successful one, which is a terminal that lies about what happened.
+          // Tool calls render from canUseTool, the only place that knows if they ran.
         }
         continue;
       }
@@ -1302,25 +1135,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         await drainWizard();
         for (const why of blocked) store.note(`refused: ${why}`);
         blocked.length = 0;
-        // A turn that filled an earlier hole did build something, even with
-        // no spec of its own - saying otherwise under the fill would be a lie.
+        // A turn that filled an earlier hole built something, even with no spec of its own.
         if (!approved && gateEngaged) store.note(filledLate ? "nothing else was built - this turn had no spec of its own." : "spec not approved - nothing was built.");
         gateEngaged = false;
         filledLate = false;
         holesThisTurn = 0;
 
-        // The wizard catches. Fires after every build and says nothing unless
-        // the work actually departs from the spec that authorised it - silence
-        // here means it looked, which is why a false alarm is so expensive.
-        // Built means built: while this request still has holes open, it
-        // isn't - the last hole passing review is what finishes it.
+        // Review the build against its spec; silent unless it departs.
         if (approved && wrote.length && !open.some((t) => t.request === currentRequest)) hooks.onBuilt?.(currentRequest);
         if (approved && wrote.length) {
           const files = [...new Set(wrote)];
           wrote.length = 0;
           wdebug("review: checking", files.join(", "));
-          // A hole is a stub on purpose. Without saying so, the review reads
-          // it as the build not working and flags the one thing that is right.
+          // A hole is a stub on purpose.
           const holes = open.length
             ? `\n\nLEFT FOR THEM TO TYPE, ON PURPOSE - a stub at a ${todos.MARKER} hole is not a departure:\n${open.map((t) => `- ${t.concept} in ${t.path}`).join("\n")}`
             : "";
@@ -1329,14 +1156,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           if (found) store.review(found);
         }
 
-        // The turn is over, not the session. Ask what's next and hand it back to
-        // the generator; an empty line or `exit` ends the query.
-        //
-        // A turn that died on an error asks through the question prompt instead,
-        // so the error is what sits under dum's face. Before, it went into the
-        // transcript and the screen just said "what next?" - a request that
-        // silently did nothing, with the reason one keypress away where nobody
-        // looks.
+        // The turn is over, not the session.
         const failed = failure(msg);
         if (!failed && open.length && !handedOff) {
           handedOff = true;
@@ -1367,21 +1187,13 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       }
     }
   } finally {
-    // Both hold a process open. Nothing else in this program ends them, so a
-    // session that exits without closing leaves idle agents behind every run.
+    // Both hold a process open; nothing else ends them.
     wizard.close();
     reference.close();
   }
 }
 
-/**
- * A reply that says they don't have it, rather than saying anything.
- *
- * The wizard must never see these. With nothing of theirs to comment on it
- * commented on the request instead - asked about a crash mid-save, "idk" got
- * back "the usual trick is write-to-temp-file then atomic rename", which is
- * the answer to the question the intern was about to ask again.
- */
+/** A reply that says they don't have it, rather than saying anything. */
 export function notAnAnswer(reply: string): boolean {
   return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
     reply.trim(),
@@ -1434,13 +1246,7 @@ export function looseCode(name: string, args: Record<string, unknown>): string[]
   return [];
 }
 
-/**
- * Whether a tool call would rewrite a TODO(dum) block that already exists.
- *
- * Adding a block is fine - that's how a file gets its holes. Replacing or
- * dropping one is not: an Edit whose old text holds a marker, or a Write that
- * leaves out a marker line the file has now.
- */
+/** Whether a tool call would rewrite a TODO(dum) block that already exists. */
 export function erasesHole(root: string, name: string, args: Record<string, unknown>, open?: string[]): boolean {
   const markers = (s: unknown) => String(s ?? "").split("\n").filter((l) => l.includes(todos.MARKER));
   let gone: string[] = [];
@@ -1468,16 +1274,7 @@ export function erasesHole(root: string, name: string, args: Record<string, unkn
 /** Where dum-intern itself is installed, for telling someone what to update. */
 const HOME = resolve(new URL("..", import.meta.url).pathname);
 
-/**
- * What to tell them when a turn ended on an error, or null if it did not.
- *
- * One failure gets a specific fix because it is certain to come back. The
- * intern runs on the Claude Code bundled with the Agent SDK dum depends on,
- * but it inherits the default model from their settings - so switching to a
- * newer model than that bundle knows breaks every request with "does not
- * support this model", and the fix it suggests ("run claude update") updates
- * the wrong copy.
- */
+/** What to tell them when a turn ended on an error, or null if it did not. */
 export function failure(msg: { is_error?: boolean; subtype?: string; result?: unknown }): string | null {
   if (!msg.is_error && (!msg.subtype || msg.subtype === "success")) return null;
   const text = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : `the turn stopped (${msg.subtype})`;
@@ -1496,13 +1293,7 @@ function userTurn(text: string) {
   };
 }
 
-/**
- * One short line about what a tool call is doing.
- *
- * Paths are shown relative to the repo. An absolute path is mostly the part
- * you already know, and once it is truncated to fit a pane what survives is
- * the prefix every line shares rather than the file that was touched.
- */
+/** One short line about what a tool call is doing. */
 function rel(root: string, p: string): string {
   const r = relative(root, isAbsolute(p) ? p : resolve(root, p));
   return r && !r.startsWith("..") ? r : p;

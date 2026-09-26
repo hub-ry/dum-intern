@@ -1,9 +1,4 @@
 // One prompt, one reply, no conversation.
-//
-// For the jobs that run once and print: scanning a project, planning a goal.
-// The long-lived sessions (intern, wizard, reference) have their own plumbing
-// because they hold context across turns; these must not, so a fresh query
-// each time is the point rather than a cost.
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
@@ -51,7 +46,10 @@ export async function oneShot(prompt: string, o: Opts): Promise<string> {
   return out;
 }
 
-/** The first JSON value of the given shape in a reply, tolerating a fence or a sentence around it. */
+/**
+ * The first JSON value of the given shape in a reply, tolerating a fence or a sentence around
+ * it.
+ */
 export function json(text: string, open: "[" | "{"): unknown {
   const close = open === "[" ? "]" : "}";
   const start = text.indexOf(open);
