@@ -134,7 +134,7 @@ It sits beside the line and is never saved to the file. A line too long to leave
 
 ### Pages, and a trackpad that scrolls
 
-The stage has pages, and a bar on top says which one you're on: the file, dum's latest reply, and the log. A reply too long for the six lines under dum's face opens as its own page, so a long answer doesn't hide behind `:log`. `shift-tab` goes back to the page you were just on, and again comes back, like alt-tab. With the stage focused, `←`/`→` walk the pages, and `j`/`k`, `space`/`b` and `g`/`G` scroll whichever one is up.
+The middle has two pages, the file and the shell, with a bar on top saying which is up. `shift-tab` flips back to whatever was up last, like alt-tab: the file and the shell, or the characters and the board on the right. With the middle focused, `←`/`→` switch between file and shell, and a board scrolls with `j`/`k`, `space`/`b` and `g`/`G`.
 
 The trackpad scrolls the pane under the pointer, focused or not. Full-screen programs don't get that for free: without mouse reports the wheel does nothing, and inside tmux it scrolls tmux's history instead. So dum turns on the terminal's standard mouse reporting and takes the reports out before Ink sees them, or they'd be typed into the input as `[<65;40;12M`. Ink 7 has no mouse support, and the one Ink mouse library targets Ink 5, so this piece is dum's own.
 
@@ -552,10 +552,10 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | Key | Action | Where |
 | :--- | :--- | :--- |
 | `tab` | input, stage, file tree, and around | anywhere |
-| `shift-tab` | the stage's last page, and back - alt-tab for file, reply and log | anywhere |
+| `shift-tab` | back to what was up last - file and shell, or characters and board | anywhere |
 | trackpad / wheel | scroll whatever's under the pointer | stage, file tree |
-| `←` `→`, `[` `]` | the stage's pages: file, reply, log | stage |
-| `j` `k`, `space` `b`, `g` `G` | scroll a reply or the log | stage |
+| `←` `→` | file and shell | the middle |
+| `j` `k`, `space` `b`, `g` `G` | scroll the board | the board |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
 | `!` + command | run it on the shell page | input, file's `:` line |
 | `!`, `:shell` | open the shell page | input |
