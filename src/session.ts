@@ -82,7 +82,8 @@ it, it is on the tree and you never ask again.`,
 
 They must understand WHAT they want and WHY - intent and consequences. They do
 NOT need to understand HOW you build it. Syntax, language mechanics, library
-choices, and implementation strategy are yours.
+choices, and implementation strategy are yours. That holds in a language
+they've never used, too - its syntax is yours here, not a reason to ask.
 
 Ask only where the INTENT has a hole: a decision where two reasonable readings
 produce genuinely different software and only they can say which they meant.
@@ -280,6 +281,12 @@ across every project. \`teach\` records what you taught on its own; use
   specialised knowledge: one library's quirks, one API's pagination, a file
   format they touched once. General skills count everywhere; niche ones get a
   quick re-check in a new project, because one-off knowledge fades.
+- lang: when a skill is one language's syntax, standard library or idiom,
+  give its language. "c++ range-based for" and "python for loops" are two
+  skills; "iteration" is one. A language they've never used means its
+  syntax is new to them, whatever they know elsewhere - in understand mode,
+  ask about it or leave it as a hole, and don't treat their other languages
+  as proof.
 - requires: at most three skills this one builds on directly. Reuse the exact
   names already on the tree whenever it is the same idea - "visibility timeout"
   and "SQS visibility timeout" are one skill, not two.
@@ -411,6 +418,13 @@ const BREADTH = z
   .enum(["general", "niche"])
   .describe("general if it carries across projects, niche if it is one-off or specialised");
 
+const LANG = z
+  .string()
+  .optional()
+  .describe(
+    "The language, ONLY if this skill is one language's syntax, standard library or idiom ('range-based for' is c++, 'list comprehensions' is python). Leave out for ideas that carry across languages (recursion, hash maps, idempotency).",
+  );
+
 const REQUIRES = z
   .array(z.string())
   .describe("Up to three skills this one directly builds on, using names already on the tree where they exist");
@@ -517,11 +531,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     }
   }
 
-  /** Is this skill theirs, for writing code on it? Claimed counts: they said so. */
-  function holds(concept: string): boolean {
+  /**
+   * Is this skill theirs, for writing code on it in this file? Claimed counts:
+   * they said so. A skill about one language only counts in that language -
+   * decided off the file's extension, so a new language starts from nothing
+   * however much of another one they know.
+   */
+  function holds(concept: string, path: string): boolean {
     if (held.has(skills.key(concept))) return false;
-    const s = skills.find(skills.read(), concept);
-    return !!s && s.solid && (s.breadth === "general" || s.claimed || s.repos.includes(repo.root));
+    return skills.holdsIn(skills.read(), concept, path, repo.root);
   }
 
   store.onNotYet = (name: string) => {
@@ -746,13 +764,14 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           here: z.string().describe("What it would mean in this specific repo. One sentence"),
           breadth: BREADTH,
           requires: REQUIRES,
+          lang: LANG,
         },
-        async ({ breadth, requires, ...lesson }) => {
+        async ({ breadth, requires, lang, ...lesson }) => {
           await drainWizard();
           store.teach(lesson);
           // Recorded here rather than left to the model: it just taught the
           // concept, so "they did not hold this" is a fact, not a judgement.
-          record({ name: lesson.concept, solid: false, breadth, requires, why: "taught in session" });
+          record({ name: lesson.concept, solid: false, breadth, requires, lang, why: "taught in session" });
           return {
             content: [
               {
@@ -775,6 +794,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             .describe("True if their answer showed they hold it, in any words. False if they fumbled it."),
           breadth: BREADTH,
           requires: REQUIRES,
+          lang: LANG,
           why: z.string().describe("One sentence: what they said that showed it, or did not."),
           distinct: z
             .boolean()
@@ -801,6 +821,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             solid: args.solid,
             breadth: args.breadth,
             requires: args.requires,
+            lang: args.lang,
             why: args.why,
           });
           return {
@@ -817,6 +838,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           path: z.string().describe("The file the hole is in, relative to the repo"),
           concept: z.string().describe("The skill this piece rests on - the name after TODO(dum):"),
           what: z.string().describe("What the code has to do. The same words as the hole."),
+          lang: LANG,
           code: z.string().describe("The code that replaces the whole block - marker, comment lines and stub - indented to fit"),
           breadth: BREADTH,
           requires: REQUIRES,
@@ -837,7 +859,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           // way it goes: that's how you see what the build rested on.
           store.openFile(path, at);
           await new Promise((r) => setTimeout(r, FLASH_MS));
-          if (mode === "understand" && !holds(args.concept)) {
+          if (mode === "understand" && !holds(args.concept, path)) {
             const t: todos.Todo = {
               concept: args.concept.trim(),
               path,
@@ -846,6 +868,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               requires: args.requires.slice(0, 3),
               before: body,
               request: currentRequest,
+              lang: args.lang,
             };
             setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
             handedOff = false;
@@ -888,6 +911,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           path: z.string().describe("The file the hole is in, relative to the repo"),
           concept: z.string().describe("The skill typing it unlocks - the industry name, reusing the tree's name if it's there"),
           what: z.string().describe("What their code has to do. The same words as the hole. Never how."),
+          lang: LANG,
           breadth: BREADTH,
           requires: REQUIRES,
         },
@@ -909,6 +933,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             requires: args.requires.slice(0, 3),
             before: body,
             request: currentRequest,
+            lang: args.lang,
           };
           setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
           handedOff = false;
@@ -939,6 +964,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               solid: true,
               breadth: t.breadth,
               requires: t.requires,
+              lang: t.lang,
               why: `typed it themselves in ${t.path}: ${args.feedback}`,
             });
           }

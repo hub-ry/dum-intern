@@ -29,6 +29,8 @@ export type Todo = {
   before: string;
   /** The request it was left under. That request isn't built until its holes are. */
   request?: string;
+  /** The language the skill is scoped to, if any - carried to the tree when it passes. */
+  lang?: string;
 };
 
 /**

@@ -123,7 +123,7 @@ This is closer to a game than a document, and every long message is a turn I sto
 - **One next action, and dum says it.** "next up: … say go", "your turn: … type it and say done, or explain it here". The intern doesn't have to.
 - **Wins show.** Every `✓ feature 3 of 9 ▰▰▰▱▱▱▱▱▱` moves the bar.
 - **Numbers, not "a bit of work".** Every feature, milestone and project comes with minutes, and none is allowed over 45.
-- **What dum says fits in working memory.** The pane shows six lines and points at `ctrl-t` for the rest.
+- **What dum says fits in working memory.** The pane shows six lines and points at `:log` for the rest.
 - **Lists stop at five.** The rest is a count.
 
 The intern's prompt carries the rest. After a build it gets three lines: what runs now, where my holes are, and nothing else. It doesn't recap, list the files, or write a "still open" essay. The spec's sections are five bullets at most, and a section with nothing real in it is left out. Lessons and `?` answers are two or three sentences.
@@ -207,6 +207,15 @@ The fastest way to learn one thing is a project where it's the only new thing. S
 Nothing about what I know is assumed. The percentage is counted against my tree in code, and the design is asked to list the skills of mine it uses by their tree names. The folder runs like a rebuild: `go` takes the next feature, and a feature is done once its holes are.
 
 No stepping stones, unlike a queued goal. Learning fast means the gaps get handled inside the project.
+
+
+### A new language starts from nothing
+
+A skill can belong to one language. "range-based for" is C++, "list comprehensions" is Python, and the tree marks them `c++ only`, `python only`. One of those only counts in files of its language, decided in code from the file's extension. So knowing Python's for loops fills nothing in a `.cpp` file.
+
+Ideas that carry across languages don't get a language. Recursion, hash maps and idempotency count everywhere. Asked for a recursive factorial in C++ by someone who knew Python's printing and loops and knew recursion, dum filled the recursive function and left the `#include` and the `std::cout` line as holes.
+
+That's understand mode. In anti-vibe a new language's syntax is the intern's, same as any other mechanics.
 
 
 ### Explaining a hole fills it

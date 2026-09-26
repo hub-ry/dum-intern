@@ -13,7 +13,7 @@
 // frontmatter at all is fine - the file name is the skill.
 
 import YAML from "yaml";
-import type { Breadth, Skill } from "./skills.ts";
+import { langName, type Breadth, type Skill } from "./skills.ts";
 
 export type State = "solid" | "shaky" | "claimed";
 
@@ -51,6 +51,7 @@ export function toNote(s: Skill): string {
     state,
     breadth: s.breadth,
   };
+  if (s.lang) front.lang = s.lang;
   if (s.repos.length) front.repos = s.repos;
   if (s.at) front.at = s.at;
   // Tags, so Obsidian's graph can colour by state. Written, never read back:
@@ -98,6 +99,7 @@ export function fromNote(text: string, file: string): Skill | null {
     solid: state !== "shaky",
     claimed: state === "claimed",
     breadth: (front.breadth === "niche" ? "niche" : "general") as Breadth,
+    lang: str(front.lang) ? langName(front.lang) : "",
     requires,
     why: body.replace(BUILDS_ON, "").trim(),
     repos: Array.isArray(front.repos) ? front.repos.filter(str) : [],

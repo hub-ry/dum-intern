@@ -42,6 +42,13 @@ export type Skill = {
    */
   claimed: boolean;
   breadth: Breadth;
+  /**
+   * The one language this skill is about, when it's syntax, a standard library
+   * or an idiom: "range-based for" is c++. Such a skill only counts in that
+   * language - knowing Python's for loops doesn't write C++'s. "" for ideas
+   * that carry across languages.
+   */
+  lang: string;
   /** Skills this one builds on directly, by name. May name skills not yet on the tree. */
   requires: string[];
   why: string;
@@ -137,6 +144,7 @@ function clean(raw: unknown): Skill | null {
     solid: s.solid,
     claimed: s.claimed === true,
     breadth: s.breadth === "niche" ? "niche" : "general",
+    lang: typeof s.lang === "string" ? langName(s.lang) : "",
     requires: Array.isArray(s.requires) ? s.requires.filter(str) : [],
     why: str(s.why) ? s.why : "",
     repos: Array.isArray(s.repos) ? s.repos.filter(str) : [],
@@ -279,6 +287,7 @@ export type Entry = {
   name: string;
   solid: boolean;
   breadth: Breadth;
+  lang?: string;
   requires: string[];
   why: string;
 };
@@ -320,6 +329,7 @@ export function note(t: Tree, e: Entry, root: string): Tree {
     // dum saw it for itself, so whatever was claimed is now settled.
     claimed: false,
     breadth: e.breadth,
+    lang: e.lang !== undefined ? langName(e.lang) : prev?.lang ?? "",
     requires,
     why: e.why,
     repos,
@@ -328,7 +338,7 @@ export function note(t: Tree, e: Entry, root: string): Tree {
   return { skills: [...t.skills.filter((s) => key(s.name) !== k), next] };
 }
 
-export type Claim = { name: string; breadth: Breadth; requires: string[]; why: string };
+export type Claim = { name: string; breadth: Breadth; requires: string[]; why: string; lang?: string };
 
 /**
  * Add what they say they hold, from a scan of their own project.
@@ -346,6 +356,7 @@ export function claim(t: Tree, c: Claim, root: string): Tree {
     solid: true,
     claimed: true,
     breadth: c.breadth,
+    lang: c.lang !== undefined ? langName(c.lang) : prev?.lang ?? "",
     requires: [...new Set([...(prev?.requires ?? []), ...c.requires])].filter((r) => key(r) !== k).slice(0, 3),
     why: c.why,
     repos: [...new Set([...(prev?.repos ?? []), root])],
@@ -379,6 +390,43 @@ export function stale(s: Skill, now = new Date()): boolean {
   if (!s.solid || !s.at) return false;
   const age = (now.getTime() - new Date(s.at).getTime()) / 86_400_000;
   return Number.isFinite(age) && age > FRESH_DAYS[s.breadth];
+}
+
+const LANG_ALIASES: Record<string, string> = {
+  cpp: "c++", cxx: "c++", cc: "c++", "c plus plus": "c++",
+  py: "python", python3: "python",
+  js: "javascript", node: "javascript", nodejs: "javascript",
+  ts: "typescript", rs: "rust", golang: "go", rb: "ruby", kt: "kotlin", cs: "c#", csharp: "c#", sh: "shell", bash: "shell", zsh: "shell",
+};
+
+/** One spelling per language, so "cpp" and "C++" are the same tag. */
+export function langName(l: string): string {
+  const k = l.trim().toLowerCase();
+  return LANG_ALIASES[k] ?? k;
+}
+
+const EXT_LANG: Record<string, string> = {
+  c: "c", h: "c", cc: "c++", cpp: "c++", cxx: "c++", hpp: "c++", hh: "c++", py: "python", js: "javascript", mjs: "javascript",
+  cjs: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", rs: "rust", go: "go", java: "java", rb: "ruby",
+  swift: "swift", kt: "kotlin", cs: "c#", php: "php", lua: "lua", sh: "shell", bash: "shell", zsh: "shell", zig: "zig", dart: "dart",
+};
+
+/** The language a file is written in, by extension. "" when it isn't source. */
+export function langOf(path: string): string {
+  const ext = path.split("/").pop()!.split(".").slice(1).pop()?.toLowerCase() ?? "";
+  return EXT_LANG[ext] ?? "";
+}
+
+/**
+ * Whether a skill on the tree lets dum write code for it in this file. Solid
+ * (or claimed), and if it's about one language, only in that language.
+ */
+export function holdsIn(t: Tree, name: string, path: string, root: string): boolean {
+  const s = find(t, name);
+  if (!s || !s.solid) return false;
+  if (s.breadth === "niche" && !s.claimed && !s.repos.includes(root)) return false;
+  const here = langOf(path);
+  return !s.lang || !here || s.lang === here;
 }
 
 /** Solid and trusted in this repo: general anywhere, niche only where shown. */
@@ -428,6 +476,7 @@ export function migrate(t: Tree, root: string): Tree {
       name: o.topic.trim(),
       solid: o.solid,
       claimed: false,
+      lang: "",
       breadth: "general",
       requires: [],
       why: str(o.why) ? o.why : "",
@@ -443,13 +492,16 @@ export function describe(t: Tree, root: string): string {
   if (!t.skills.length) return "";
   const line = (s: Skill) => {
     const on = s.requires.length ? `  [builds on: ${s.requires.join(", ")}]` : "";
-    return `  - ${s.name}${on}`;
+    const only = s.lang ? `  (${s.lang} only)` : "";
+    return `  - ${s.name}${only}${on}`;
   };
   const out: string[] = [
     "THEIR SKILL TREE",
     "",
     "Everything they have shown you or been taught, across every project. Use",
     "these exact names when you record something that is the same idea.",
+    "A skill marked (<language> only) counts only in that language. In another",
+    "language it is NOT known: their Python for loops don't write C++'s.",
   ];
   const now = new Date();
   const k = known(t, root).filter((s) => !stale(s, now));
@@ -512,6 +564,8 @@ export type Row = {
   /** `ghost` is a prerequisite something builds on that they have not shown yet. */
   state: "solid" | "shaky" | "claimed" | "ghost";
   niche: boolean;
+  /** The language it's scoped to, or "". */
+  lang: string;
   /** Already drawn further up under another parent, so its children are not repeated. */
   repeat: boolean;
 };
@@ -557,6 +611,7 @@ export function rows(t: Tree): Row[] {
       name: nameOf(k),
       state: s ? (s.claimed ? "claimed" : s.solid ? "solid" : "shaky") : "ghost",
       niche: s?.breadth === "niche",
+      lang: s?.lang ?? "",
       repeat,
     });
     if (repeat) return;

@@ -290,3 +290,21 @@ test("remove takes the note off disk, and reset moves the tree aside", () => {
   assert.ok(existsSync(`${aside}/b.md`));
   assert.deepEqual(read(dir), empty);
 });
+
+test("a skill about one language only counts in that language", async () => {
+  const { holdsIn, langName, langOf } = await import("../src/skills.ts");
+  let t = note(empty, e("for loops", { lang: "Python" }), A);
+  t = note(t, e("recursion"), A);
+  assert.equal(find(t, "for loops")!.lang, "python");
+  assert.ok(holdsIn(t, "for loops", "a.py", A));
+  assert.ok(!holdsIn(t, "for loops", "main.cpp", A), "python's for loops don't write c++'s");
+  assert.ok(holdsIn(t, "recursion", "main.cpp", A), "ideas carry across languages");
+  assert.ok(holdsIn(t, "for loops", "notes.md", A), "not source: no language to disagree with");
+  assert.equal(langName("cpp"), "c++");
+  assert.equal(langOf("src/x.hpp"), "c++");
+  assert.equal(langOf("Makefile"), "");
+  assert.match(describe(t, A), /for loops  \(python only\)/);
+  // A later note without a language keeps the one it had.
+  t = note(t, e("for loops"), A);
+  assert.equal(find(t, "for loops")!.lang, "python");
+});

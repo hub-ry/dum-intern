@@ -84,9 +84,11 @@ Rules:
   most three findings, worst first.
 - Style, naming, tests you would have written, and things you would have done
   differently are NOT findings. Only the spec, and only things that are wrong.
-- A block starting with a TODO(dum) comment, with a stub under it, is left for
-  the engineer to write on purpose. It is never a finding - not as unbuilt, not
-  as incomplete, not as "doesn't work yet". Review everything around it.
+- A block starting with a TODO(dum) comment is left for the engineer to write
+  on purpose, and it can stand in for anything the spec left to them - a line,
+  a whole function, main() with its signature. Code that isn't there because a
+  hole says it goes there is never a finding: not as missing, not as
+  incomplete, not as "won't compile yet". Review everything around it.
 - This fires after every build, so a false alarm is expensive: they stop
   reading you. When in doubt, stay quiet.
 - If the build matches the spec, reply with exactly: ok

@@ -108,7 +108,7 @@ function printSkills(root: string) {
             ? c.blue("◐")
             : c.dim("·");
     const name = r.state === "ghost" ? c.dim(r.name) : r.name;
-    const tags = [r.niche ? "niche" : "", r.repeat ? "↑ above" : "", r.state === "ghost" ? "not shown yet" : ""]
+    const tags = [r.lang ? `${r.lang} only` : "", r.niche ? "niche" : "", r.repeat ? "↑ above" : "", r.state === "ghost" ? "not shown yet" : ""]
       .filter(Boolean)
       .join("  ");
     console.log(`  ${"  ".repeat(r.depth)}${mark} ${name}${tags ? "  " + c.dim(tags) : ""}`);
