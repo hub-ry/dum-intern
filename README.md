@@ -117,6 +117,21 @@ dum's commands are typed, not chorded. `:run`, `:graph`, `:log`, `:help`, like v
 What runs in the shell is mine. The intern doesn't see it.
 
 
+### Code in the middle, the characters on the right
+
+The middle panel is code: the file, or the shell. Nothing else goes there.
+
+Everything else is the characters'. dum and the wizard say things under their faces. When something's too big to say under a face, like the spec to approve, a lesson, a long reply, help or the log, the characters step aside and the right panel becomes a board that scrolls. It goes back to the characters once it's answered, or with `shift-tab`.
+
+When dum has something to say about one line of code, it pins a live comment to it instead of describing where to look:
+
+```
+  3 const LEASE_MS = 30_000;  ◂ 30s: long enough for a slow job to finish
+```
+
+It sits beside the line and is never saved to the file. A line too long to leave room puts its comment on the file's status row, with the line number. Comments clear when the next turn starts.
+
+
 ### Pages, and a trackpad that scrolls
 
 The stage has pages, and a bar on top says which one you're on: the file, dum's latest reply, and the log. A reply too long for the six lines under dum's face opens as its own page, so a long answer doesn't hide behind `:log`. `shift-tab` goes back to the page you were just on, and again comes back, like alt-tab. With the stage focused, `←`/`→` walk the pages, and `j`/`k`, `space`/`b` and `g`/`G` scroll whichever one is up.

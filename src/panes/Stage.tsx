@@ -22,6 +22,7 @@ export function Stage({
   onCommand,
   onPage,
   last,
+  pins,
 }: {
   stage: StageT;
   code: CodeView | null;
@@ -38,6 +39,7 @@ export function Stage({
   onPage: (step: 1 | -1) => void;
   /** Which of file or shell was last up, while a board is showing. */
   last: "file" | "shell";
+  pins: Record<string, { line: number; text: string }[]>;
 }) {
   const body = height - 1;
   const tabs = (
@@ -63,6 +65,7 @@ export function Stage({
           onLeave={onLeave}
           onTyping={onTyping}
           onCommand={onCommand}
+          pinned={pins}
         />
       </Box>
     );
@@ -91,6 +94,7 @@ export function Stage({
         onLeave={onLeave}
         onTyping={onTyping}
         onCommand={onCommand}
+        pinned={pins}
       />
     </Box>
   );

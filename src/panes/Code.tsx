@@ -24,8 +24,11 @@ export function Code({
   onLeave,
   onTyping,
   onCommand,
+  pinned = {},
 }: {
   code: CodeView | null;
+  /** Live comments by path, line 1-based. */
+  pinned?: Record<string, { line: number; text: string }[]>;
   width: number;
   height: number;
   focused: boolean;
@@ -130,6 +133,14 @@ export function Code({
   const where = `${buf.row + 1}:${vcol(buf.lines[buf.row]!, buf.col) + 1}`;
   // TODO(dum) blocks, painted in the gutter.
   const holes = spans(buf.lines.join("\n"));
+  const pins = code.path ? pinned[code.path] ?? [] : [];
+  const pinAt = (n: number) => pins.find((p) => p.line === n + 1)?.text ?? "";
+  // A comment whose line leaves no room beside it goes on the status row.
+  const crowded = pins.find((p) => {
+    const n = p.line - 1;
+    if (n < buf.top || n >= buf.top + view.rows) return false;
+    return view.cols - printable(slice(lines[n] ?? "", buf.left, buf.left + view.cols)).length - 3 <= 8;
+  });
   const inHole = (n: number) => holes.some(([a, b]) => n >= a && n <= b);
 
   return (
@@ -152,7 +163,11 @@ export function Code({
             <Text inverse> </Text>
           </>
         ) : (
-          <Text dimColor>{buf.message || status(code, buf)}</Text>
+          buf.message || !crowded ? (
+            <Text dimColor>{buf.message || status(code, buf)}</Text>
+          ) : (
+            <Text color="#87afd7">{`${crowded.line} ◂ ${crowded.text}`}</Text>
+          )
         )}
       </Text>
       {shown.map((line, i) => (
@@ -162,7 +177,7 @@ export function Code({
           ) : (
             <Text dimColor={buf.top + i !== buf.row || !focused}>{String(buf.top + i + 1).padStart(gutter)} </Text>
           )}
-          {row(line.replace(/\t/g, "  "), buf, buf.top + i, view.cols, focused && !buf.cmd)}
+          {row(line.replace(/\t/g, "  "), buf, buf.top + i, view.cols, focused && !buf.cmd, pinAt(buf.top + i))}
           <Text dimColor>{" " + bar[i]}</Text>
         </Text>
       ))}
@@ -213,8 +228,22 @@ function buffer(map: Map<string, Entry>, code: CodeView, view: View): Entry {
 }
 
 /** One line of the window, with the cursor drawn into it. */
-function row(styled: string, buf: Buf, at: number, cols: number, cursor: boolean): React.ReactNode {
+function row(styled: string, buf: Buf, at: number, cols: number, cursor: boolean, pin = ""): React.ReactNode {
   const from = buf.left;
+  if (pin && (!cursor || at !== buf.row)) {
+    // A live comment sits after the code, in whatever room the line leaves.
+    const s = slice(styled, from, from + cols);
+    const used = printable(s).length;
+    const room = cols - used - 3;
+    const note = room > 8 ? (pin.length > room ? pin.slice(0, room - 1) + "…" : pin) : "";
+    return (
+      <Text>
+        {s}
+        {note ? <Text color="#87afd7">{"  ◂ " + note}</Text> : null}
+        {" ".repeat(Math.max(0, cols - used - (note ? note.length + 4 : 0)))}
+      </Text>
+    );
+  }
   if (!cursor || at !== buf.row) {
     const s = slice(styled, from, from + cols);
     return <Text>{s + " ".repeat(Math.max(0, cols - printable(s).length))}</Text>;

@@ -120,6 +120,8 @@ writing prose at them - plain text you emit is a side channel they may not read.
   note_understanding
                Put a concept on their skill tree: one they showed they hold,
                or one they fumbled. See below.
+  point        Pin a short comment to a line of their code. When what you'd
+               say is about one line, point at it instead of describing it.
   fill_todo    After approval: hand dum the code for a TODO(dum) hole. dum
                writes it only if the skill is on their tree. See HOLES.
   leave_todo   After approval: register a hole they chose to type.
@@ -683,6 +685,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       // Each new request earns its own spec.
       approved = false;
       currentRequest = next;
+      store.unpin();
       yield userTurn(withAside(withHoles(next)));
     }
   }
@@ -811,6 +814,20 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               { type: "text" as const, text: "Recorded. Do not mention this to them." },
             ],
           };
+        },
+      ),
+      tool(
+        "point",
+        "Pin a live comment to a line of a file, shown beside their code and never saved. How you talk about a specific line, instead of describing where it is.",
+        {
+          path: z.string().describe("The file, relative to the repo"),
+          line: z.number().int().positive().describe("The line, 1-based"),
+          text: z.string().max(60).describe("Under 60 characters: what to notice about this line"),
+        },
+        async (args) => {
+          if (escapes(repo.root, args.path)) return { content: [{ type: "text" as const, text: `${args.path} is outside the repo.` }] };
+          store.pin(rel(repo.root, args.path), args.line, args.text.replace(/\s+/g, " ").trim());
+          return { content: [{ type: "text" as const, text: "Pinned. It's beside that line now - don't repeat it in words." }] };
         },
       ),
       tool(

@@ -176,3 +176,15 @@ test("a question put back after a side question counts as a re-ask", async () =>
   assert.ok(!reasks(q, "should an empty list raise, or return None?"));
   assert.ok(!reasks("", q));
 });
+
+test("live comments pin to lines, replace per line, and clear together", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand", process.cwd());
+  s.openFile("package.json");
+  s.pin("package.json", 3, "first");
+  s.pin("package.json", 3, "second");
+  s.pin("package.json", 5, "other");
+  assert.deepEqual(s.getSnapshot().pins["package.json"], [{ line: 3, text: "second" }, { line: 5, text: "other" }]);
+  s.unpin();
+  assert.deepEqual(s.getSnapshot().pins, {});
+});

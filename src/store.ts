@@ -100,6 +100,8 @@ export type State = {
    * help, a lesson, a spec.
    */
   reply: Stage | null;
+  /** Live comments on lines of files, by path: shown beside the code, never saved. */
+  pins: Record<string, { line: number; text: string }[]>;
   /** What the middle shows: code only - the file or the shell. */
   middle: "file" | "shell";
   /** Where a milestone folder stands: done of total, and what a unit is called. */
@@ -164,6 +166,7 @@ export class Store {
       progress: null,
       reply: null,
       middle: "file",
+      pins: {},
       models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
   }
@@ -398,6 +401,18 @@ export class Store {
     if (!how) return this.show(":run", `no runner for ${path}. !<command> runs anything.`);
     if ("hint" in how) return this.show(":run", how.hint);
     this.onShell?.(how.cmd);
+  }
+
+  /** Pin a live comment to a line (1-based) and bring that line into view. */
+  pin(path: string, line: number, text: string) {
+    const here = (this.state.pins[path] ?? []).filter((p) => p.line !== line);
+    this.patch({ pins: { ...this.state.pins, [path]: [...here, { line, text }] } });
+    if (this.state.code?.path !== path || this.state.stage.kind !== "code") this.openFile(path, line - 1);
+  }
+
+  /** Clear every live comment: a new turn starts clean. */
+  unpin() {
+    if (Object.keys(this.state.pins).length) this.patch({ pins: {} });
   }
 
   /** Where a milestone folder stands. */

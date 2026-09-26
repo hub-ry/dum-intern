@@ -136,6 +136,11 @@ if (scene === "spec") {
   store.typing("stats.py", file.replace("    mid = n // 2\n", "    mid = n // 2\n    return s[mid] if n % 2 else (s[mid - 1] + s[mi"), 2);
   store.filled("stats.py", "median", "    n = len(s)\n    mid = n // 2\n    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2");
   void store.askNext();
+} else if (scene === "pin") {
+  // Live comments: dum talking about a line, beside the line.
+  store.pin("src/lease.ts", 3, "30s: long enough for a slow job to finish");
+  store.pin("src/lease.ts", 11, "skip locked: two workers never grab one job");
+  void store.askNext();
 } else if (scene === "long") {
   // dum saying far too much: the pane shows what fits and points at the rest.
   void store.askQuestion(

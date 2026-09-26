@@ -135,6 +135,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             focused={focus === "stage"}
             reply={state.reply}
             last={state.middle}
+            pins={state.pins}
             onPage={(step) => store.pageStage(step)}
             onSave={saveFile}
             onReload={reloadFile}
