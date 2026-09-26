@@ -7,8 +7,10 @@ import { Store } from "./store.ts";
 import { banner, runPlain, Input } from "./plain.ts";
 import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
 import * as skills from "./skills.ts";
+import * as todos from "./todos.ts";
 import { c } from "./lines.ts";
 import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import { basename as repo } from "node:path";
 
 type Args = {
@@ -114,7 +116,25 @@ async function main() {
 
   const stop = tui ? await startInk(store, readLayout(repo.root)) : startPlain(store, repo.name, mode);
   try {
-    const request = fromArgs || (await store.askQuestion("what do you want?", "")).trim();
+    // An unfinished hole is the first thing you see on the way back in.
+    const holes = todos.load(repo.root);
+    if (holes.length && !fromArgs) {
+      const t = holes[0]!;
+      let at = 0;
+      try {
+        at = Math.max(0, todos.hole(readFileSync(`${repo.root}/${t.path}`, "utf8"), t.concept));
+      } catch {
+        /* the file went away; the review will say so */
+      }
+      store.setTodos(holes.map((h) => ({ concept: h.concept, path: h.path })));
+      store.openFile(t.path, at);
+    }
+    const request =
+      fromArgs ||
+      (holes.length
+        ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, "tab into the file, type it, :w, then say done. or ask for something else.")
+        : await store.askQuestion("what do you want?", "")
+      ).trim();
     if (!request) {
       store.note("nothing to do.");
       return;

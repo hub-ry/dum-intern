@@ -117,6 +117,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
         <Text dimColor>{"  "}</Text>
         <Text color="#87af87">{`${state.skills.known} known`}</Text>
         {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
+        {state.todos.length ? <Text color="#d7a55f">{`  ${state.todos.length} to type`}</Text> : null}
         <Box flexGrow={1} />
         <Text dimColor>{hint(focus, typing, hasCode)}</Text>
       </Box>

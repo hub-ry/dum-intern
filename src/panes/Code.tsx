@@ -15,10 +15,10 @@ import React, { useEffect, useReducer, useRef } from "react";
 import { Box, Text, useInput, usePaste } from "ink";
 import { printable, slice } from "../lines.ts";
 import { highlight } from "../highlight.ts";
-import { dirty, open, paste, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
+import { dirty, goto, open, paste, press, saved, scroll, tell, text, vcol, type Buf, type View } from "../editor.ts";
 import type { CodeView } from "../store.ts";
 
-type Entry = { source: string; buf: Buf };
+type Entry = { source: string; buf: Buf; jump?: number };
 
 export function Code({
   code,
@@ -175,6 +175,13 @@ function buffer(map: Map<string, Entry>, code: CodeView, view: View): Entry {
   if (!entry) {
     entry = { source: code.body, buf: open(code.body, { readOnly, at: code.live ? Infinity : code.at }) };
     map.set(key, entry);
+  }
+  if (code.jump !== undefined && entry.jump !== code.jump && code.at !== undefined && !code.live) {
+    entry.jump = code.jump;
+    // A third of the way down, like vim landing on a far jump: the hole and
+    // what leads into it, rather than the hole on the bottom edge.
+    const g = goto(entry.buf, code.at);
+    entry.buf = { ...g, top: Math.max(0, g.row - Math.floor(view.rows / 3)) };
   }
   if (entry.buf.readOnly !== readOnly) entry.buf = { ...entry.buf, readOnly };
   entry.buf = scroll(entry.buf, view);

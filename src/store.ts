@@ -69,6 +69,12 @@ export type CodeView = {
   onDisk: boolean;
   /** The line to land on when the editor first shows this. */
   at?: number;
+  /**
+   * Set when something asks to land on `at` even if the buffer already exists
+   * - handing you a hole in a file the intern just wrote. A new value is a new
+   * jump; the buffer remembers which one it last obeyed.
+   */
+  jump?: number;
 };
 
 /**
@@ -101,12 +107,15 @@ export type State = {
   stage: Stage;
   /** Skills on the tree that count in this repo, and how many are still shaky. */
   skills: { known: number; shaky: number };
+  /** Holes the intern left for you to type, each one a skill to unlock. */
+  todos: { concept: string; path: string }[];
 };
 
 export class Store {
   private state: State;
   private listeners = new Set<() => void>();
   private nextId = 1;
+  private jumps = 0;
 
   /**
    * The promise the agent is parked on, and the entry to write the reply into.
@@ -143,6 +152,7 @@ export class Store {
       code: null,
       stage: { kind: "code" },
       skills: { known: 0, shaky: 0 },
+      todos: [],
     };
   }
 
@@ -273,7 +283,7 @@ export class Store {
    * must never quietly add to that. It sees the file LIST already; the
    * contents are yours until you explain them.
    */
-  openFile(path: string) {
+  openFile(path: string, at?: number) {
     let body: string;
     let onDisk = true;
     try {
@@ -283,7 +293,7 @@ export class Store {
       onDisk = false;
     }
     this.patch({
-      code: { tool: "open", path, body, live: false, outcome: null, onDisk },
+      code: { tool: "open", path, body, live: false, outcome: null, onDisk, ...(at !== undefined ? { at, jump: ++this.jumps } : {}) },
       stage: { kind: "code" },
     });
   }
@@ -326,6 +336,11 @@ export class Store {
   /** The skill tree changed. */
   setSkills(skills: { known: number; shaky: number }) {
     this.patch({ skills });
+  }
+
+  /** The holes left for you to type changed. */
+  setTodos(todos: { concept: string; path: string }[]) {
+    this.patch({ todos });
   }
 
   /** Ask one question and park until it is answered. */

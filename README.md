@@ -175,6 +175,38 @@ Not knowing the answer and not having the concept are different. I type `idk` an
 I declare it. Nothing infers it.
 
 
+### Type it
+
+Explaining was the only way onto the tree, which made the tree exactly as good as the intern's read of my sentences. Tuning that is prompt work, and prompt work only goes so far.
+
+So a question has a second answer. I can explain it, or say `type it`.
+
+```
+  For an even-length list like [1, 2, 3, 4], what should median return?
+  answer it · idk · type it
+  > type it
+```
+
+The spec gets a "you type" section. The intern builds everything around that piece and leaves a hole where it goes:
+
+```python
+def median(xs):
+    s = sorted(xs)
+    # TODO(dum): median of a sorted list
+    # Given `s`, already sorted, return its middle value.
+    # Odd length: the single middle element. Even length: must be handled too.
+    raise NotImplementedError
+```
+
+What the code has to do, never how. The file pane opens on it, I type it in, `:w`, and say `done`.
+
+The intern reads it like a reviewer. If it works, the skill goes on the tree as solid, same as explaining it. If it doesn't, I get a question: "for median([1, 2, 3, 4]), which index does `s[len(s) // 2]` read?" Not the fix, and it doesn't touch my code. `done` on a file I haven't changed gets caught in code without a round trip.
+
+Open holes live in `.dum/todos.json`, so quitting halfway is fine. The next `dum` in that repo opens on the hole.
+
+Typing is harder to fake than a sentence. A deleted marker isn't an implementation, and a function that's wrong on the even case doesn't pass.
+
+
 ### Enforced in code, not in the prompt
 
 Mutating tools are denied until I approve the spec. v1 asked for this in the system prompt. On the first real run the intern skipped it, wrote two files, and printed "nothing was built".
@@ -215,6 +247,8 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `tab` / `shift-tab` | input, file, file tree, and back around | anywhere |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
+| `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
+| `done` | check what I typed into the hole | "what next?" |
 | `y` | approve the spec, anything else declines | spec |
 | `ctrl-t` | swap the stage to the full transcript and back | anywhere |
 | `j` / `k`, arrows | move | file tree, file |
@@ -263,6 +297,7 @@ dum
 <repo>/.dum/
   session          so the next `dum` resumes the same intern
   wizard.jsonl     every quip
+  todos.json       holes left for me to type
   debug.log        with DUM_DEBUG=1
   knowledge.json   the old per-repo record, folded into the tree once and left alone
 ```

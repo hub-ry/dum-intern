@@ -127,6 +127,13 @@ export function vcol(line: string, col: number): number {
   return v + Math.max(0, col - line.length);
 }
 
+/** Put the cursor on a line, at its first character, as `:` number does. */
+export function goto(b: Buf, row: number): Buf {
+  const r = clamp(row, 0, b.lines.length - 1);
+  const col = firstNonBlank(b.lines[r]!);
+  return { ...b, row: r, col, want: col };
+}
+
 /**
  * Keep the cursor on screen.
  *

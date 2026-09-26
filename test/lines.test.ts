@@ -36,3 +36,9 @@ test("slice keeps the colour in force at its start and closes at its end", () =>
   assert.equal(slice(styled, 9, 12), "");
   assert.equal(printable(slice(styled, 1, 7)), "bcdefg");
 });
+
+test("a heading with inline code keeps the code's case and its colour", () => {
+  const [head] = markdown("## add `median(xs)` to stats.py", 60);
+  assert.equal(printable(head!), "ADD median(xs) TO STATS.PY");
+  assert.ok(!/\[\d+(;\d+)*M/.test(head!), "no uppercased escape codes");
+});

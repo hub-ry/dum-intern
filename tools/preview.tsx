@@ -127,6 +127,11 @@ if (scene === "spec") {
   // sideways clipping are exercised by something with the shape of code.
   store.openFile("src/store.ts");
   void store.askQuestion("what next?", "");
+} else if (scene === "hole") {
+  // Handed a hole to type: the file open at the TODO, dum saying whose turn.
+  store.setTodos([{ concept: "median of an even-length list", path: "src/store.ts" }]);
+  store.openFile("src/store.ts", 120);
+  void store.askNext();
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");
   store.toggleTranscript();

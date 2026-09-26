@@ -64,6 +64,7 @@ export function Cast({ state, width }: { state: State; width: number }) {
         text={internSaid.shown}
         width={inner}
         why={state.prompt?.type === "question" ? state.prompt.why : ""}
+        choices={state.prompt?.type === "question" && state.prompt.why ? "answer it · idk · type it" : ""}
       />
     </Box>
   );
@@ -77,6 +78,7 @@ function Speaker({
   nameColor,
   text,
   why,
+  choices,
   width,
   dim,
 }: {
@@ -87,6 +89,8 @@ function Speaker({
   nameColor: string;
   text: string;
   why?: string;
+  /** The ways out of a question, so "type it" is discoverable without a manual. */
+  choices?: string;
   width: number;
   dim?: boolean;
 }) {
@@ -109,6 +113,11 @@ function Speaker({
             </Text>
           ))
         : null}
+      {choices ? (
+        <Text color="#5f8787" wrap="truncate-end">
+          {choices}
+        </Text>
+      ) : null}
     </Box>
   );
 }
@@ -188,7 +197,10 @@ function lastQuip(s: State): string {
 function currentLine(s: State): string {
   if (s.prompt?.type === "question") return s.prompt.question;
   if (s.prompt?.type === "spec") return "that is the spec. build it?";
-  if (s.prompt?.type === "next") return "what next?";
+  if (s.prompt?.type === "next") {
+    const t = s.todos[0];
+    return t ? `your turn: ${t.concept} in ${t.path}. :w it, then say done.` : "what next?";
+  }
   if (s.busy) return "";
   for (let i = s.transcript.length - 1; i >= 0; i--) {
     const e = s.transcript[i]!;

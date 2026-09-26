@@ -60,15 +60,19 @@ export function markdown(md: string, width: number): string[] {
       out.push("  " + c.blue(raw));
       continue;
     }
-    const line = raw
-      .replace(/`([^`]+)`/g, (_, t) => c.blue(t))
-      .replace(/\*\*([^*]+)\*\*/g, (_, t) => c.bold(t));
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    const inline = (s: string) =>
+      s.replace(/`([^`]+)`/g, (_, t) => c.blue(t)).replace(/\*\*([^*]+)\*\*/g, (_, t) => c.bold(t));
+    // Uppercased before it is styled, and never inside backticks: shouting
+    // after styling turned the colour escapes into literal junk, and
+    // `median(xs)` is code, not a word that can change case.
+    const h = /^(#{1,6})\s+(.*)$/.exec(raw);
     if (h) {
       if (out.length) out.push("");
-      out.push(c.bold(h[2]!.toUpperCase()));
+      const loud = h[2]!.split(/(`[^`]+`)/).map((p) => (p.startsWith("`") ? p : p.toUpperCase())).join("");
+      out.push(c.bold(inline(loud)));
       continue;
     }
+    const line = inline(raw);
     const li = /^(\s*)[-*]\s+(.*)$/.exec(line);
     if (li) {
       const pad = " ".repeat(li[1]!.length);

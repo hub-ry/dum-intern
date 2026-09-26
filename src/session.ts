@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
 import { peekString, WATCHED } from "./stream.ts";
 import * as skills from "./skills.ts";
+import * as todos from "./todos.ts";
 import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
 import { Wizard, log as logQuip, type Quip } from "./wizard.ts";
@@ -155,7 +156,7 @@ There is someone here who does have that breadth - the wizard. Industry context
 reaches them in the wizard's voice, not yours. Your job is the work in front of
 you and the decisions only they can make.
 
-You have four tools for talking to them, and you MUST use them instead of
+You have these tools for talking to them, and you MUST use them instead of
 writing prose at them - plain text you emit is a side channel they may not read.
 
   ask          Ask ONE question and get their reply. This is a conversation,
@@ -167,6 +168,8 @@ writing prose at them - plain text you emit is a side channel they may not read.
   note_understanding
                Put a concept on their skill tree: one they showed they hold,
                or one they fumbled. See below.
+  leave_todo   After approval: register a hole you left for them to type.
+  check_todo   Judge what they typed into a hole. See TYPE IT below.
 
 HOW YOU TALK
 You're a teammate typing in the same terminal, not a document. Talk like it.
@@ -265,6 +268,31 @@ across every project. \`teach\` records what you taught on its own; use
   like "they want it in postgres".
 - Do not tell them you recorded it and do not use it as praise. dum shows new
   skills on its own.
+
+TYPE IT
+Explaining is one way onto the tree. Typing the code is the other. When they
+reply "type it" to a question, they're choosing to write that piece themselves
+instead of explaining it. Don't ask about that concept again and don't record
+it yet. Name it in the spec under "you type", with what the code has to do.
+
+When you build, write everything around that piece yourself and leave a hole
+where it goes:
+- the hole is a comment block in the file's own comment syntax. Its first line
+  is exactly \`TODO(dum): <concept>\`, then one to three lines saying what the
+  code must do - inputs, output, the edge case that matters. Never how. No
+  pseudocode, no function names they'd have to call, no hints.
+- keep the hole small: one function body or one block, the part that actually
+  rests on the concept. Everything else should already work.
+- stub it so the file still parses, the way the language does it (an empty
+  body, \`todo!()\`, \`raise NotImplementedError\`, \`throw new Error("todo")\`).
+- then call leave_todo for it. One hole per concept.
+- after the build, one line telling them where the hole is. Nothing more.
+
+When they say they've typed it you'll be asked to check. Read their code and
+call check_todo. Passing is the skill, so judge it like a reviewer: does it do
+what the hole said, and would it work? Not whether it matches what you'd have
+written. A failure gets a question that makes them find it, never the fix, and
+never touch their code.
 
 THE SPEC
 - Every decision they made appears in it as a decision.
@@ -400,6 +428,32 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       store.note(`+ skill: ${name}${entry.breadth === "niche" ? " (niche)" : ""}`);
     }
   }
+  // Holes left for them to type. Kept on disk, since typing one is often the
+  // next session's work, and the review turn goes to the resumed intern.
+  let open = todos.load(repo.root);
+  let handedOff = false;
+  const readRel = (p: string) => {
+    try {
+      return readFileSync(resolve(repo.root, p), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  function setOpen(next: todos.Todo[]) {
+    open = next;
+    todos.save(repo.root, open);
+    store.setTodos(open.map((t) => ({ concept: t.concept, path: t.path })));
+  }
+  setOpen(open);
+
+  /** Put the first open hole under their cursor. */
+  function handOff() {
+    const t = open[0];
+    if (!t) return;
+    const body = readRel(t.path);
+    store.openFile(t.path, body === null ? 0 : Math.max(0, todos.hole(body, t.concept)));
+  }
+
   const wizard = new Wizard(repo);
   wizard.start();
 
@@ -473,7 +527,20 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   }
 
   async function* turns(): AsyncGenerator<any> {
-    yield userTurn(opening(request));
+    // Coming back to finish a hole: "done" as the first thing said is the
+    // review, not a request to build something called done.
+    if (open.length && /^done[.!]*$/i.test(request.trim())) {
+      const typed = open.filter((t) => !todos.untouched(open, readRel).includes(t));
+      if (typed.length) {
+        yield userTurn(todos.reviewTurn(typed));
+      } else {
+        store.note(`${open.map((t) => t.path).join(", ")} still as dum left it - type it in, :w, then done`);
+        handOff();
+        yield userTurn(opening("(nothing yet - they're about to type their TODO(dum) hole. Say nothing and end the turn.)"));
+      }
+    } else {
+      yield userTurn(opening(request));
+    }
     for (;;) {
       const next = await new Promise<string>((res) => (pending.deliver = res));
       if (!next || QUIT.has(next.toLowerCase())) return; // ends the query cleanly
@@ -503,6 +570,16 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         async (args) => {
           await drainWizard();
           const reply = (await store.askQuestion(args.question, args.why_it_matters)).trim();
+          if (todos.wantsToType(reply)) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "They'll type this one instead of explaining it. Don't ask about it again and don't record it. Put it under \"you type\" in the spec, and when you build, leave a TODO(dum) hole for it and call leave_todo.",
+                },
+              ],
+            };
+          }
           if (reply && !notAnAnswer(reply)) {
             wizardLate = false;
             wizardPending = wizard.consider({ request: currentRequest, answer: reply });
@@ -585,6 +662,77 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           return {
             content: [
               { type: "text" as const, text: "Recorded. Do not mention this to them." },
+            ],
+          };
+        },
+      ),
+      tool(
+        "leave_todo",
+        "Register a TODO(dum) hole you left in a file for them to type. Only after the spec is approved, and only after the hole is written.",
+        {
+          path: z.string().describe("The file the hole is in, relative to the repo"),
+          concept: z.string().describe("The skill typing it unlocks - the industry name, reusing the tree's name if it's there"),
+          what: z.string().describe("What their code has to do. The same words as the hole. Never how."),
+          breadth: BREADTH,
+          requires: REQUIRES,
+        },
+        async (args) => {
+          const fail = (text: string) => ({ content: [{ type: "text" as const, text }] });
+          if (!approved) return fail("Not yet - holes are left while building, after the spec is approved.");
+          if (escapes(repo.root, args.path)) return fail(`${args.path} is outside the repo.`);
+          const path = rel(repo.root, args.path);
+          const body = readRel(path);
+          if (body === null) return fail(`${path} doesn't exist. Write the file with the hole first.`);
+          if (todos.hole(body, args.concept) < 0) {
+            return fail(`There's no ${todos.MARKER} line in ${path}. Write the hole first, then call this again.`);
+          }
+          const t: todos.Todo = {
+            concept: args.concept.trim(),
+            path,
+            what: args.what.trim(),
+            breadth: args.breadth,
+            requires: args.requires.slice(0, 3),
+            before: body,
+          };
+          setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
+          handedOff = false;
+          return fail("Left. Tell them where it is in one line after the build.");
+        },
+      ),
+      tool(
+        "check_todo",
+        "Judge the code they typed into a TODO(dum) hole. Passing unlocks the skill.",
+        {
+          concept: z.string().describe("The hole's concept, exactly as registered"),
+          passed: z.boolean().describe("True if their code does what the hole said and would work"),
+          feedback: z
+            .string()
+            .describe("If it failed: one question that makes them run the failing case in their head. Never the fix. If it passed: one short line on what they got right."),
+        },
+        async (args) => {
+          const t = open.find((o) => skills.key(o.concept) === skills.key(args.concept));
+          if (!t) {
+            return { content: [{ type: "text" as const, text: `No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.` }] };
+          }
+          store.say(args.feedback);
+          if (args.passed) {
+            setOpen(open.filter((o) => o !== t));
+            record({
+              name: t.concept,
+              solid: true,
+              breadth: t.breadth,
+              requires: t.requires,
+              why: `typed it themselves in ${t.path}: ${args.feedback}`,
+            });
+          }
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: args.passed
+                  ? "Passed and recorded. They saw your line - say nothing else about it."
+                  : "Still open. They saw your question - say nothing else this turn, and don't fix it for them.",
+              },
             ],
           };
         },
@@ -781,7 +929,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           const files = [...new Set(wrote)];
           wrote.length = 0;
           wdebug("review: checking", files.join(", "));
-          const found = await reference.review(approvedSpec, files);
+          // A hole is a stub on purpose. Without saying so, the review reads
+          // it as the build not working and flags the one thing that is right.
+          const holes = open.length
+            ? `\n\nLEFT FOR THEM TO TYPE, ON PURPOSE - a stub at a ${todos.MARKER} hole is not a departure:\n${open.map((t) => `- ${t.concept} in ${t.path}`).join("\n")}`
+            : "";
+          const found = await reference.review(approvedSpec + holes, files);
           wdebug(found ? `review: found "${found.slice(0, 80)}"` : "review: ok");
           if (found) store.review(found);
         }
@@ -795,11 +948,27 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
         // silently did nothing, with the reason one keypress away where nobody
         // looks.
         const failed = failure(msg);
-        const next = (
-          failed
-            ? await store.askQuestion(failed, "type anything to try again once it's fixed, or exit")
-            : await store.askNext()
-        ).trim();
+        if (!failed && open.length && !handedOff) {
+          handedOff = true;
+          handOff();
+        }
+        let next = "";
+        for (;;) {
+          next = (
+            failed
+              ? await store.askQuestion(failed, "type anything to try again once it's fixed, or exit")
+              : await store.askNext()
+          ).trim();
+          if (failed || !open.length || !/^done[.!]*$/i.test(next)) break;
+          // Settled here rather than spending a turn on it: nothing changed.
+          const same = todos.untouched(open, readRel);
+          if (same.length < open.length) {
+            next = todos.reviewTurn(open.filter((t) => !same.includes(t)));
+            break;
+          }
+          store.note(`${open.map((t) => t.path).join(", ")} ${open.length === 1 ? "is" : "are"} still as dum left ${open.length === 1 ? "it" : "them"} - type it in, :w, then done`);
+          handOff();
+        }
         pending.deliver?.(next);
         if (!next || QUIT.has(next.toLowerCase())) return;
         continue;
