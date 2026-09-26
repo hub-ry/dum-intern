@@ -264,9 +264,10 @@ Plain files, no database. Notes are written through a temp file and a rename and
 
 ### Not done
 
-- No skill-tree pane inside the TUI yet. The tree is `dum --skills` or the browser graph.
-- No git protocol. dum writes files and never commits, branches, or checks what's dirty first.
-- In anti-vibe, the intern can claim the build matches the spec before checking. The build review catches it, but only afterwards.
+- No skill-tree pane inside the TUI yet. The tree is `dum --skills` or the browser graph. ([#1](https://github.com/hub-ry/dum-intern/issues/1))
+- No git protocol. dum writes files and never commits, branches, or checks what's dirty first. ([#2](https://github.com/hub-ry/dum-intern/issues/2))
+- In anti-vibe, the intern can claim the build matches the spec before checking. The build review catches it, but only afterwards. ([#3](https://github.com/hub-ry/dum-intern/issues/3))
+- The level thresholds and gap sizes are a first guess, not tuned against real sessions. ([#4](https://github.com/hub-ry/dum-intern/issues/4))
 - The intern runs on the Claude Code bundled with the Agent SDK but uses my default model. A model newer than that bundle fails every request. dum says to `npm update @anthropic-ai/claude-agent-sdk` in its own folder, but can't do it for me.
 
 
