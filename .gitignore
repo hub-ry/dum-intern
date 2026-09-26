@@ -1,2 +1,4 @@
 node_modules/
 .dum/
+cpp/hysa
+cpp/hysa_test
