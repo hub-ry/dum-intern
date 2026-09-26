@@ -21,6 +21,12 @@ import { spans } from "../todos.ts";
 
 type Entry = { source: string; buf: Buf; jump?: number };
 
+/**
+ * Every buffer, outside the component. Running a shell command takes the panes
+ * down and puts them back, and unsaved edits must be there when they return.
+ */
+const BUFFERS = new Map<string, Entry>();
+
 export function Code({
   code,
   width,
@@ -30,6 +36,7 @@ export function Code({
   onReload,
   onLeave,
   onTyping,
+  onCommand,
 }: {
   code: CodeView | null;
   width: number;
@@ -43,8 +50,10 @@ export function Code({
   onLeave: () => void;
   /** True while every key is text - the app must not take tab from an insert. */
   onTyping: (typing: boolean) => void;
+  /** A `:run`, `:graph`, `:log` or `:!cmd` from the `:` line. */
+  onCommand: (effect: string) => void;
 }) {
-  const buffers = useRef(new Map<string, Entry>());
+  const buffers = useRef(BUFFERS);
   const [, bump] = useReducer((n: number) => n + 1, 0);
 
   // The gutter is sized off the text before the buffer exists, because the
@@ -76,6 +85,7 @@ export function Code({
           out = err ? tell(out, err) : tell(saved(out), `wrote ${code.path}`);
         }
         if (e === "leave") onLeave();
+        if (e.startsWith("cmd:") || e.startsWith("shell:")) onCommand(e);
         if (e === "reload") {
           buffers.current.delete(keyOf(code));
           onReload(code.path);

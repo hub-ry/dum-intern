@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
 import type { Mode } from "./session.ts";
+import { runnerFor } from "./shell.ts";
 
 export type Outcome = "ran" | "held" | "refused";
 
@@ -101,6 +102,7 @@ export type Stage =
   | { kind: "answer"; question: string; body: string; pending: boolean }
   | { kind: "spec"; spec: string }
   | { kind: "lesson"; lesson: Lesson }
+  | { kind: "info"; title: string; body: string }
   | { kind: "transcript" };
 
 export type State = {
@@ -155,6 +157,9 @@ export class Store {
   /** Set by the runner: where a `?` question goes. */
   onAsk: ((question: string) => void) | null = null;
 
+  /** Set by the runner: `!cmd` - run it in a real shell. "" for an interactive shell. */
+  onShell: ((cmd: string) => void) | null = null;
+
   /** Set by the runner: draw the graph and open it. */
   onGraph: (() => void) | null = null;
 
@@ -204,6 +209,18 @@ export class Store {
     if (text.startsWith("?")) {
       const question = text.slice(1).trim();
       if (question) this.onAsk?.(question);
+      return;
+    }
+    // `:run`, `:graph`, `:log`, `:help` - dum's commands, vim's ex line.
+    // Only these exact words: `:yes` or `:)` is still an answer.
+    const ex = /^:\s*(run|graph|log|help)\s*$/i.exec(text.trim());
+    if (ex) {
+      this.command(ex[1]!.toLowerCase());
+      return;
+    }
+    // `!` is a shell, same as vim and Claude Code. Never an answer either.
+    if (text.startsWith("!") && this.onShell) {
+      this.onShell(text.slice(1).trim());
       return;
     }
     // Same rule as `?`: taking a skill back is not an answer to anything, and
@@ -359,6 +376,14 @@ export class Store {
     this.patch({ stage: { kind: "answer", question, body, pending: false } });
   }
 
+  /**
+   * Something for you to read that isn't anyone speaking - help, a hint. On
+   * the stage, because a note under an open prompt is never seen.
+   */
+  show(title: string, body: string) {
+    this.patch({ stage: { kind: "info", title, body } });
+  }
+
   /** The wizard caught something in what dum just built. */
   review(text: string) {
     this.append({ kind: "review", text });
@@ -367,6 +392,43 @@ export class Store {
   /** The skill tree changed. */
   setSkills(skills: { known: number; shaky: number; claimed: number }) {
     this.patch({ skills });
+  }
+
+  /** One of dum's `:` commands, from the input or the file's `:` line. */
+  command(name: string) {
+    if (name === "run") return this.runFile();
+    if (name === "graph") return this.onGraph?.();
+    if (name === "log") return this.toggleTranscript();
+    if (name === "help") {
+      return this.show(
+        "dum commands",
+        [
+          "!cmd      run it in a real shell. ! alone is your own shell until exit",
+          "?text     ask anything, answered off to the side",
+          ":run      run the file on screen (compiled languages: the line to type)",
+          ":graph    the skill graph, in your browser",
+          ":log      everything said so far, and back",
+          "tab       input, file, file tree",
+          "",
+          "answering a question: your answer, idk, or type it",
+          "at your turn: type it and say done, or explain it here",
+          "not yet   take back the skill just checked off",
+        ].join("\n"),
+      );
+    }
+  }
+
+  /**
+   * :run - run the file on screen. Interpreted languages run; compiled ones
+   * get the line to type, because typing it is the lesson.
+   */
+  runFile() {
+    const path = this.state.code?.onDisk ? this.state.code.path : "";
+    if (!path) return this.show(":run", "open a file first - :run runs the one on screen.");
+    const how = runnerFor(path);
+    if (!how) return this.show(":run", `no runner for ${path}. !<command> runs anything.`);
+    if ("hint" in how) return this.show(":run", how.hint);
+    this.onShell?.(how.cmd);
   }
 
   /** Where a milestone folder stands. */

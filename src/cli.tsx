@@ -14,6 +14,7 @@ import * as planner from "./planner.ts";
 import * as rebuild from "./rebuild.ts";
 import * as graphs from "./graph.ts";
 import * as learn from "./learn.ts";
+import * as shell from "./shell.ts";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { c, wrap, voiceName, minutes, cap, bar } from "./lines.ts";
@@ -546,7 +547,20 @@ async function main() {
   // that works, and it is also how this program is scripted in a test.
   const tui = !plain && stdout.isTTY && stdin.isTTY;
 
-  const stop = tui ? await startInk(store, readLayout(repo.root)) : startPlain(store, repo.name, mode);
+  const ui = tui ? await startInk(store, readLayout(repo.root)) : null;
+  const stop = ui ? ui.stop : startPlain(store, repo.name, mode);
+  // `!cmd`: the panes step aside while it runs, and come back after. In plain
+  // mode there are no panes to move, so it just runs.
+  let shelling = false;
+  store.onShell = (cmd) => {
+    if (shelling) return;
+    shelling = true;
+    const go = async () => {
+      const code = await shell.run(cmd, repo.root, !!ui);
+      store.note(cmd ? `$ ${cmd}  (exit ${code})` : "back from the shell.");
+    };
+    void (ui ? ui.suspend(go) : go()).finally(() => (shelling = false));
+  };
   try {
     // An unfinished hole is the first thing you see on the way back in.
     const holes = todos.load(repo.root);
@@ -610,7 +624,7 @@ async function main() {
   }
 }
 
-async function startInk(store: Store, layout: LayoutNode): Promise<() => void> {
+async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () => void; suspend: (fn: () => Promise<void>) => Promise<void> }> {
   // Imported lazily so the plain path never pays to load React and Ink, which
   // matters for `dum` in a pipe and for the startup cost of `--plain`.
   const [{ render }, React, { App }] = await Promise.all([
@@ -618,8 +632,33 @@ async function startInk(store: Store, layout: LayoutNode): Promise<() => void> {
     import("react"),
     import("./panes/App.tsx"),
   ]);
-  const app = render(React.createElement(App, { store, layout }), { exitOnCtrlC: true });
-  return () => app.unmount();
+  const mount = () => render(React.createElement(App, { store, layout }), { exitOnCtrlC: true });
+  let app = mount();
+  return {
+    stop: () => app.unmount(),
+    // Unmounting hands the terminal back - raw mode off, input released - so
+    // the command gets it whole. The store keeps everything; the panes are
+    // drawn fresh from it after.
+    //
+    // Unmounting also lets go of stdin, and with nothing else holding the
+    // event loop Node simply exits - mid "enter to go back". Found in tmux:
+    // dum quit the moment the command finished. So the suspend holds the
+    // process open itself until the panes are back.
+    suspend: async (fn) => {
+      const hold = setInterval(() => {}, 1 << 30);
+      app.unmount();
+      await app.waitUntilExit().catch(() => {});
+      stdin.ref();
+      stdout.write("\x1b[2J\x1b[H");
+      try {
+        await fn();
+      } finally {
+        stdout.write("\x1b[2J\x1b[H");
+        app = mount();
+        clearInterval(hold);
+      }
+    },
+  };
 }
 
 function startPlain(store: Store, repo: string, mode: Mode): () => void {

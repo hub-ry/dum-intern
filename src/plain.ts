@@ -115,6 +115,7 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
   // Said once, when the intern's model is first known, and again only if a
   // voice changes model - a line printer has no corner to keep it in.
   let models = "";
+  let shown: unknown = null;
   let wake: (() => void) | null = null;
   let stop: (() => void) | null = null;
 
@@ -133,6 +134,13 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     if (said && said !== models) {
       models = said;
       console.log("  " + c.dim(said));
+    }
+    // Help and hints go to the stage in the panes; here they're just printed.
+    if (s.stage.kind === "info" && s.stage !== shown) {
+      shown = s.stage;
+      console.log(`  ${c.bold(s.stage.title)}`);
+      for (const l of s.stage.body.split("\n")) console.log(`  ${c.dim(l)}`);
+      console.log();
     }
     for (; printed < s.transcript.length; printed++) {
       for (const line of collapse(format(s.transcript[printed]!, WIDTH)))

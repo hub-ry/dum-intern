@@ -79,7 +79,7 @@ I can fix a wrong one, delete one, or write one. A note I write myself counts as
 ### The graph
 
 ```sh
-dum --graph        # or ctrl-g in a session
+dum --graph        # or :graph in a session
 ```
 
 The tree and the queue as one picture, in the browser. The layout copies the Rust project's skill-tree: Graphviz boxes top to bottom, each project a group of the skills it unlocks, with a box to tick for each, climbing from what's done toward the goal. A goal and its steps share a frame. Skills no project covers sit in "your tree", and prerequisites nobody's recorded are dashed.
@@ -102,6 +102,17 @@ It reads them and lists the concepts the code actually rests on, each with the l
 Claimed isn't known. Nobody watched me write that code. The first build that leans on a claimed skill gets one short check, and passing it makes it known. Something dum already judged in a session is never touched by a scan. A skill I fumbled in front of it stays shaky however much of it my old code uses.
 
 `dum --reset` starts the tree over. The old notes get moved aside, not deleted.
+
+
+### A shell, and no chords to collide with
+
+Learning a language includes running it, and the panes used to make that awkward. `!g++ -std=c++17 -Wall -o lab lab.cpp && ./lab` runs in a real shell. The panes step aside, the program gets the whole terminal (input and ctrl-c included), and Enter brings them back with nothing lost. `!` alone is my own shell until I `exit`.
+
+`:run` runs the open file for languages where that's one obvious command: python, node, ruby, go. For C, C++ and Rust it doesn't compile anything. It shows the line to type, because typing the compiler line is part of learning the language.
+
+dum's commands are typed, not chorded. `:run`, `:graph`, `:log`, `:help`, like vim's ex line, and they work on the file pane's `:` line too, next to `:w`. `ctrl-g` belongs to a browser extension and `ctrl-e` to every shell's end-of-line, so the input gets readline's keys and dum takes none. The one global chord left is ctrl-c.
+
+What runs in the shell is mine. The intern doesn't see it.
 
 
 ### Short, on purpose
@@ -437,6 +448,13 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | :--- | :--- | :--- |
 | `tab` / `shift-tab` | input, file, file tree, and back around | anywhere |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
+| `!` + command | run it in a real shell - the panes step aside, enter comes back | input, file's `:` line |
+| `!` | your own shell, until `exit` | input |
+| `:run` | run the open file. Compiled languages get the line to type instead | input, file's `:` line |
+| `:graph` | the skill graph, in the browser | input, file's `:` line |
+| `:log` | the full transcript on the stage, and back | input, file's `:` line |
+| `:help` | all of this, on the stage | input |
+| `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
 | `idk` | "I don't have this concept", the intern teaches it | answering a question |
 | `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
 | `done` | check what I typed into the hole | "what next?" |
@@ -444,8 +462,6 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | an explanation | fills the hole it explains, if it holds up | "your turn" |
 | `not yet` [name] | don't count the skill just checked off | anywhere |
 | `y` | approve the spec, anything else declines | spec |
-| `ctrl-t` | swap the stage to the full transcript and back | anywhere |
-| `ctrl-g` | open the skill graph in the browser | anywhere |
 | `j` / `k`, arrows | move | file tree, file |
 | `h` / `l` | collapse / expand | file tree |
 | `enter` / `o` | open the file (only you see it, the intern doesn't) | file tree |

@@ -44,3 +44,21 @@ export function pasted(f: Field, text: string): Field {
   const flat = text.replace(/\s*(\r\n|\r|\n)+\s*/g, " ").replace(/^\s+|\s+$/g, "");
   return { value: f.value.slice(0, f.at) + flat + f.value.slice(f.at), at: f.at + flat.length };
 }
+
+/**
+ * ctrl-a / ctrl-e: start and end. ctrl-u / ctrl-k: delete to start and to end.
+ * ctrl-w: delete the word before the cursor. Null for any other chord, which
+ * then belongs to nobody - there are no app-wide chords to steal it for.
+ */
+export function readline(ch: string, f: { value: string; at: number }): { value: string; at: number } | null {
+  const { value, at } = f;
+  if (ch === "a") return { value, at: 0 };
+  if (ch === "e") return { value, at: value.length };
+  if (ch === "u") return { value: value.slice(at), at: 0 };
+  if (ch === "k") return { value: value.slice(0, at), at };
+  if (ch === "w") {
+    const before = value.slice(0, at).replace(/\S*\s*$/, "");
+    return { value: before + value.slice(at), at: before.length };
+  }
+  return null;
+}

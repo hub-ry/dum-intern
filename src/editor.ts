@@ -81,7 +81,15 @@ export type Buf = {
 
 export type View = { rows: number; cols: number };
 
-export type Effect = "save" | "leave" | "reload";
+/**
+ * What a key asks of the world outside the buffer. `cmd:` is one of dum's own
+ * commands typed on the `:` line (`:run`, `:graph`, `:log`), and `shell:` is
+ * vim's `:!` - the pane passes both up rather than knowing what they do.
+ */
+export type Effect = "save" | "leave" | "reload" | `cmd:${string}` | `shell:${string}`;
+
+/** dum's commands, the same on the input line and on the file's `:` line. */
+export const COMMANDS = ["run", "graph", "log", "help"] as const;
 
 const UNDO_MAX = 200;
 
@@ -494,6 +502,8 @@ function command(b: Buf, ch: string, key: Key): Step {
     if (t === "wq" || t === "x") return { buf: done, effects: ["save", "leave"] };
     if (t === "e" || t === "e!") return { buf: done, effects: ["reload"] };
     if (t === "$") return { buf: to(done, Infinity, 0) };
+    if (t.startsWith("!")) return { buf: done, effects: [`shell:${t.slice(1).trim()}`] };
+    if ((COMMANDS as readonly string[]).includes(t)) return { buf: done, effects: [`cmd:${t}`] };
     if (/^\d+$/.test(t)) return { buf: to(done, Number(t) - 1, firstNonBlank(done.lines[clamp(Number(t) - 1, 0, done.lines.length - 1)]!)) };
     return { buf: tell(done, t ? `not a command: ${t}` : "") };
   }

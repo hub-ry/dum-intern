@@ -41,9 +41,9 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
       const step = key.shift ? -1 : 1;
       return setFocus((f) => ring[(ring.indexOf(f) + step + ring.length) % ring.length]!);
     }
-    // A chord, because the field owns every plain key while you are typing.
-    if (key.ctrl && ch === "t") return store.toggleTranscript();
-    if (key.ctrl && ch === "g") return store.onGraph?.();
+    // No other global chords, on purpose. They collide: ctrl-g belongs to a
+    // browser extension, ctrl-e to every shell's end-of-line. dum's commands
+    // are typed instead - `:run`, `:graph`, `:log` - like vim's ex line.
   });
 
   useEffect(() => {
@@ -55,6 +55,13 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     (p: string) => {
       store.openFile(p);
       setFocus("code");
+    },
+    [store],
+  );
+  const onCommand = useCallback(
+    (e: string) => {
+      if (e.startsWith("shell:")) store.onShell?.(e.slice(6));
+      else if (e.startsWith("cmd:")) store.command(e.slice(4));
     },
     [store],
   );
@@ -100,6 +107,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             onReload={reloadFile}
             onLeave={toInput}
             onTyping={setTyping}
+            onCommand={onCommand}
           />
         );
       case "cast":
@@ -166,9 +174,9 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
 function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
   if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
   if (focus === "code") {
-    return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   / find   esc: back";
+    return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return `tab: ${hasCode ? "file" : "files"}   ? asks anything   ctrl-t: transcript   ctrl-g: graph`;
+  return `tab: ${hasCode ? "file" : "files"}   !shell   ?ask   :run   :graph   :log   :help`;
 }
 
 function promptFor(p: Prompt): string {

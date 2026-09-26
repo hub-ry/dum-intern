@@ -142,7 +142,7 @@ const SAY_LINES = 6;
 
 function clamped(lines: string[], n?: number): string[] {
   if (!n || lines.length <= n) return lines;
-  return [...lines.slice(0, n - 1), `… ${lines.length - n + 1} more - ctrl-t`];
+  return [...lines.slice(0, n - 1), `… ${lines.length - n + 1} more - :log`];
 }
 
 function Face({

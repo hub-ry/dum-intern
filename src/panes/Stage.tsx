@@ -23,6 +23,7 @@ export function Stage({
   onReload,
   onLeave,
   onTyping,
+  onCommand,
 }: {
   stage: StageT;
   code: CodeView | null;
@@ -34,6 +35,7 @@ export function Stage({
   onReload: (path: string) => void;
   onLeave: () => void;
   onTyping: (typing: boolean) => void;
+  onCommand: (effect: string) => void;
 }) {
   if (stage.kind === "code") {
     return (
@@ -46,6 +48,7 @@ export function Stage({
         onReload={onReload}
         onLeave={onLeave}
         onTyping={onTyping}
+        onCommand={onCommand}
       />
     );
   }
@@ -57,6 +60,21 @@ export function Stage({
         subtitle={stage.pending ? "looking it up…" : "nobody said this - it is a reference"}
         color="#b0b0b0"
         lines={stage.pending ? [] : wrapAt(stage.body, width - 4)}
+        width={width}
+        height={height}
+      />
+    );
+  }
+
+  if (stage.kind === "info") {
+    // Laid out by whoever wrote it - columns stay columns. Long lines are
+    // cut at the pane's edge rather than reflowed into prose.
+    return (
+      <Reading
+        title={stage.title}
+        subtitle=""
+        color="#87afd7"
+        lines={stage.body.split("\n")}
         width={width}
         height={height}
       />
@@ -106,7 +124,7 @@ export function Stage({
   return (
     <Reading
       title="everything said so far"
-      subtitle="ctrl-t to go back"
+      subtitle=":log to go back"
       color="#87afd7"
       lines={collapse(lines)}
       width={width}

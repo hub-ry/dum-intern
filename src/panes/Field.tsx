@@ -7,7 +7,7 @@
 
 import React, { useState } from "react";
 import { Text, useInput, usePaste } from "ink";
-import { typed, pasted } from "../typing.ts";
+import { typed, pasted, readline } from "../typing.ts";
 
 export function Field({
   prompt,
@@ -29,6 +29,16 @@ export function Field({
       onSubmit(value);
       setValue("");
       setAt(0);
+      return;
+    }
+    // The readline keys every shell has, so a sentence can be fixed the way
+    // your fingers already fix one.
+    if (key.ctrl) {
+      const next = readline(ch, { value, at });
+      if (next) {
+        setValue(next.value);
+        return setAt(next.at);
+      }
       return;
     }
     if (key.leftArrow) return setAt(Math.max(0, at - 1));
