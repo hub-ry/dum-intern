@@ -327,9 +327,13 @@ it yet. Name it in the spec under "you type", with what the code has to do.
 When you build, write everything around that piece yourself and leave a hole
 where it goes:
 - the hole is a comment block in the file's own comment syntax. Its first line
-  is exactly \`TODO(dum): <concept>\`, then one to three lines saying what the
+  is exactly \`TODO(dum): <concept>\`, then one or two lines saying what the
   code must do - inputs, output, the edge case that matters. Never how. No
   pseudocode, no function names they'd have to call, no hints.
+- comments in code you write are short everywhere: a one-line file header or
+  none, one line of why where the code can't say it, never an explanation of
+  the concept. Lessons go in teach, not in their file. The gate refuses more
+  than three comment lines in a row.
 - keep the hole small: one function body or one block, the part that actually
   rests on the concept. Everything else should already work.
 - stub it so the file still parses, the way the language does it (an empty
@@ -1148,6 +1152,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             message: `That's ${holesThisTurn + more} holes in one request - at most ${MAX_HOLES}, about what working memory holds at once. Don't merge blocks to fit: that's the same load in bigger pieces. Build the part that fits in ${MAX_HOLES} concepts, and name the rest as the next request in one line.`,
           };
         }
+        // Comments in their code are short: the code is theirs to read, not
+        // an essay to scroll past. Any mode, any source file.
+        const essay = wordyCode(name, args);
+        if (essay.length) {
+          store.toolEvent(name, detail(repo.root, args), "refused", "comments too long");
+          return {
+            behavior: "deny" as const,
+            message: `Comments are at most ${todos.MAX_COMMENT_RUN} lines in a row - a hole's description, a file header, anything. Too long: ${essay
+              .slice(0, 2)
+              .map((l) => JSON.stringify(l))
+              .join(", ")}. Say why, not what, in a line.`,
+          };
+        }
         const leak = mode === "understand" ? looseCode(name, args) : [];
         if (leak.length) {
           store.toolEvent(name, detail(repo.root, args), "refused", "code outside a hole");
@@ -1335,6 +1352,19 @@ export function notAnAnswer(reply: string): boolean {
   return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
     reply.trim(),
   );
+}
+
+/** Comment runs over the limit that a Write or Edit would add, in a source file. */
+export function wordyCode(name: string, args: Record<string, unknown>): string[] {
+  const path = typeof args.file_path === "string" ? args.file_path : "";
+  if (!path || !todos.gated(path)) return [];
+  if (name === "Write") return todos.wordy(String(args.content ?? ""), path);
+  if (name === "Edit") return todos.wordy(String(args.new_string ?? ""), path);
+  if (name === "MultiEdit") {
+    const edits = Array.isArray(args.edits) ? args.edits : [];
+    return edits.flatMap((e: any) => todos.wordy(String(e?.new_string ?? ""), path));
+  }
+  return [];
 }
 
 /** How many TODO(dum) blocks a Write or Edit would add. */

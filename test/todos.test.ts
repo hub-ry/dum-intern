@@ -106,3 +106,13 @@ test("the gate names the loose lines of any Write, Edit or MultiEdit to source",
   assert.deepEqual(looseCode("MultiEdit", { file_path: "a.go", edits: [{ new_string: "// ok" }, { new_string: "fmt.Println(1)" }] }), ["fmt.Println(1)"]);
   assert.deepEqual(looseCode("Write", { file_path: "notes.md", content: "print('hi')" }), []);
 });
+
+test("comment runs over three lines are too long, a hole's heading starts a new run", async () => {
+  const { wordy } = await import("../src/todos.ts");
+  const essay = "// one\n// two\n// three\n// four\nint x;\n";
+  assert.deepEqual(wordy(essay, "a.cpp"), ["// one"]);
+  const hole = "// header line\n\n// TODO(dum): x\n// what it does\n// the edge case\nint y;\n";
+  assert.deepEqual(wordy(hole, "a.cpp"), []);
+  assert.deepEqual(wordy("# a\n# b\n# c\n# d\n", "a.py"), ["# a"]);
+  assert.deepEqual(wordy(essay, "notes.md"), []);
+});

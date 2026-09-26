@@ -135,6 +135,32 @@ export function loose(text: string, path: string): string[] {
   return lines.filter((l, i) => l.trim() && !inHole.has(i) && !comment.test(l.trim()));
 }
 
+/** The most comment lines in a row: a hole's description, a file header, anything. */
+export const MAX_COMMENT_RUN = 3;
+
+/** Runs of comment lines longer than MAX_COMMENT_RUN, by their first line. */
+export function wordy(text: string, path: string): string[] {
+  const comment = COMMENTS[lang(path)];
+  if (!comment) return [];
+  const out: string[] = [];
+  let run: string[] = [];
+  const end = () => {
+    if (run.length > MAX_COMMENT_RUN) out.push(run[0]!.trim());
+    run = [];
+  };
+  for (const l of text.split("\n")) {
+    // A TODO(dum) marker starts its own run: it's a heading, not prose.
+    if (l.includes(MARKER)) {
+      end();
+      continue;
+    }
+    if (l.trim() && comment.test(l.trim())) run.push(l);
+    else end();
+  }
+  end();
+  return out;
+}
+
 /** Holes whose file is exactly as the intern left it, or gone. */
 export function untouched(todos: Todo[], read: (path: string) => string | null): Todo[] {
   return todos.filter((t) => read(t.path) === t.before);
