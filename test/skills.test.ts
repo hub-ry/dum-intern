@@ -310,3 +310,15 @@ test("a skill about one language only counts in that language", async () => {
   t = note(t, e("for loops"), A);
   assert.equal(find(t, "for loops")!.lang, "python");
 });
+
+test("fading: gaps start at three lines and widen with skills in that language", async () => {
+  const { level } = await import("../src/skills.ts");
+  let t = empty;
+  assert.deepEqual(level(t, "c++"), { name: "novice", count: 0, gap: 3, scaffold: true });
+  for (const n of ["a", "b", "c"]) t = note(t, e(n, { lang: "c++" }), A);
+  assert.equal(level(t, "c++").name, "developing");
+  assert.equal(level(t, "c++").gap, 8);
+  assert.equal(level(t, "python").name, "novice", "c++ skills don't make you fluent in python");
+  for (const n of "defghij".split("")) t = note(t, e(n, { lang: "c++" }), A);
+  assert.deepEqual(level(t, "c++"), { name: "fluent", count: 10, gap: Infinity, scaffold: false });
+});

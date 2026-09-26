@@ -434,6 +434,21 @@ export function holdsIn(t: Tree, name: string, path: string, root: string): bool
   return spoken(t, here);
 }
 
+export type Level = { name: "novice" | "developing" | "fluent"; count: number; gap: number; scaffold: boolean };
+
+/**
+ * How far along they are in a language, for fading (Kalyuga et al., 2003):
+ * novices get most of the code given and small gaps, fluent ones do the work.
+ * `gap` is the most lines one hole may ask of them; `scaffold` is whether dum
+ * may write the code around the gaps itself.
+ */
+export function level(t: Tree, lang: string): Level {
+  const count = t.skills.filter((s) => s.solid && !s.claimed && (lang ? s.lang === lang : true)).length;
+  if (count < 3) return { name: "novice", count, gap: 3, scaffold: true };
+  if (count < 10) return { name: "developing", count, gap: 8, scaffold: true };
+  return { name: "fluent", count, gap: Infinity, scaffold: false };
+}
+
 /** Whether they've shown anything at all in this language. */
 export function spoken(t: Tree, lang: string): boolean {
   return t.skills.some((s) => s.solid && s.lang === lang);

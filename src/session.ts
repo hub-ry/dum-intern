@@ -341,14 +341,18 @@ where it goes:
 - then call leave_todo for it. One hole per concept.
 - after the build, the hole goes on line 2 of KEEP IT SHORT's three. Nothing more.
 
-HOLES
-In understand mode, ALL code goes in through holes - includes and imports,
-control flow, boilerplate, glue. The gate refuses a Write or Edit to a source
-file that adds any code outside a TODO(dum) block. dum decides, off their tree,
-which blocks you may fill:
-- write the file as comments and TODO(dum) blocks only. One block per piece
-  that stands on one concept; a whole small file can be a handful of blocks.
-  Put the file's header comment and the blocks in the order the code goes.
+HOLES - AND FADING
+The gaps grow as they do (the expertise reversal effect: worked examples help
+novices and get in experts' way). WHERE THEY ARE says their level per
+language:
+- novice: you write the scaffolding - includes, main, the class shell, glue -
+  and leave only the core of the concept this request is about as a gap of
+  one to three lines. Small enough to finish in a minute.
+- developing: more is theirs. Gaps up to eight lines, a small function body.
+- fluent: ALL code goes through holes. The gate refuses code outside a
+  TODO(dum) block, and fill_todo decides off their tree what you may fill.
+At every level, the gap is the concept being learned, never boilerplate. The
+gate measures the code you hand fill_todo and refuses a gap over their limit.
 - then call fill_todo for each block with the code that goes there, indented
   to fit. If the skill is known on their tree, dum writes it in. If it isn't,
   dum leaves the hole for them to type - don't try to write it another way,
@@ -700,10 +704,27 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
    * still tells the intern which concepts to name back to them without
    * explaining.
    */
+  /** Their level in each language this repo or their tree touches, for the intern. */
+  function levels(): string {
+    if (mode !== "understand") return "";
+    const t = skills.read();
+    const langs = new Set([...repo.files.map(skills.langOf), ...t.skills.map((s) => s.lang)].filter(Boolean));
+    const line = (l: string) => {
+      const lv = skills.level(t, l);
+      return `  ${l}: ${lv.name} (${lv.count} skills) - gaps up to ${lv.gap === Infinity ? "any size" : `${lv.gap} lines`}${lv.scaffold ? ", you write the rest" : ", everything through holes"}`;
+    };
+    return [
+      "WHERE THEY ARE, PER LANGUAGE (the gate enforces these)",
+      ...[...langs].map(line),
+      "  any other language: novice (0 skills) - gaps up to 3 lines, you write the rest",
+    ].join("\n");
+  }
+
   function opening(req: string): string {
     return [
       BAR[mode],
       hooks.context?.() ?? "",
+      levels(),
       mode === "understand" ? onboarding(skills.read()) : "",
       skills.describe(skills.read(), repo.root),
       describe(repo),
@@ -890,6 +911,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           store.openFile(path, at);
           await new Promise((r) => setTimeout(r, FLASH_MS));
           if (mode === "understand" && !holds(args.concept, path)) {
+            // The gap is sized to where they are: a novice gets the core line
+            // or three, not the whole function.
+            const lv = skills.level(skills.read(), skills.langOf(path));
+            const lines = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
+            if (lines > lv.gap) {
+              return say(
+                `Too big a gap for a ${lv.name} in ${skills.langOf(path) || "this"} (${lv.count} skills): ${lines} lines, at most ${lv.gap}. Write the scaffolding around it yourself, and leave only the core of "${args.concept}" as the hole - rewrite this block, it isn't theirs yet.`,
+              );
+            }
             const t: todos.Todo = {
               concept: args.concept.trim(),
               path,
@@ -1165,7 +1195,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
               .join(", ")}. Say why, not what, in a line.`,
           };
         }
-        const leak = mode === "understand" ? looseCode(name, args) : [];
+        // Fading: a novice in this language gets the scaffolding written for
+        // them, so only a fluent one has every line go through a hole.
+        const target = typeof args.file_path === "string" ? args.file_path : "";
+        const lv = skills.level(skills.read(), skills.langOf(target));
+        const leak = mode === "understand" && !lv.scaffold ? looseCode(name, args) : [];
         if (leak.length) {
           store.toolEvent(name, detail(repo.root, args), "refused", "code outside a hole");
           return {
@@ -1177,7 +1211,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           };
         }
         holesThisTurn += more;
-        if (erasesHole(repo.root, name, args)) {
+        if (erasesHole(repo.root, name, args, open.map((t) => t.concept))) {
           store.toolEvent(name, detail(repo.root, args), "refused", "a hole is filled through dum, not edited");
           return {
             behavior: "deny" as const,
@@ -1407,13 +1441,14 @@ export function looseCode(name: string, args: Record<string, unknown>): string[]
  * dropping one is not: an Edit whose old text holds a marker, or a Write that
  * leaves out a marker line the file has now.
  */
-export function erasesHole(root: string, name: string, args: Record<string, unknown>): boolean {
-  if (name === "Edit") return String(args.old_string ?? "").includes(todos.MARKER);
-  if (name === "MultiEdit") {
+export function erasesHole(root: string, name: string, args: Record<string, unknown>, open?: string[]): boolean {
+  const markers = (s: unknown) => String(s ?? "").split("\n").filter((l) => l.includes(todos.MARKER));
+  let gone: string[] = [];
+  if (name === "Edit") gone = markers(args.old_string);
+  else if (name === "MultiEdit") {
     const edits = Array.isArray(args.edits) ? args.edits : [];
-    return edits.some((e: any) => String(e?.old_string ?? "").includes(todos.MARKER));
-  }
-  if (name === "Write" && typeof args.file_path === "string") {
+    gone = edits.flatMap((e: any) => markers(e?.old_string));
+  } else if (name === "Write" && typeof args.file_path === "string") {
     let now: string;
     try {
       now = readFileSync(resolve(root, args.file_path), "utf8");
@@ -1421,12 +1456,13 @@ export function erasesHole(root: string, name: string, args: Record<string, unkn
       return false; // a new file can't erase anything
     }
     const next = String(args.content ?? "");
-    return now
-      .split("\n")
-      .filter((l) => l.includes(todos.MARKER))
-      .some((l) => !next.includes(l.trim()));
+    gone = markers(now).filter((l) => !next.includes(l.trim()));
   }
-  return false;
+  // Only a hole already handed to them is theirs. One the intern is still
+  // shaping - say, cutting down to size - it may rewrite.
+  if (!open) return gone.length > 0;
+  const concept = (l: string) => skills.key(l.slice(l.indexOf(todos.MARKER) + todos.MARKER.length).replace(/^[:\s]+/, ""));
+  return gone.some((l) => open.some((c) => skills.key(c) === concept(l)));
 }
 
 /** Where dum-intern itself is installed, for telling someone what to update. */

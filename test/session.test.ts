@@ -135,3 +135,11 @@ test("holes a write would add are counted, not the ones already there", async ()
   assert.equal(newHoles(root, "Edit", { old_string: "x", new_string: hole("z") }), 1);
   assert.equal(newHoles(root, "Read", {}), 0);
 });
+
+test("a hole handed to them can't be rewritten; one still being shaped can", async () => {
+  const { erasesHole } = await import("../src/session.ts");
+  const edit = { old_string: "// TODO(dum): vector growth\n// grow it", new_string: "grow();" };
+  assert.ok(erasesHole("/", "Edit", edit, ["vector growth"]));
+  assert.ok(!erasesHole("/", "Edit", edit, ["something else"]));
+  assert.ok(erasesHole("/", "Edit", edit), "no list: every hole is protected");
+});

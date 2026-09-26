@@ -134,7 +134,17 @@ The limits come from the same line of research, and dum keeps them in code:
 - **Small steps, at my pace.** People learn more from [learner-paced segments](https://link.springer.com/article/10.1007/s10648-018-9456-4) than from one continuous unit (a meta-analysis of 56 studies). Features stay under 30 minutes and milestones under 45, and nothing moves on until I say `go`.
 - **One concept per hole, twelve lines per fill.** Nothing big rides in under one name.
 
-One finding cuts the other way. Worked examples help novices most, and they stop helping, or hurt, once you know the material. That's the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003), and the fix it points to is [fading](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6): start with most of the code given and a few gaps, then widen the gaps. dum does the reverse. An empty tree gets all holes, and a full one gets fills. That's on purpose, because code I can't explain shouldn't appear. But it's worth knowing that a beginner is doing the hardest version of each task.
+And the gaps fade. Worked examples help novices most, and they stop helping, or hurt, once you know the material. That's the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003), and the fix it points to is [fading](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6): start with most of the code given and small gaps, then widen them. dum used to do the reverse, all holes for an empty tree, which made a beginner's first task the hardest version of it.
+
+So the size of a gap depends on my level in that language, counted from the skills on my tree tagged with it:
+
+| Level | Skills in the language | The gap | Around it |
+| :--- | :--- | :--- | :--- |
+| novice | 0-2 | 1-3 lines, the core of the concept | dum writes the scaffolding |
+| developing | 3-9 | up to 8 lines, a small function body | dum writes the rest |
+| fluent | 10+ | any size | every line goes through a hole |
+
+The gate measures the code the intern hands it for a hole, and sends back a gap that's too big for my level. Asked for a tiny vector class with no C++ on my tree, it wrote the class, `main` and the printing, and left two gaps: the grow condition in `push_back`, and copying into the new block and freeing the old one. It compiled as given.
 
 
 ### Short, on purpose
