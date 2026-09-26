@@ -11,6 +11,7 @@ export function Field({
   active = true,
   width = 80,
   onRows,
+  placeholder = "",
 }: {
   prompt: string;
   onSubmit: (value: string) => void;
@@ -20,6 +21,8 @@ export function Field({
   width?: number;
   /** How many rows it's taking, so the panes above can make room. */
   onRows?: (rows: number) => void;
+  /** Grey text while empty: what typing here does right now. */
+  placeholder?: string;
 }) {
   const [value, setValue] = useState("");
   const [at, setAt] = useState(0);
@@ -77,6 +80,19 @@ export function Field({
   const rows = fieldRows(prompt, value, width);
   useEffect(() => onRows?.(Math.min(MAX_ROWS, rows.length)), [rows.length, onRows]);
   useEffect(() => () => onRows?.(1), [onRows]);
+  // After every hook: an early return above one makes React count them wrong.
+  if (!value && placeholder) {
+    return (
+      <Text>
+        <Text color={color} bold dimColor={!active}>
+          {prompt}
+        </Text>
+        {active ? <Text inverse> </Text> : null}
+        <Text dimColor>{placeholder}</Text>
+      </Text>
+    );
+  }
+
   const cursor = prompt.length + at;
   const where = Math.floor(cursor / width);
   const first = Math.max(0, Math.min(where - MAX_ROWS + 1, rows.length - MAX_ROWS));

@@ -167,3 +167,21 @@ test("shell commands typed bare run in the shell; English that starts the same d
     assert.ok(!isShellLine(l), l);
   }
 });
+
+test("with the shell showing, the input is a terminal - except dum's own words", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  const ran: string[] = [];
+  s.onShell = (c) => {
+    ran.push(c);
+    s.openShell();
+  };
+  const reply = s.askNext();
+  s.openShell();
+  assert.ok(s.inShell());
+  s.submit("g++ guess.cpp -o guess");
+  s.submit("make it faster");
+  s.submit("done");
+  assert.deepEqual(ran, ["g++ guess.cpp -o guess", "make it faster"], "in the shell, even English is a command");
+  assert.equal(await reply, "done");
+});

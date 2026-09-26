@@ -121,8 +121,8 @@ What runs in the shell is mine. The intern doesn't see it.
 
 Three places, one rule each:
 
-- **The input** at the bottom is where I type, always. Answers go to dum. `cd`, `gcc`, `./guess` go to the shell. When a program in the shell is waiting for input, the prompt turns into `guess ›` and what I type goes to it. `ctrl-c` stops that program, and only quits dum when nothing's running.
-- **The middle** is code: the file, or the shell. `shift-tab` flips between them, and so does clicking the `file` / `shell` tabs. The shell never takes the keyboard, so there's no mode to get stuck in.
+- **The input** at the bottom is where I type, always, and its grey placeholder says what typing does right now. With the file showing, the prompt is `>` and I'm talking to dum, though `cd`, `gcc` or `./guess` still go to the shell. With the shell showing, the prompt is `$` and everything I type runs there, like any terminal. dum's own words (`done`, `go`, `idk`) still reach dum. When a program is waiting for input the prompt becomes `guess ›`, and `ctrl-c` stops it. It only quits dum when nothing's running.
+- **The middle** is code: the file, or the shell. `shift-tab` flips between them, into the terminal and back out, and so does clicking the `file` / `shell` tabs.
 - **The right** is the characters: their faces side by side, and the whole conversation under them, newest at the bottom, scrollable with the trackpad. Nothing scrolls away when I look at the shell. When dum says "run `g++ guess.cpp`", it's still there while I do. Something too big for the thread, like the spec to approve, a lesson or help, takes over the right panel as a board until it's answered, or `esc`.
 
 `tab` moves between the input, the file and the tree, and clicking a pane does the same.

@@ -229,7 +229,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
           </Text>
         ) : (
           <Field
-            prompt={state.running ? `${state.running} › ` : promptFor(state.prompt)}
+            prompt={state.running ? `${state.running} › ` : store.inShell() ? "$ " : promptFor(state.prompt)}
+            placeholder={placeholderFor(state, store.inShell())}
             color={state.prompt?.type === "spec" ? "#87af87" : undefined}
             active={focus === "input"}
             onSubmit={(v) => store.submit(v.trim())}
@@ -249,6 +250,16 @@ function hint(focus: Focus, typing: boolean, hasCode: boolean, inShell = false):
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
   return "tab: move · ⇧tab: file ⇄ shell · ? ask · :help";
+}
+
+/** What typing does right now, shown grey in the empty input. */
+function placeholderFor(s: ReturnType<Store["getSnapshot"]>, shell: boolean): string {
+  if (s.running) return `input for ${s.running} · ctrl-c stops it`;
+  if (shell) return "a command, like g++ guess.cpp -o guess · ⇧tab: back to dum";
+  if (s.prompt?.type === "spec") return "y to build it, or say what to change";
+  if (s.prompt?.type === "question" && s.prompt.choices) return "answer dum · idk · type it · ?ask";
+  if (s.todos.length) return "done when it's typed · or explain it · ⇧tab: shell";
+  return "ask dum for something · ⇧tab: shell to run code";
 }
 
 function promptFor(p: Prompt): string {

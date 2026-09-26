@@ -118,6 +118,9 @@ const LONG_SAY = 170;
 const isReply = (s: Stage) => s.kind !== "code" && s.kind !== "transcript" && s.kind !== "shell";
 const isBoardKind = (s: Stage) => s.kind !== "code" && s.kind !== "shell";
 
+/** Words that are always for dum, even typed while the shell is showing. */
+const DUM_WORDS = /^(done|go|idk|type it|not yet.*|exit)[.!]*$/i;
+
 export class Store {
   private state: State;
   private listeners = new Set<() => void>();
@@ -225,6 +228,12 @@ export class Store {
     }
     // A program running in the shell (./guess waiting for a number) takes the line.
     if (this.onProgram?.(text)) return;
+    // Looking at the shell is being in the terminal: the line runs there - except
+    // dum's own words, which reach dum from anywhere.
+    if (this.inShell() && this.onShell && !DUM_WORDS.test(text.trim())) {
+      this.onShell(text.trim());
+      return;
+    }
     // cd, gcc, echo and friends run in the shell without a `!`.
     if (this.onShell && isShellLine(text)) {
       this.onShell(text.trim());
@@ -538,6 +547,11 @@ export class Store {
   showMiddle(which: "file" | "shell") {
     if (which === "shell") return this.openShell();
     this.patch({ stage: { kind: "code" } });
+  }
+
+  /** Whether the input is talking to the shell: the middle shows it and no board is up. */
+  inShell(): boolean {
+    return this.state.middle === "shell" && this.state.stage.kind === "shell";
   }
 
   setRunning(running: string) {
