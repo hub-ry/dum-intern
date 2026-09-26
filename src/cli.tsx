@@ -23,7 +23,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { c, wrap, voiceName, minutes, cap, bar } from "./lines.ts";
 import { homedir } from "node:os";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import { basename as repo, resolve } from "node:path";
 
 type Args = {
@@ -42,6 +42,7 @@ type Args = {
   graph: boolean;
   learn: string[] | null;
   add: string[] | null;
+  fresh: boolean;
 };
 
 function parse(args: string[]): Args {
@@ -60,6 +61,7 @@ function parse(args: string[]): Args {
   let graph = false;
   let learnArgs: string[] | null = null;
   let addArgs: string[] | null = null;
+  let fresh = false;
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -77,6 +79,7 @@ function parse(args: string[]): Args {
     else if (a === "--graph" || a === "-g") graph = true;
     else if (a === "--learn") learnArgs = args.slice(i + 1);
     else if (a === "--add") addArgs = args.slice(i + 1);
+    else if (a === "--new" || a === "-n") fresh = true;
     else if (a === "--next") {
       const n = Number(args[i + 1]);
       next = Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 1;
@@ -84,7 +87,7 @@ function parse(args: string[]): Args {
     } else rest.push(a);
     if (forget !== null || scan !== null || queue !== null || rebuild !== null || learnArgs !== null || addArgs !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph, learn: learnArgs, add: addArgs };
+  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, scan, queue, rebuild, plan, list, next, graph, learn: learnArgs, add: addArgs, fresh };
 }
 
 /** The tree, printed. */
@@ -529,7 +532,7 @@ function repoRoot(): string {
 }
 
 async function main() {
-  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs, add: addArgs } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, forget, reset, scan, queue, rebuild: rebuildArgs, plan, list, next, graph, learn: learnArgs, add: addArgs, fresh } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works from anywhere -
   // only "known here" needs a repo.
@@ -570,6 +573,17 @@ async function main() {
   }
 
   const repo = readRepo(cwd());
+  // A fresh intern: its memory and any open holes moved aside, not deleted.
+  if (fresh) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    for (const f of ["session", "todos.json"]) {
+      try {
+        renameSync(`${repo.root}/.dum/${f}`, `${repo.root}/.dum/${f}.old-${stamp}`);
+      } catch {
+        /* nothing to move */
+      }
+    }
+  }
   // From the first screen, not the first request: startup has bugs too.
   debugTo(repo.root);
   const store = new Store(repo.name, mode, repo.root, repo.files);

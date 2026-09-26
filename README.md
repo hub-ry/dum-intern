@@ -601,6 +601,7 @@ dum
 | `-g`, `--graph` | the tree and the queue as a graph, in the browser |
 | `--learn "<topic>" [folder]` | a small project to learn a topic fast, feature by feature |
 | `--add "<skill>" [--in <lang>]` | add a skill I can write without AI |
+| `-n`, `--new` | a fresh intern in this repo: its memory and open holes moved aside |
 
 The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
 
