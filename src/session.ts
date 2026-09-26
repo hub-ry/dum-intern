@@ -315,7 +315,8 @@ gate measures the code you hand fill_todo and refuses a gap over their limit.
 - you can't Edit a TODO(dum) block yourself. The gate refuses it.
 In anti-vibe mode there are no holes unless they say "type it". Write the code.
 
-When they say they've typed it you'll be asked to check. Read their code and
+When they say they've typed it you'll be asked to check. You can't run their
+code on a review turn; if it should be run, give them the command. Read their code and
 call check_todo. Passing is the skill, so judge it like a reviewer: does it do
 what the hole said, and would it work? Not whether it matches what you'd have
 written. A failure gets a question that makes them find it, never the fix, and
@@ -909,12 +910,14 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           if (args.passed) {
             setOpen(open.filter((o) => o !== t));
             if (t.request && !open.some((o) => o.request === t.request)) hooks.onBuilt?.(t.request);
+            reviewed = true;
             record({
               name: t.concept,
               solid: true,
               breadth: t.breadth,
               requires: t.requires,
               lang: t.lang,
+              shownIn: skills.langOf(t.path) || undefined,
               why: `typed it themselves in ${t.path}: ${args.feedback}`,
             });
           }
@@ -972,6 +975,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
 
   /** A hole from an earlier spec got filled this turn, by explaining it. */
   let filledLate = false;
+
+  /** A hole of theirs was checked this turn. */
+  let reviewed = false;
 
   /** TODO(dum) blocks written under this request so far. */
   let holesThisTurn = 0;
@@ -1142,7 +1148,9 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         for (const why of blocked) store.note(`refused: ${why}`);
         blocked.length = 0;
         // A turn that filled an earlier hole built something, even with no spec of its own.
-        if (!approved && gateEngaged) store.note(filledLate ? "nothing else was built - this turn had no spec of its own." : "spec not approved - nothing was built.");
+        // A turn that reviewed or filled their hole did its job without a spec.
+        if (!approved && gateEngaged && !reviewed) store.note(filledLate ? "nothing else was built - this turn had no spec of its own." : "spec not approved - nothing was built.");
+        reviewed = false;
         gateEngaged = false;
         filledLate = false;
         holesThisTurn = 0;

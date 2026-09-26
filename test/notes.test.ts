@@ -9,6 +9,7 @@ const skill = (over: Partial<Skill> = {}): Skill => ({
   claimed: false,
   breadth: "general",
   lang: "",
+  shownIn: [],
   requires: [],
   why: "",
   repos: [],
@@ -17,7 +18,7 @@ const skill = (over: Partial<Skill> = {}): Skill => ({
 });
 
 test("a note round-trips every state", () => {
-  for (const over of [{}, { solid: false }, { claimed: true }, { breadth: "niche" as const, repos: ["/r"] }, { lang: "c++" }]) {
+  for (const over of [{}, { solid: false }, { claimed: true }, { breadth: "niche" as const, repos: ["/r"] }, { lang: "c++" }, { shownIn: ["c++", "python"] }]) {
     const s = skill({ ...over, requires: ["timeouts", "Side / ranking"], why: "They said `x`." });
     assert.deepEqual(fromNote(toNote(s), fileName(s.name)), s);
   }

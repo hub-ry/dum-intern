@@ -36,6 +36,7 @@ export function toNote(s: Skill): string {
     breadth: s.breadth,
   };
   if (s.lang) front.lang = s.lang;
+  if (s.shownIn.length) front["shown-in"] = s.shownIn;
   if (s.repos.length) front.repos = s.repos;
   if (s.at) front.at = s.at;
   // Tags, so Obsidian's graph can colour by state.
@@ -76,6 +77,7 @@ export function fromNote(text: string, file: string): Skill | null {
     claimed: state === "claimed",
     breadth: (front.breadth === "niche" ? "niche" : "general") as Breadth,
     lang: str(front.lang) ? langName(front.lang) : "",
+    shownIn: Array.isArray(front["shown-in"]) ? (front["shown-in"] as unknown[]).filter(str).map(langName) : [],
     requires,
     why: body.replace(BUILDS_ON, "").trim(),
     repos: Array.isArray(front.repos) ? front.repos.filter(str) : [],

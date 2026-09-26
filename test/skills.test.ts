@@ -322,3 +322,15 @@ test("fading: gaps start at three lines and widen with skills in that language",
   for (const n of "defghij".split("")) t = note(t, e(n, { lang: "c++" }), A);
   assert.deepEqual(level(t, "c++"), { name: "fluent", count: 10, gap: Infinity, scaffold: false });
 });
+
+test("typing a hole in a language counts toward that language's level; explaining doesn't", async () => {
+  const { level, spoken } = await import("../src/skills.ts");
+  let t = note(empty, e("vector growth"), A);
+  assert.equal(level(t, "c++").count, 0, "explained in words: not c++ yet");
+  t = note(t, e("vector growth", { shownIn: "cpp" }), A);
+  assert.deepEqual(find(t, "vector growth")!.shownIn, ["c++"]);
+  assert.equal(level(t, "c++").count, 1);
+  assert.ok(spoken(t, "c++"));
+  t = note(t, e("vector growth"), A);
+  assert.deepEqual(find(t, "vector growth")!.shownIn, ["c++"], "kept across later notes");
+});

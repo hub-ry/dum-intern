@@ -136,7 +136,7 @@ The limits come from the same line of research, and dum keeps them in code:
 
 And the gaps fade. Worked examples help novices most, and they stop helping, or hurt, once you know the material. That's the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003), and the fix it points to is [fading](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6): start with most of the code given and small gaps, then widen them. dum used to do the reverse, all holes for an empty tree, which made a beginner's first task the hardest version of it.
 
-So the size of a gap depends on my level in that language, counted from the skills on my tree tagged with it:
+So the size of a gap depends on my level in that language. That counts the skills on my tree tagged with the language, plus the ones I've typed in it by filling a hole. Explaining an idea in words doesn't count toward a language, since it isn't C++ I wrote:
 
 | Level | Skills in the language | The gap | Around it |
 | :--- | :--- | :--- | :--- |

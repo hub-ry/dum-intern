@@ -521,6 +521,7 @@ async function main() {
   // From the first screen, not the first request: startup has bugs too.
   debugTo(repo.root);
   const store = new Store(repo.name, mode, repo.root, repo.files);
+  store.setSkills(skills.summary(skills.read(), repo.root));
   store.onGraph = () => {
     void showGraph(true).then((out) => store.note(out ? `graph opened in your browser: ${out.replace(homedir(), "~")}` : "couldn't draw the graph."));
   };

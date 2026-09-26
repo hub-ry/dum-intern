@@ -23,6 +23,8 @@ export type Skill = {
    * "range-based for" is c++.
    */
   lang: string;
+  /** Languages they've typed it in, through a hole. What a level in a language counts. */
+  shownIn: string[];
   /** Skills this one builds on directly, by name. May name skills not yet on the tree. */
   requires: string[];
   why: string;
@@ -104,6 +106,7 @@ function clean(raw: unknown): Skill | null {
     claimed: s.claimed === true,
     breadth: s.breadth === "niche" ? "niche" : "general",
     lang: typeof s.lang === "string" ? langName(s.lang) : "",
+    shownIn: Array.isArray(s.shownIn) ? s.shownIn.filter(str).map(langName) : [],
     requires: Array.isArray(s.requires) ? s.requires.filter(str) : [],
     why: str(s.why) ? s.why : "",
     repos: Array.isArray(s.repos) ? s.repos.filter(str) : [],
@@ -230,6 +233,8 @@ export type Entry = {
   solid: boolean;
   breadth: Breadth;
   lang?: string;
+  /** The language of the file they just typed it in, if that's how it was shown. */
+  shownIn?: string;
   requires: string[];
   why: string;
 };
@@ -261,6 +266,7 @@ export function note(t: Tree, e: Entry, root: string): Tree {
     claimed: false,
     breadth: e.breadth,
     lang: e.lang !== undefined ? langName(e.lang) : prev?.lang ?? "",
+    shownIn: [...new Set([...(prev?.shownIn ?? []), ...(e.shownIn ? [langName(e.shownIn)] : [])])],
     requires,
     why: e.why,
     repos,
@@ -282,6 +288,7 @@ export function claim(t: Tree, c: Claim, root: string): Tree {
     claimed: true,
     breadth: c.breadth,
     lang: c.lang !== undefined ? langName(c.lang) : prev?.lang ?? "",
+    shownIn: prev?.shownIn ?? [],
     requires: [...new Set([...(prev?.requires ?? []), ...c.requires])].filter((r) => key(r) !== k).slice(0, 3),
     why: c.why,
     repos: [...new Set([...(prev?.repos ?? []), root])],
@@ -356,7 +363,9 @@ export type Level = { name: "novice" | "developing" | "fluent"; count: number; g
  * may write the code around the gaps itself.
  */
 export function level(t: Tree, lang: string): Level {
-  const count = t.skills.filter((s) => s.solid && !s.claimed && (lang ? s.lang === lang : true)).length;
+  // Tagged with the language, or typed in it: an idea explained in words
+  // isn't C++ they've written, but a hole they filled in C++ is.
+  const count = t.skills.filter((s) => s.solid && !s.claimed && (!lang || s.lang === lang || s.shownIn.includes(lang))).length;
   if (count < 3) return { name: "novice", count, gap: 3, scaffold: true };
   if (count < 10) return { name: "developing", count, gap: 8, scaffold: true };
   return { name: "fluent", count, gap: Infinity, scaffold: false };
@@ -364,7 +373,7 @@ export function level(t: Tree, lang: string): Level {
 
 /** Whether they've shown anything at all in this language. */
 export function spoken(t: Tree, lang: string): boolean {
-  return t.skills.some((s) => s.solid && s.lang === lang);
+  return t.skills.some((s) => s.solid && (s.lang === lang || s.shownIn.includes(lang)));
 }
 
 /** Solid and trusted in this repo: general anywhere, niche only where shown. */
@@ -407,6 +416,7 @@ export function migrate(t: Tree, root: string): Tree {
       solid: o.solid,
       claimed: false,
       lang: "",
+      shownIn: [],
       breadth: "general",
       requires: [],
       why: str(o.why) ? o.why : "",
