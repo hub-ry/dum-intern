@@ -82,6 +82,14 @@ class Shell extends EventEmitter {
     return { rows, cursor: y >= 0 && y < t.rows ? { x: b.cursorX, y } : null };
   }
 
+  /** The program running in the foreground, if it isn't the shell itself. "" when idle. */
+  running(): string {
+    if (!this.p) return "";
+    const fg = this.p.process;
+    const sh = (process.env.SHELL || "/bin/sh").split("/").pop();
+    return fg && fg !== sh && !/^-?(zsh|bash|sh|fish)$/.test(fg) ? fg : "";
+  }
+
   kill() {
     this.p?.kill();
     this.p = null;

@@ -119,9 +119,13 @@ What runs in the shell is mine. The intern doesn't see it.
 
 ### Code in the middle, the characters on the right
 
-The middle panel is code: the file, or the shell. Nothing else goes there.
+Three places, one rule each:
 
-Everything else is the characters'. dum and the wizard say things under their faces. When something's too big to say under a face, like the spec to approve, a lesson, a long reply, help or the log, the characters step aside and the right panel becomes a board that scrolls. It goes back to the characters once it's answered, or with `shift-tab`.
+- **The input** at the bottom is where I type, always. Answers go to dum. `cd`, `gcc`, `./guess` go to the shell. When a program in the shell is waiting for input, the prompt turns into `guess ›` and what I type goes to it. `ctrl-c` stops that program, and only quits dum when nothing's running.
+- **The middle** is code: the file, or the shell. `shift-tab` flips between them, and so does clicking the `file` / `shell` tabs. The shell never takes the keyboard, so there's no mode to get stuck in.
+- **The right** is the characters: their faces side by side, and the whole conversation under them, newest at the bottom, scrollable with the trackpad. Nothing scrolls away when I look at the shell. When dum says "run `g++ guess.cpp`", it's still there while I do. Something too big for the thread, like the spec to approve, a lesson or help, takes over the right panel as a board until it's answered, or `esc`.
+
+`tab` moves between the input, the file and the tree, and clicking a pane does the same.
 
 When dum has something to say about one line of code, it pins a live comment to it instead of describing where to look:
 
@@ -132,9 +136,7 @@ When dum has something to say about one line of code, it pins a live comment to 
 It sits beside the line and is never saved to the file. A line too long to leave room puts its comment on the file's status row, with the line number. Comments clear when the next turn starts.
 
 
-### Pages, and a trackpad that scrolls
-
-The middle has two pages, the file and the shell, with a bar on top saying which is up. `shift-tab` flips back to whatever was up last, like alt-tab: the file and the shell, or the characters and the board on the right. With the middle focused, `←`/`→` switch between file and shell, and a board scrolls with `j`/`k`, `space`/`b` and `g`/`G`.
+### A trackpad that scrolls
 
 The trackpad scrolls the pane under the pointer, focused or not. Full-screen programs don't get that for free: without mouse reports the wheel does nothing, and inside tmux it scrolls tmux's history instead. So dum turns on the terminal's standard mouse reporting and takes the reports out before Ink sees them, or they'd be typed into the input as `[<65;40;12M`. Ink 7 has no mouse support, and the one Ink mouse library targets Ink 5, so this piece is dum's own.
 
@@ -551,11 +553,11 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 
 | Key | Action | Where |
 | :--- | :--- | :--- |
-| `tab` | input, stage, file tree, and around | anywhere |
-| `shift-tab` | back to what was up last - file and shell, or characters and board | anywhere |
-| trackpad / wheel | scroll whatever's under the pointer | stage, file tree |
-| `←` `→` | file and shell | the middle |
-| `j` `k`, `space` `b`, `g` `G` | scroll the board | the board |
+| `tab` | input, file, file tree, and around (or click a pane) | anywhere |
+| `shift-tab` | the middle: file ⇄ shell (or click the tab) | anywhere |
+| `esc` | close a board: help, a lesson, the log | input |
+| `ctrl-c` | stop the program running in the shell; with none, quit | anywhere |
+| trackpad / wheel | scroll whatever's under the pointer | anywhere |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
 | `cd`, `gcc`, `echo`, `./a.out` ... | run on the shell page, as typed | input |
 | `!` + command | anything else on the shell page (`!` alone opens it) | input, file's `:` line |

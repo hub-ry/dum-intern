@@ -119,8 +119,8 @@ export function Code({
   if (!code || !buf) {
     return (
       <Box width={width} flexDirection="column" paddingX={1}>
-        <Text dimColor>nothing being written</Text>
-        <Text dimColor>tab to the files and open one</Text>
+        <Text dimColor>no file open</Text>
+        <Text dimColor>open one from the tree on the left (tab, then enter)</Text>
       </Box>
     );
   }

@@ -33,6 +33,8 @@ export function strip(chunk: string): { rest: string; wheels: Wheel[]; held: str
     const btn = Number(b);
     // 64 up, 65 down; the low bits can carry shift/alt/ctrl.
     if (end === "M" && (btn & 64) === 64) wheels.push({ x: Number(x), y: Number(y), delta: (btn & 1 ? 1 : -1) * STEP });
+    // A left click, on press: button 0 with no motion or modifier bits.
+    else if (end === "M" && (btn & ~0b11100) === 0) wheels.push({ x: Number(x), y: Number(y), delta: 0 });
     return "";
   });
   let held = "";
@@ -69,7 +71,7 @@ export function filtered(real: NodeJS.ReadStream): { stdin: NodeJS.ReadStream; c
     timer = null;
     const r = strip(held + chunk.toString("utf8"));
     held = r.held;
-    for (const w of r.wheels) mouse.emit("wheel", w);
+    for (const w of r.wheels) mouse.emit(w.delta ? "wheel" : "click", w);
     if (r.rest) {
       keys.emit("data", r.rest);
       out.write(r.rest);

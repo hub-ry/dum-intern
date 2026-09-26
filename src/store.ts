@@ -102,6 +102,8 @@ export type State = {
   reply: Stage | null;
   /** Live comments on lines of files, by path: shown beside the code, never saved. */
   pins: Record<string, { line: number; text: string }[]>;
+  /** A program running in the shell that your input goes to, by name. "" when none. */
+  running: string;
   /** What the middle shows: code only - the file or the shell. */
   middle: "file" | "shell";
   /** Where a milestone folder stands: done of total, and what a unit is called. */
@@ -114,6 +116,7 @@ export type State = {
 const LONG_SAY = 170;
 
 const isReply = (s: Stage) => s.kind !== "code" && s.kind !== "transcript" && s.kind !== "shell";
+const isBoardKind = (s: Stage) => s.kind !== "code" && s.kind !== "shell";
 
 export class Store {
   private state: State;
@@ -166,6 +169,7 @@ export class Store {
       progress: null,
       reply: null,
       middle: "file",
+      running: "",
       pins: {},
       models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
@@ -219,6 +223,8 @@ export class Store {
       this.onEditorCommand?.(ed[1]!);
       return;
     }
+    // A program running in the shell (./guess waiting for a number) takes the line.
+    if (this.onProgram?.(text)) return;
     // cd, gcc, echo and friends run in the shell without a `!`.
     if (this.onShell && isShellLine(text)) {
       this.onShell(text.trim());
@@ -520,6 +526,32 @@ export class Store {
     const id = this.nextId++;
     this.patch({ transcript: [...this.state.transcript, { ...e, id } as Entry] });
     return id;
+  }
+
+  /** Set by the runner: ctrl-c. Stops a program in the shell, or quits. */
+  onInterrupt: (() => void) | null = null;
+
+  /** Set by the runner: a program in the shell wants this line. True if it took it. */
+  onProgram: ((line: string) => boolean) | null = null;
+
+  /** The middle: file or shell. */
+  showMiddle(which: "file" | "shell") {
+    if (which === "shell") return this.openShell();
+    this.patch({ stage: { kind: "code" } });
+  }
+
+  setRunning(running: string) {
+    if (this.state.running !== running) this.patch({ running });
+  }
+
+  toggleMiddle() {
+    this.showMiddle(this.state.middle === "shell" ? "file" : "shell");
+  }
+
+  /** Put the characters back. The middle keeps what it had. */
+  closeBoard() {
+    if (!isBoardKind(this.state.stage)) return;
+    this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
   }
 
   /** The stage page before this one, for shift-tab. */

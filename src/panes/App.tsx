@@ -17,7 +17,7 @@ import { bar } from "../lines.ts";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-type Focus = "input" | "tree" | "stage" | "side";
+type Focus = "input" | "tree" | "stage";
 
 export function App({ store, layout }: { store: Store; layout: Node }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -31,27 +31,24 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   const hasCode = state.stage.kind === "code" && state.code !== null;
   // The board is somewhere to go only while it's up.
   const board = isBoard(state.stage);
-  const ring: Focus[] = board ? ["input", "side", "stage", "tree"] : ["input", "stage", "tree"];
-
-  const inShell = focus === "stage" && state.stage.kind === "shell";
+  const inShell = state.middle === "shell" && !board ? true : state.stage.kind === "shell";
+  // The shell never takes the keyboard: you type into it from the input. So
+  // the middle is somewhere to go only when it's a file.
+  const ring: Focus[] = inShell ? ["input", "tree"] : ["input", "stage", "tree"];
 
   useInput((ch, key) => {
-    // In the shell every key is the shell's (it reads them raw), except
-    // shift-tab, which is the way back out.
-    if (inShell) {
-      // Out of the shell lands you in the input, never in whatever page is
-      // underneath - a file there would take your next keystrokes as vim.
-      if (key.tab && key.shift) {
-        store.flipStage();
-        setFocus("input");
-      }
-      return;
-    }
+    // ctrl-c stops what's running in the shell; with nothing running, it quits.
+    if (key.ctrl && ch === "c") return store.onInterrupt?.();
     if (key.tab && !typing) {
-      if (key.shift) return store.flipStage();
+      // shift-tab does one thing: the middle between file and shell.
+      if (key.shift) {
+        store.toggleMiddle();
+        return setFocus("input");
+      }
       return setFocus((f) => ring[(ring.indexOf(f) + 1) % ring.length]!);
     }
-    // No other global chords, on purpose.
+    // esc from the input closes a board (help, a lesson, the log).
+    if (key.escape && focus === "input" && board && state.stage.kind !== "spec") return store.closeBoard();
   });
 
   useEffect(() => {
@@ -59,11 +56,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     return () => void (store.onEditorCommand = null);
   }, [store]);
 
-  // Opening the shell means you're about to type into it.
+  // Showing the shell sends you to the input, which is where you type into it.
   useEffect(() => {
-    if (state.stage.kind === "shell") setFocus("stage");
-    if (focus === "side" && !board) setFocus("input");
-  }, [state.stage.kind, board, focus]);
+    if (inShell && focus === "stage") setFocus("input");
+  }, [inShell, focus]);
+
 
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
   const cols = stdout?.columns ?? 80;
@@ -84,6 +81,31 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     mouse.on("wheel", onWheel);
     return () => void mouse.off("wheel", onWheel);
   }, [layout, cols, body]);
+
+  // Clicks: a pane under the pointer takes focus; the file and shell tabs switch.
+  useEffect(() => {
+    const onClick = (w: Wheel) => {
+      const x = w.x - 1;
+      const y = w.y - 2;
+      const hit = allocate(layout, { x: 0, y: 0, width: cols, height: body }).find(
+        (p) => x >= p.x && x < p.x + p.width && y >= p.y && y < p.y + p.height,
+      );
+      if (!hit) return setFocus("input");
+      if (hit.pane === "tree") return setFocus("tree");
+      if (hit.pane === "code") {
+        // The tab bar: " file " then " shell ", after a one-column margin.
+        if (y === hit.y) {
+          const at = x - hit.x - 1;
+          if (at >= 0 && at < 6) return store.showMiddle("file");
+          if (at >= 6 && at < 13) return store.showMiddle("shell");
+        }
+        return setFocus(state.middle === "shell" ? "input" : "stage");
+      }
+      setFocus("input");
+    };
+    mouse.on("click", onClick);
+    return () => void mouse.off("click", onClick);
+  }, [layout, cols, body, state.middle]);
 
   const toInput = useCallback(() => setFocus("input"), []);
   const openFile = useCallback(
@@ -153,11 +175,11 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             transcript={state.transcript}
             width={at.width}
             height={at.height}
-            focused={focus === "side"}
+            focused={false}
             question={state.prompt?.type === "question" ? state.prompt.question : undefined}
           />
         ) : (
-          <Cast state={state} width={at.width} />
+          <Cast state={state} width={at.width} height={at.height} />
         );
     }
   };
@@ -207,7 +229,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
           </Text>
         ) : (
           <Field
-            prompt={promptFor(state.prompt)}
+            prompt={state.running ? `${state.running} › ` : promptFor(state.prompt)}
             color={state.prompt?.type === "spec" ? "#87af87" : undefined}
             active={focus === "input"}
             onSubmit={(v) => store.submit(v.trim())}
@@ -221,13 +243,12 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
 }
 
 function hint(focus: Focus, typing: boolean, hasCode: boolean, inShell = false): string {
-  if (inShell) return "every key goes to the shell   ⇧tab: back";
+  void inShell;
   if (focus === "tree") return "tab: back   j/k   h/l   ⏎ open";
-  if (focus === "side") return "tab: next   j/k   space/b   g/G   ⇧tab: characters";
   if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return "tab · ⇧tab back · ? ask · ! shell · :help";
+  return "tab: move · ⇧tab: file ⇄ shell · ? ask · :help";
 }
 
 function promptFor(p: Prompt): string {

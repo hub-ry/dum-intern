@@ -1,10 +1,12 @@
-// The two voices, with faces, and what they are saying underneath.
+// The characters' side: their faces on top, and the conversation under them.
+// Everything said stays in the thread, so looking at the shell never loses it.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { load, framesFor, draw, type Sprite } from "../sprite.ts";
-import { wrap, voiceName, sentences } from "../lines.ts";
-import type { State } from "../store.ts";
+import { wrap, voiceName, c } from "../lines.ts";
+import { scrolls } from "../mouse.ts";
+import type { Entry, State } from "../store.ts";
 
 const ART = new URL("../art/", import.meta.url).pathname;
 
@@ -12,7 +14,10 @@ const ART = new URL("../art/", import.meta.url).pathname;
 const SPEED = 3;
 const TICK = 40;
 
-export function Cast({ state, width }: { state: State; width: number }) {
+const DUM = "#87afd7";
+const WIZARD = "#d7a55f";
+
+export function Cast({ state, width, height }: { state: State; width: number; height: number }) {
   const sprites = useMemo(() => {
     try {
       return { intern: load(ART + "intern.txt"), wizard: load(ART + "wizard.txt") };
@@ -22,132 +27,162 @@ export function Cast({ state, width }: { state: State; width: number }) {
     }
   }, []);
 
-  const wizardLine = lastQuip(state);
-  const internLine = currentLine(state);
-
-  const wizardSaid = useTypewriter(wizardLine);
-  const internSaid = useTypewriter(internLine);
-
-  if (!sprites) return <Box width={width} />;
-
   const inner = Math.max(16, width - 4);
+  const lines = thread(state, inner);
+  // The newest message types itself out, so you can tell something was just said.
+  const fresh = lines.filter((l) => l.fresh);
+  const typed = useTypewriter(fresh.map((l) => l.text).join("\n"));
+  let left = typed.shown.length;
+  const shown = lines.map((l) => {
+    if (!l.fresh) return l;
+    const part = l.text.slice(0, Math.max(0, left));
+    left -= l.text.length + 1;
+    return { ...l, text: part };
+  });
+  const talking = typed.typing ? fresh[0]?.who : undefined;
+
+  // Face (4), name, model, then the rule.
+  const top = sprites ? 7 : 1;
+  const room = Math.max(3, height - top);
+  // Follows the newest line unless you've scrolled up to read.
+  const [back, setBack] = useState(0);
+  const most = Math.max(0, shown.length - room);
+  useEffect(() => {
+    const f = (delta: number) => setBack((b) => Math.max(0, Math.min(most, b - delta)));
+    scrolls.on("cast", f);
+    return () => void scrolls.off("cast", f);
+  }, [most]);
+  useEffect(() => setBack(0), [lines.length]);
+  const end = shown.length - Math.min(back, most);
+  const view = shown.slice(Math.max(0, end - room), end);
 
   return (
-    <Box width={width} flexDirection="column" paddingX={2}>
-      <Speaker
-        sprite={sprites.wizard}
-        state={wizardSaid.typing ? "talking" : "idle"}
-        speaking={wizardSaid.typing}
-        name="wizard"
-        model={voiceName(state.models.wizard.model, state.models.wizard.effort)}
-        nameColor="#d7a55f"
-        text={wizardSaid.shown}
-        width={inner}
-        dim
-      />
-      <Box height={1} />
-      <Speaker
-        sprite={sprites.intern}
-        state={internState(state, internSaid.typing)}
-        speaking={internSaid.typing}
-        name="dum"
-        model={voiceName(state.models.intern.model, state.models.intern.effort)}
-        nameColor="#87afd7"
-        text={internSaid.shown}
-        width={inner}
-        why={state.prompt?.type === "question" ? state.prompt.why : ""}
-        clamp={SAY_LINES}
-        choices={state.prompt?.type === "question" && state.prompt.choices ? "answer it · idk · type it" : ""}
-      />
-    </Box>
-  );
-}
-
-function Speaker({
-  sprite,
-  state,
-  speaking,
-  name,
-  model,
-  nameColor,
-  text,
-  why,
-  choices,
-  clamp,
-  width,
-  dim,
-}: {
-  sprite: Sprite;
-  state: string;
-  speaking: boolean;
-  name: string;
-  /** Which model is speaking, so a voice is never a mystery box. */
-  model?: string;
-  nameColor: string;
-  text: string;
-  why?: string;
-  /** The ways out of a question, so "type it" is discoverable without a manual. */
-  choices?: string;
-  /** Most lines to show before pointing at the transcript. */
-  clamp?: number;
-  width: number;
-  dim?: boolean;
-}) {
-  return (
-    <Box flexDirection="column">
-      <Face sprite={sprite} state={state} speaking={speaking} />
-      <Box height={1} />
-      <Text wrap="truncate-end">
-        <Text color={nameColor} bold>
-          {name}
-        </Text>
-        {model ? <Text dimColor>{"  " + model}</Text> : null}
-      </Text>
-      {clamped(text ? wrap(text, "", width) : [""], clamp).map((line, i) => (
-        <Text key={i} dimColor={dim || line.startsWith("… ")} wrap="truncate-end">
-          {line || " "}
+    <Box width={width} height={height} flexDirection="column" paddingX={2}>
+      {sprites ? (
+        <Box height={top - 1} flexShrink={0}>
+          <Portrait sprite={sprites.wizard} state={talking === "wizard" ? "talking" : "idle"} speaking={talking === "wizard"} name="wizard" color={WIZARD} model={voiceName(state.models.wizard.model, state.models.wizard.effort)} width={Math.floor(inner / 2)} />
+          <Portrait sprite={sprites.intern} state={talking === "dum" ? "talking" : internState(state)} speaking={talking === "dum"} name="dum" color={DUM} model={voiceName(state.models.intern.model, state.models.intern.effort)} width={Math.ceil(inner / 2)} />
+        </Box>
+      ) : null}
+      <Text dimColor>{back ? `↑ ${back} more below - scroll down` : "─".repeat(inner)}</Text>
+      {view.map((l, i) => (
+        <Text key={i} wrap="truncate-end">
+          {l.text || " "}
         </Text>
       ))}
-      {why
-        ? trimmed(wrap(why, "", width), 3, width).map((line, i) => (
-            <Text key={`w${i}`} dimColor wrap="truncate-end">
-              {line}
-            </Text>
-          ))
-        : null}
-      {choices ? (
-        <Text color="#5f8787" wrap="truncate-end">
-          {choices}
-        </Text>
-      ) : null}
     </Box>
   );
 }
 
-/** What dum says, cut to what fits in working memory. */
-const SAY_LINES = 6;
-
-function clamped(lines: string[], n?: number): string[] {
-  if (!n || lines.length <= n) return lines;
-  return [...lines.slice(0, n - 1), "… more on the stage"];
+function Portrait({ sprite, state, speaking, name, color, model, width }: { sprite: Sprite; state: string; speaking: boolean; name: string; color: string; model: string; width: number }) {
+  return (
+    <Box flexDirection="column" width={width}>
+      <Face sprite={sprite} state={state} speaking={speaking} />
+      <Text bold color={color} wrap="truncate-end">
+        {name}
+      </Text>
+      <Text dimColor wrap="truncate-end">
+        {model || " "}
+      </Text>
+    </Box>
+  );
 }
 
-/** Cut to `n` lines with an ellipsis, for text that isn't on the stage anywhere. */
-function trimmed(lines: string[], n: number, width: number): string[] {
-  if (lines.length <= n) return lines;
-  const last = lines[n - 1]!;
-  return [...lines.slice(0, n - 1), (last.length >= width ? last.slice(0, width - 1) : last) + "…"];
+export type Line = { text: string; who?: "dum" | "wizard"; fresh?: boolean };
+
+/**
+ * The conversation as lines to draw, oldest first. dum and the wizard by name,
+ * your replies after a ›, and dum's own notes (skills, fills, holes) dim. The
+ * open question comes last, with its why and the ways to answer.
+ */
+export function thread(s: State, width: number): Line[] {
+  const out: Line[] = [];
+  const say = (who: "dum" | "wizard", text: string, fresh = false) => {
+    out.push({ text: c.bold(who === "dum" ? blue(who) : amber(who)), who });
+    for (const l of wrap(text, "", width)) out.push({ text: l, who, fresh });
+  };
+  const note = (text: string) => {
+    for (const l of wrap(text, "", width)) out.push({ text: c.dim(l) });
+  };
+  const you = (text: string) => {
+    for (const [i, l] of wrap(text, "", width - 2).entries()) out.push({ text: (i ? "  " : c.dim("› ")) + l });
+  };
+  const gap = () => {
+    if (out.length && out[out.length - 1]!.text) out.push({ text: "" });
+  };
+
+  const entries = s.transcript;
+  entries.forEach((e: Entry, i) => {
+    const newest = i === entries.length - 1;
+    switch (e.kind) {
+      case "say":
+        gap();
+        say("dum", e.text, newest);
+        break;
+      case "quip":
+        gap();
+        say("wizard", e.text, newest);
+        break;
+      case "review":
+        gap();
+        say("wizard", e.text, newest);
+        break;
+      case "question":
+        if (e.question) {
+          gap();
+          say("dum", e.question, newest && e.answer === null);
+          if (e.answer === null && s.prompt?.type === "question") {
+            if (s.prompt.why) note(s.prompt.why);
+            if (s.prompt.choices) out.push({ text: c.dim("answer it · idk · type it") });
+          }
+        }
+        if (e.answer !== null && e.answer !== "") you(e.answer);
+        break;
+      case "lesson":
+        gap();
+        say("wizard", `${e.lesson.concept} - the whole lesson is up on the board.`, newest);
+        break;
+      case "spec":
+        gap();
+        say("dum", e.approved === null ? "the spec is up - build it?" : e.approved ? "spec approved - building." : "spec declined.", newest);
+        break;
+      case "answer":
+        gap();
+        note(`? ${e.question}`);
+        for (const l of wrap(e.body, "", width).slice(0, 6)) out.push({ text: l });
+        break;
+      case "note":
+        note(e.text);
+        break;
+      case "fill":
+        note(`✓ filled ${e.path}: ${e.concept}`);
+        break;
+      case "tool":
+        if (e.name === "hole") note(`▌ ${e.detail} - yours to type`);
+        else if (e.outcome !== "ran") note(`${e.outcome}: ${e.name} ${e.detail}${e.why ? ` (${e.why})` : ""}`);
+        break;
+    }
+  });
+
+  // The turn is yours: say what's waiting, last, where the eye ends up.
+  if (s.prompt?.type === "next") {
+    const t = s.todos[0];
+    gap();
+    if (t) out.push({ text: blue(`your turn: ${t.concept} in ${t.path}`) }, { text: c.dim("type it and say done, or explain it here") });
+    else if (s.suggestion) out.push({ text: blue(`next up: ${s.suggestion}`) }, { text: c.dim("say go, or ask for something else") });
+    else out.push({ text: c.dim("what next?") });
+  }
+  if (s.prompt?.type === "spec") {
+    gap();
+    out.push({ text: blue("build this? y/n") });
+  }
+  return out;
 }
 
-function Face({
-  sprite,
-  state,
-  speaking,
-}: {
-  sprite: Sprite;
-  state: string;
-  speaking: boolean;
-}) {
+const blue = (t: string) => `\x1b[38;2;135;175;215m${t}\x1b[39m`;
+const amber = (t: string) => `\x1b[38;2;215;165;95m${t}\x1b[39m`;
+
+function Face({ sprite, state, speaking }: { sprite: Sprite; state: string; speaking: boolean }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     // Mouths move faster than idles blink.
@@ -158,8 +193,7 @@ function Face({
   const frames = framesFor(sprite, state);
   // A blink is an event, not a beat: alternating it evenly reads as a twitch.
   const rare = !speaking && frames[1]?.name.endsWith(".blink");
-  const i =
-    frames.length < 2 ? 0 : rare ? (tick % 11 === 10 ? 1 : 0) : tick % frames.length;
+  const i = frames.length < 2 ? 0 : rare ? (tick % 11 === 10 ? 1 : 0) : tick % frames.length;
 
   return (
     <Box flexDirection="column">
@@ -191,67 +225,9 @@ function useTypewriter(text: string): { shown: string; typing: boolean } {
   return { shown: text.slice(0, n), typing: n < text.length };
 }
 
-function lastQuip(s: State): string {
-  for (let i = s.transcript.length - 1; i >= 0; i--) {
-    const e = s.transcript[i]!;
-    if (e.kind === "quip") return e.text;
-  }
-  return "";
-}
-
-/** The last thing dum said after your most recent message, trimmed to fit. "" if nothing. */
-export function sinceYou(s: State): string {
-  let you = -1;
-  s.transcript.forEach((e, i) => {
-    if (e.kind === "question" && e.answer !== null) you = i;
-  });
-  const says = s.transcript.slice(you + 1).filter((e) => e.kind === "say");
-  const said = says.find((e) => e.kind === "say" && e.lead) ?? says.pop();
-  if (!said || said.kind !== "say") return "";
-  const text = sentences(said.text, 3);
-  return text.length > 260 ? text.slice(0, 257).trimEnd() + "…" : text;
-}
-
-/** What the intern is saying right now. */
-function currentLine(s: State): string {
-  if (s.prompt?.type === "question") {
-    // Whatever dum said since its last question (an answer to yours, say)
-    // goes above this one, or it's never seen.
-    const asked = s.transcript.filter((e) => e.kind === "question");
-    const before = asked[asked.length - 2]?.id ?? 0;
-    const said = s.transcript.filter((e) => e.kind === "say" && e.id > before).pop();
-    const q = s.prompt.again ? `still: ${s.prompt.question}` : s.prompt.question;
-    if (!(said && said.kind === "say" && asked.length > 1)) return q;
-    // The question is never the part that gets cut: the answer above it gives way.
-    const short = sentences(said.text, 2);
-    const brief = short.length > 160 ? short.slice(0, 157).trimEnd() + "…" : short;
-    return `${brief}\n\n${q}`;
-  }
-  if (s.prompt?.type === "spec") return "that is the spec. build it?";
-  if (s.prompt?.type === "next") {
-    const t = s.todos[0];
-    const next = t
-      ? `your turn: ${t.concept} in ${t.path}. type it and say done, or explain it here.`
-      : s.suggestion
-        ? `next up: ${s.suggestion}. say go, or ask for something else.`
-        : "what next?";
-    // What dum said since you last spoke - a review's question, say - goes
-    // above, or the prompt line covers it and dum looks like it ignored you.
-    const said = sinceYou(s);
-    return said ? `${said}\n\n${next}` : next;
-  }
-  if (s.busy) return "";
-  for (let i = s.transcript.length - 1; i >= 0; i--) {
-    const e = s.transcript[i]!;
-    if (e.kind === "say") return e.text;
-    if (e.kind === "note") return e.text;
-  }
-  return "";
-}
-
-function internState(s: State, typing: boolean): string {
+function internState(s: State): string {
   if (s.code && s.code.outcome && s.code.outcome !== "ran") return "blocked";
-  if (typing || s.prompt) return "asking";
+  if (s.prompt) return "asking";
   if (s.busy && s.code?.live) return "building";
   if (s.busy) return "thinking";
   return "idle";

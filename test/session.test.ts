@@ -189,19 +189,21 @@ test("live comments pin to lines, replace per line, and clear together", async (
   assert.deepEqual(s.getSnapshot().pins, {});
 });
 
-test("what dum said since your last message shows above the prompt line", async () => {
-  const { sinceYou } = await import("../src/panes/Cast.tsx");
+test("the thread keeps everything said, and ends on whose turn it is", async () => {
+  const { thread } = await import("../src/panes/Cast.tsx");
+  const { printable } = await import("../src/lines.ts");
   const { Store } = await import("../src/store.ts");
   const s = new Store("r", "understand");
+  s.say("run it with g++ -std=c++17 guess.cpp -o guess");
   const done = s.askNext();
   s.submit("done");
   await done;
-  s.say('secret 50, you type 30, and it says "too high". is 30 bigger than 50?');
+  s.say('secret 50, you type 30, and it says "too high". is 30 bigger than 50?', true);
+  s.setTodos([{ concept: "if/else", path: "guess.cpp" }]);
   void s.askNext();
-  assert.match(sinceYou(s.getSnapshot()), /is 30 bigger than 50\?/);
-  const again = s.askNext();
-  s.submit("hm");
-  await again;
-  void s.askNext();
-  assert.equal(sinceYou(s.getSnapshot()), "", "nothing new since you spoke");
+  const text = thread(s.getSnapshot(), 40).map((l) => printable(l.text));
+  assert.ok(text.some((l) => l.includes("g++")), "earlier messages stay");
+  assert.ok(text.some((l) => l === "› done"), "your reply shows");
+  assert.ok(text.some((l) => l.includes("is 30 bigger than 50?")));
+  assert.match(text[text.length - 2]!, /your turn: if\/else in guess\.cpp/);
 });

@@ -609,6 +609,21 @@ async function main() {
   // `!cmd`: the panes step aside while it runs, and come back after.
   // In the panes, `!cmd` types into the shell page. Plain mode has no pages,
   // so it runs the command in the terminal directly.
+  if (ui) {
+    // A program in the shell (./guess asking for a number) gets what you type.
+    store.onProgram = (line) => {
+      if (!pty.running()) return false;
+      store.showMiddle("shell");
+      pty.write(line + "\r");
+      return true;
+    };
+    store.onInterrupt = () => {
+      if (pty.running()) return pty.write("\x03");
+      ui.stop();
+      exit(130);
+    };
+    setInterval(() => store.setRunning(pty.running()), 400).unref();
+  }
   let shelling = false;
   store.onShell = (cmd) => {
     if (ui) {
@@ -710,7 +725,8 @@ async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () =>
   process.on("exit", mouseOff);
   const mount = () => {
     mouseOn();
-    return render(React.createElement(App, { store, layout }), { exitOnCtrlC: true, stdin: input.stdin as never });
+    // ctrl-c is dum's to route: to a program in the shell, or to quit.
+    return render(React.createElement(App, { store, layout }), { exitOnCtrlC: false, stdin: input.stdin as never });
   };
   const app = mount();
   return {

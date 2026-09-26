@@ -125,7 +125,7 @@ function PageBar({
       <Text wrap="truncate-end">
         {tab("file", has.file)}
         {tab("shell", true)}
-        <Text dimColor>{"   ⇧tab back" + (focused && on !== "shell" ? "  ←/→ pages" : "")}</Text>
+        <Text dimColor>{"   ⇧tab: file ⇄ shell"}</Text>
       </Text>
     </Box>
   );

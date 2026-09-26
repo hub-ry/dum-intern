@@ -1,12 +1,12 @@
-// The shell page: a real shell on the stage. Every key goes to it but shift-tab.
+// The shell page: a real shell in the middle. You type into it from the input.
 
 import React, { useEffect, useReducer } from "react";
 import { Box, Text } from "ink";
 import { shell } from "../pty.ts";
-import { keys, scrolls } from "../mouse.ts";
+import { scrolls } from "../mouse.ts";
 import { slice, printable } from "../lines.ts";
 
-export function Shell({ width, height, focused }: { width: number; height: number; focused: boolean }) {
+export function Shell({ width, height }: { width: number; height: number; focused?: boolean }) {
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const cols = Math.max(10, width - 2);
   const rows = Math.max(3, height);
@@ -21,17 +21,6 @@ export function Shell({ width, height, focused }: { width: number; height: numbe
     return () => void shell.off("change", bump);
   }, []);
 
-  // Raw bytes, not Ink's parsed keys: completion, arrows and ctrl-c must reach it as typed.
-  useEffect(() => {
-    if (!focused) return;
-    const f = (d: string) => {
-      const data = d.replace(/\x1b\[Z/g, "");
-      if (data) shell.write(data);
-    };
-    keys.on("data", f);
-    return () => void keys.off("data", f);
-  }, [focused]);
-
   useEffect(() => {
     const f = (delta: number) => shell.scroll(delta);
     scrolls.on("code", f);
@@ -43,7 +32,8 @@ export function Shell({ width, height, focused }: { width: number; height: numbe
     <Box flexDirection="column" width={width} paddingX={1}>
       {Array.from({ length: rows }, (_, i) => {
         const line = lines[i] ?? "";
-        if (!focused || !cursor || cursor.y !== i) {
+        // The cursor always shows: it's where what you type in the input lands.
+        if (!cursor || cursor.y !== i) {
           return (
             <Text key={i} wrap="truncate-end">
               {line || " "}

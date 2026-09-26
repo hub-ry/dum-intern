@@ -91,8 +91,8 @@ test("mouse reports come out of the input, and nothing else does", async () => {
   assert.deepEqual(strip("\x1b[<65;40;12M"), { rest: "", wheels: [{ x: 40, y: 12, delta: 3 }], held: "" });
   assert.deepEqual(strip("ab\x1b[<64;1;2Mcd").wheels, [{ x: 1, y: 2, delta: -3 }]);
   assert.equal(strip("ab\x1b[<64;1;2Mcd").rest, "abcd");
-  // Clicks and releases are dropped, not typed.
-  assert.deepEqual(strip("\x1b[<0;5;5M\x1b[<0;5;5m"), { rest: "", wheels: [], held: "" });
+  // A click is reported (delta 0) and its release dropped; neither is typed.
+  assert.deepEqual(strip("\x1b[<0;5;5M\x1b[<0;5;5m"), { rest: "", wheels: [{ x: 5, y: 5, delta: 0 }], held: "" });
   // A report cut in half waits for the rest; a lone escape never waits.
   assert.deepEqual(strip("x\x1b[<65;4"), { rest: "x", wheels: [], held: "\x1b[<65;4" });
   assert.deepEqual(strip("\x1b"), { rest: "", wheels: [], held: "\x1b" }, "held briefly - filtered() lets it go as a key");
