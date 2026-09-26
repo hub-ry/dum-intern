@@ -157,3 +157,13 @@ test("the input wraps into rows instead of running off the screen", async () => 
   assert.deepEqual(fieldRows("> ", "abcdefgh", 5), ["> abc", "defgh", " "]);
   assert.deepEqual(fieldRows("> ", "", 5), [">  "], "a cell kept for the cursor");
 });
+
+test("shell commands typed bare run in the shell; English that starts the same doesn't", async () => {
+  const { isShellLine } = await import("../src/shell.ts");
+  for (const l of ["cd src", "touch a.txt", "echo hi", "gcc -o hi hi.c", "g++ main.cpp", "./a.out", "git status", "make", "cat main.c", "rm -rf build", "ls"]) {
+    assert.ok(isShellLine(l), l);
+  }
+  for (const l of ["make it faster", "cat and dog", "go with the list", "idk", "type it", "yes", "the cd is scratched"]) {
+    assert.ok(!isShellLine(l), l);
+  }
+});

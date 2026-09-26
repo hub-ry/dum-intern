@@ -78,3 +78,28 @@ export async function run(cmd: string, cwd: string, wait = true): Promise<number
   if (flowing) stdin.resume();
   return code;
 }
+
+/** Commands that never start an English answer: typed bare, they run in the shell. */
+const ALWAYS = new Set([
+  "cd", "ls", "pwd", "touch", "mkdir", "rmdir", "echo", "gcc", "g++", "cc", "c++", "clang", "clang++",
+  "rustc", "cargo", "python3", "pip", "pip3", "node", "npm", "npx", "tsx", "git", "javac", "zig", "ghc",
+]);
+
+/** Commands that are also words: shell only when what follows looks like shell. */
+const WORDS = new Set(["make", "cat", "cp", "mv", "rm", "go", "java", "python", "less", "head", "tail", "grep", "which", "man"]);
+
+/**
+ * Whether a line typed into the input is a shell command, no `!` needed.
+ * `make` or `cat main.c` is; "make it faster" is an answer.
+ */
+export function isShellLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  const [first = "", ...rest] = t.split(/\s+/);
+  if (first.startsWith("./") || first.startsWith("../")) return true;
+  if (ALWAYS.has(first)) return true;
+  if (!WORDS.has(first)) return false;
+  const args = rest.join(" ");
+  // Nothing after, or a flag, a path or file, quotes, a pipe or redirect.
+  return !args || /(^|\s)-\w|[\/.]\w|["'`|<>&;$*]/.test(args);
+}

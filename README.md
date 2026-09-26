@@ -106,7 +106,7 @@ Claimed isn't known. Nobody watched me write that code. The first build that lea
 
 ### A shell, and no chords to collide with
 
-Learning a language includes running it, so the stage has a shell page next to the file, the reply and the log. It's my own `$SHELL` with my own prompt, running in the repo, started the first time I open it and kept for the session, so `cd`, history and env stick. `!` opens it from anywhere, and `!g++ -std=c++17 -Wall -o lab lab.cpp && ./lab` typed into the input runs there. While it has focus every key is the shell's: Tab completes, ctrl-c interrupts, interactive programs read their input. `shift-tab` is the one key that isn't, and it takes me back to the input.
+Learning a language includes running it, so the stage has a shell page next to the file, the reply and the log. It's my own `$SHELL` with my own prompt, running in the repo, started the first time I open it and kept for the session, so `cd`, history and env stick. `!` opens it from anywhere. Shell commands typed into the input go straight there with no `!`: `cd src`, `touch main.c`, `echo hi`, `gcc -o hi hi.c`, `./hi`, `git status`. A few commands are also words (`make`, `cat`, `rm`), and those only count when what follows looks like shell, a path or a flag, so "make it faster" is still an answer. Anything else takes a `!`. While it has focus every key is the shell's: Tab completes, ctrl-c interrupts, interactive programs read their input. `shift-tab` is the one key that isn't, and it takes me back to the input.
 
 It's [node-pty](https://github.com/microsoft/node-pty) running the shell and xterm's headless emulator keeping the screen, so it behaves like the terminal it's inside.
 
@@ -557,7 +557,8 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `←` `→` | file and shell | the middle |
 | `j` `k`, `space` `b`, `g` `G` | scroll the board | the board |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
-| `!` + command | run it on the shell page (`!` alone opens it) | input, file's `:` line |
+| `cd`, `gcc`, `echo`, `./a.out` ... | run on the shell page, as typed | input |
+| `!` + command | anything else on the shell page (`!` alone opens it) | input, file's `:` line |
 | `:run` | run the open file. Compiled languages get the line to type instead | input, file's `:` line |
 | `:log` | the full transcript on the stage | input, file's `:` line |
 | `:help` | all of this, on the stage | input |

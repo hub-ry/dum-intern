@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
 import type { Mode } from "./session.ts";
-import { runnerFor } from "./shell.ts";
+import { runnerFor, isShellLine } from "./shell.ts";
 
 export type Outcome = "ran" | "held" | "refused";
 
@@ -219,6 +219,11 @@ export class Store {
       this.onEditorCommand?.(ed[1]!);
       return;
     }
+    // cd, gcc, echo and friends run in the shell without a `!`.
+    if (this.onShell && isShellLine(text)) {
+      this.onShell(text.trim());
+      return;
+    }
     // `!` is a shell, same as vim and Claude Code. Never an answer either.
     if (text.startsWith("!") && this.onShell) {
       this.onShell(text.slice(1).trim());
@@ -377,7 +382,8 @@ export class Store {
         "dum",
         [
           "?question   ask anything, off to the side",
-          "!command    run it in the shell  (! alone opens it)",
+          "cd, gcc, echo, git, ./a.out ...   run in the shell as typed",
+          "!command    anything else in the shell  (! alone opens it)",
           ":run        run the file you're looking at",
           ":skill x    add a skill you can write without AI",
           "            (:skill -x takes it off)",
