@@ -66,16 +66,21 @@ function setUp(s: Scenario): { repo: string; home: string } {
   return { repo, home };
 }
 
-function snapshot(repo: string, skip: Set<string>): Record<string, string> {
+/** Text files dum wrote or changed. Seed files count once they differ; build output never does. */
+function snapshot(repo: string, seed: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (dir: string) => {
     for (const n of readdirSync(dir)) {
-      if (n === ".git" || n === ".dum") continue;
+      if (n === ".git" || n === ".dum" || n === "__pycache__" || n === "node_modules") continue;
       const p = join(dir, n);
       if (statSync(p).isDirectory()) walk(p);
       else {
         const rel = relative(repo, p);
-        if (!skip.has(rel) && statSync(p).size < 200_000) out[rel] = readFileSync(p, "utf8");
+        if (statSync(p).size > 200_000) continue;
+        const text = readFileSync(p, "utf8");
+        if (text.includes("\u0000") || text.includes("\ufffd")) continue; // binary: a compiled program, not code
+        if (seed[rel] === text) continue;
+        out[rel] = text;
       }
     }
   };
@@ -85,7 +90,7 @@ function snapshot(repo: string, skip: Set<string>): Record<string, string> {
 
 /** Drive one session in plain mode, answering the way the scenario says. */
 function drive(s: Scenario, repo: string, home: string): Promise<Run> {
-  const seed = new Set(["README.md", ...Object.keys(s.files)]);
+  const seed: Record<string, string> = { "README.md": `# ${s.name}\n`, ...s.files };
   return new Promise((resolve) => {
     const record = join(dirname(repo), "transcript.json");
     const p = spawn(DUM, ["-p", ...(s.mode === "anti-vibe" ? ["-a"] : []), s.request], {
@@ -201,7 +206,9 @@ async function main() {
       const fails = (x: Result) => x.checks.filter((k) => !k.ok).length;
       const d = (r.verdict?.score ?? 0) - (o.verdict?.score ?? 0);
       const df = fails(r) - fails(o);
-      const tag = d > 0 || df < 0 ? c.green("better") : d < 0 || df > 0 ? c.red("worse") : c.dim("same");
+      const up = d > 0 || df < 0;
+      const down = d < 0 || df > 0;
+      const tag = up && down ? c.amber("mixed") : up ? c.green("better") : down ? c.red("worse") : c.dim("same");
       console.log(`  ${r.name}  ${tag}  ${c.dim(`taste ${o.verdict?.score ?? "-"} -> ${r.verdict?.score ?? "-"}, failed checks ${fails(o)} -> ${fails(r)}`)}`);
     }
   }
