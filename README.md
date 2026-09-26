@@ -144,7 +144,9 @@ So the size of a gap depends on my level in that language. That counts the skill
 | developing | 3-9 | up to 8 lines, a small function body | dum writes the rest |
 | fluent | 10+ | any size | every line goes through a hole |
 
-The gate measures the code the intern hands it for a hole, and sends back a gap that's too big for my level. Asked for a tiny vector class with no C++ on my tree, it wrote the class, `main` and the printing, and left two gaps: the grow condition in `push_back`, and copying into the new block and freeing the old one. It compiled as given.
+The gate measures the code the intern hands it for a hole, and sends back a gap that's too big for my level. The number of gaps grows the same way. The first request in a language gets one, and once I've solved it more can come, up to four once I'm fluent. The words under a gap fade too: exact steps at the start, then what it must do, then only the goal.
+
+The spec I approve is short on purpose. The intern fills in one-line fields (what I'll have, what I type, what I decided, what's left out, how to run it) and dum lays them out. It used to write the spec as free markdown, and my terminal showed it as a wall of raw tables and nested lists. Asked for a tiny vector class with no C++ on my tree, it wrote the class, `main` and the printing, and left two gaps: the grow condition in `push_back`, and copying into the new block and freeing the old one. It compiled as given.
 
 
 ### My taste, and scenarios that check it

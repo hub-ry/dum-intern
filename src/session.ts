@@ -179,9 +179,12 @@ ask for something dum does, name the command in one line:
   :help                   everything else
 
 HOW TO INTERROGATE
-- A request brings at most four new concepts - about what working memory
-  holds. If it needs more, the spec builds the first part and names the next
-  request in one line. The gate refuses a fifth hole.
+- A request brings few new concepts: one gap the first time in a language,
+  up to four once they're fluent. If it needs more, the spec builds the first
+  part and names the next request in one line.
+- Bridge only from what their tree shows. If they've done C and this is C++,
+  one line on what's different (headers vs <iostream>) is worth it. If the
+  tree shows nothing related, assume nothing and don't mention it.
 - Plan no list of questions. Ask one, read the answer, and let the next grow
   out of it - or skip it, if their answer already covered it.
 - One decision per question. If it contains "and" or a parenthetical
@@ -331,15 +334,17 @@ written. A failure gets a question that makes them find it, never the fix, and
 never touch their code.
 
 THE SPEC
-- Short sections, at most five bullets each, one line per bullet where it fits.
-  They approve it by reading it, and a spec that scrolls doesn't get read.
-- Leave out any section with nothing real in it. Later features or milestones
-  aren't "out of scope" - they're already on their list.
-- Every decision they made appears in it as a decision.
-- No scope they did not ask for. List anything you considered and dropped under
-  "explicitly out of scope".
-- Anything they answered so vaguely it does not constrain the code goes under
-  "still unresolved" - say so plainly rather than quietly choosing.
+propose_spec takes short fields and dum lays them out - one line each, no
+markdown. They approve it by reading it; a spec that scrolls doesn't get read.
+- summary: what they'll have, in one sentence.
+- you_type: their gaps, "file: what it must do".
+- decisions: every decision they made, as a decision.
+- not_doing: what you considered and dropped. Later features aren't this -
+  they're already on their list.
+- unresolved: what they answered too vaguely to constrain the code. Say so
+  rather than quietly choosing.
+- run: the command, if there is one.
+Leave a field empty rather than fill it.
 
 YOUR MEMORY HAS A CUTOFF
 There are libraries, versions, and models newer than anything you remember. If
@@ -951,14 +956,22 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
       ),
       tool(
         "propose_spec",
-        "Show the engineer the build spec and ask whether to build it. Call this once you know enough.",
-        { spec: z.string().describe("The spec, as markdown") },
+        "Show the engineer the build spec and ask whether to build it. Call this once you know enough. Short fields, one line each - dum lays it out.",
+        {
+          summary: z.string().max(140).describe("One sentence: what they'll have when it's built"),
+          you_type: z.array(z.string().max(120)).max(4).default([]).describe("Their gaps, one line each: 'file: what it must do'"),
+          decisions: z.array(z.string().max(120)).max(4).default([]).describe("Decisions they made, one line each"),
+          not_doing: z.array(z.string().max(100)).max(3).default([]).describe("What's deliberately left out"),
+          unresolved: z.array(z.string().max(120)).max(2).default([]).describe("What they left open"),
+          run: z.string().max(120).optional().describe("The command to run it, if there is one"),
+        },
         async (args) => {
           await drainWizard();
-          approved = await store.proposeSpec(args.spec);
+          const spec = specCard(args);
+          approved = await store.proposeSpec(spec);
           if (!approved) gateEngaged = true;
           if (approved) {
-            approvedSpec = args.spec;
+            approvedSpec = spec;
             wrote.length = 0;
           }
           return {
@@ -1041,11 +1054,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         }
         // Filling a hole is dum's call, made off the tree in fill_todo.
         const more = mode === "understand" ? newHoles(repo.root, name, args) : 0;
-        if (more && holesThisTurn + more > MAX_HOLES) {
-          store.toolEvent(name, detail(repo.root, args), "refused", `more than ${MAX_HOLES} holes at once`);
+        const room = holesAllowed(skills.level(skills.read(), skills.langOf(typeof args.file_path === "string" ? args.file_path : "")));
+        if (more && holesThisTurn + more > room) {
+          store.toolEvent(name, detail(repo.root, args), "refused", `more than ${room} gap${room === 1 ? "" : "s"} at once`);
           return {
             behavior: "deny" as const,
-            message: `That's ${holesThisTurn + more} holes in one request - at most ${MAX_HOLES}, about what working memory holds at once. Don't merge blocks to fit: that's the same load in bigger pieces. Build the part that fits in ${MAX_HOLES} concepts, and name the rest as the next request in one line.`,
+            message: `That's ${holesThisTurn + more} holes in one request - at their level, at most ${room}. Don't merge blocks to fit: that's the same load in bigger pieces. Give them the rest as scaffolding, or name it as the next request in one line.`,
           };
         }
         // Comments in their code are short: the code is theirs to read, not an essay to scroll
@@ -1241,6 +1255,42 @@ export function wordyCode(name: string, args: Record<string, unknown>): string[]
     return edits.flatMap((e: any) => todos.wordy(String(e?.new_string ?? ""), path));
   }
   return [];
+}
+
+/**
+ * The spec, laid out by dum from short fields. The model used to write it as
+ * free markdown, which came out as a wall of raw tables and nested lists.
+ */
+export function specCard(s: {
+  summary: string;
+  you_type?: string[];
+  decisions?: string[];
+  not_doing?: string[];
+  unresolved?: string[];
+  run?: string;
+}): string {
+  const one = (t: string) => t.replace(/\s+/g, " ").replace(/\|/g, "/").trim();
+  const section = (title: string, items?: string[]) =>
+    items?.length ? [`## ${title}`, ...items.map((i) => `- ${one(i)}`), ""] : [];
+  return [
+    `**${one(s.summary)}**`,
+    "",
+    ...section("you type", s.you_type),
+    ...section("you decided", s.decisions),
+    ...section("not doing", s.not_doing),
+    ...section("still open", s.unresolved),
+    ...(s.run ? ["## run", `- \`${one(s.run)}\``] : []),
+  ]
+    .join("\n")
+    .trim();
+}
+
+/** New holes allowed in one request, by level: the first time in a language, one. */
+export function holesAllowed(lv: skills.Level): number {
+  if (lv.count === 0) return 1;
+  if (lv.name === "novice") return 2;
+  if (lv.name === "developing") return 3;
+  return MAX_HOLES;
 }
 
 /** How many TODO(dum) blocks a Write or Edit would add. */

@@ -143,3 +143,26 @@ test("a hole handed to them can't be rewritten; one still being shaped can", asy
   assert.ok(!erasesHole("/", "Edit", edit, ["something else"]));
   assert.ok(erasesHole("/", "Edit", edit), "no list: every hole is protected");
 });
+
+test("the spec is laid out by dum from one-line fields", async () => {
+  const { specCard } = await import("../src/session.ts");
+  const { markdown, printable } = await import("../src/lines.ts");
+  const card = specCard({
+    summary: "a tiny\nvector that prints when it grows",
+    you_type: ["vec.cpp: grow the buffer | keep the elements"],
+    decisions: ["copying is blocked"],
+    not_doing: [],
+    run: "c++ vec.cpp && ./vec",
+  });
+  assert.equal(card, "**a tiny vector that prints when it grows**\n\n## you type\n- vec.cpp: grow the buffer / keep the elements\n\n## you decided\n- copying is blocked\n\n## run\n- `c++ vec.cpp && ./vec`");
+  const shown = markdown(card, 60).map(printable);
+  assert.ok(shown.every((l) => !/[#*|`]/.test(l)), "nothing raw reaches the screen");
+});
+
+test("gaps per request grow with the level: one the first time in a language", async () => {
+  const { holesAllowed } = await import("../src/session.ts");
+  assert.equal(holesAllowed({ name: "novice", count: 0, gap: 3, scaffold: true }), 1);
+  assert.equal(holesAllowed({ name: "novice", count: 2, gap: 3, scaffold: true }), 2);
+  assert.equal(holesAllowed({ name: "developing", count: 5, gap: 8, scaffold: true }), 3);
+  assert.equal(holesAllowed({ name: "fluent", count: 12, gap: Infinity, scaffold: false }), 4);
+});

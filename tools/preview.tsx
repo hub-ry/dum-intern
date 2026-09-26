@@ -6,6 +6,7 @@ import { render } from "ink";
 import { App } from "../src/panes/App.tsx";
 import { Store } from "../src/store.ts";
 import { DEFAULT } from "../src/layout.ts";
+import { specCard } from "../src/session.ts";
 
 const cols = Number(process.argv[2]) || 100;
 const rows = Number(process.argv[3]) || 34;
@@ -96,24 +97,13 @@ store.streaming(
 const scene = process.argv[5] ?? "ask";
 if (scene === "spec") {
   void store.proposeSpec(
-    [
-      "## build",
-      "",
-      "A durable job queue backed by postgres.",
-      "",
-      "## decisions",
-      "",
-      "- lease-based reclaim: a job is leased for 30s and renewed by a heartbeat, so a dead worker's job returns to the queue on its own",
-      "- at-least-once delivery, deduped on an idempotency key",
-      "",
-      "## explicitly out of scope",
-      "",
-      "- priorities, delayed jobs, a web dashboard",
-      "",
-      "## still unresolved",
-      "",
-      "- what happens after N failed attempts (you said `probably just log it`)",
-    ].join("\n"),
+    specCard({
+      summary: "a tiny int vector that prints every time it grows",
+      you_type: ["vec.cpp: when push_back finds it full, grow the buffer"],
+      decisions: ["copying is blocked, so IntVec b = a; won't compile"],
+      not_doing: ["templates", "pop_back and erase"],
+      run: "c++ -std=c++17 -Wall vec.cpp -o vec && ./vec",
+    }),
   );
 } else if (scene === "open") {
   // A real file from this repo, so the gutter, the scrollbar and the sideways clipping are
