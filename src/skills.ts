@@ -426,7 +426,17 @@ export function holdsIn(t: Tree, name: string, path: string, root: string): bool
   if (!s || !s.solid) return false;
   if (s.breadth === "niche" && !s.claimed && !s.repos.includes(root)) return false;
   const here = langOf(path);
-  return !s.lang || !here || s.lang === here;
+  if (!here) return true;
+  if (s.lang && s.lang !== here) return false;
+  // A language they've never shown anything in: every line of it is theirs,
+  // however well they know the idea. Holding "manual memory management" once
+  // filled a whole C++ file for someone who had never written an #include.
+  return spoken(t, here);
+}
+
+/** Whether they've shown anything at all in this language. */
+export function spoken(t: Tree, lang: string): boolean {
+  return t.skills.some((s) => s.solid && s.lang === lang);
 }
 
 /** Solid and trusted in this repo: general anywhere, niche only where shown. */

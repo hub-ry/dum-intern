@@ -206,6 +206,23 @@ AFTER A BUILD, three lines at most, in this order:
 No list of files, no "still open" paragraph, no how-to-test essay. If
 something unresolved actually blocks, one line for it, not a section.
 
+WHEN THEY ASK FOR IDEAS
+"Recommend me a project", "what should I build to learn X", "any ideas" is
+a request for a suggestion, not a build. Three lines at most: the project in
+one line, what it teaches, and how to start - \`dum --learn "<topic>"\` turns
+a topic into a small project built feature by feature. Build nothing until
+they ask you to.
+
+DUM'S OWN COMMANDS
+You can't change their tree except by recording what they show. When they
+ask for something dum does, name the command in one line:
+  dum --reset             start the skill tree over (the old one is kept aside)
+  dum --forget "<skill>"  take one skill off
+  not yet                 undo the skill you just checked off
+  dum --learn "<topic>"   a project designed to learn a topic
+  dum --skills, :graph    see the tree
+  :help                   everything else
+
 HOW TO INTERROGATE
 - One decision per question. If it contains "and" or a parenthetical
   follow-up, it is two questions - split them, or drop the weaker one.
@@ -446,6 +463,9 @@ const WIZARD_WAIT = 2500;
 
 /** How long a hole sits on screen before dum fills it or leaves it. Long enough to read the marker. */
 const FLASH_MS = 900;
+
+/** The most code one fill may carry. One concept, not a function's worth of them. */
+const FILL_MAX_LINES = 12;
 
 /** A fill types itself in over this long, scaled to its length. */
 const FILL_MIN_MS = 700;
@@ -873,7 +893,20 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
             handedOff = false;
             store.toolEvent("hole", `${path}: ${t.concept}`, "held");
-            return say(`"${t.concept}" isn't known on their tree, so the hole stays for them to type. Don't write it any other way.`);
+            const lang = skills.langOf(path);
+            const why = lang && !skills.spoken(skills.read(), lang)
+              ? `They haven't shown anything in ${lang} yet, so every line of ${path} is theirs until they do - even ideas they hold.`
+              : `"${t.concept}" isn't known on their tree${lang ? ` for ${lang}` : ""}, so the hole stays for them to type.`;
+            return say(`${why} Don't write it any other way.`);
+          }
+          // A fill is one concept's worth of code. Anything bigger is several
+          // things under one name - it once carried a whole main() in under
+          // a skill they held.
+          const size = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
+          if (size > FILL_MAX_LINES) {
+            return say(
+              `That's ${size} lines under one concept - at most ${FILL_MAX_LINES}. Split the block into holes, one concept each: whatever it also leans on (includes, printing, loops, a class shell) is its own hole, and those stay theirs unless they're on the tree.`,
+            );
           }
           const filled = todos.fill(body, args.concept, args.code);
           if (filled === null) return say(`Couldn't find the block for that in ${path}.`);

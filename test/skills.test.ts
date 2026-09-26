@@ -298,7 +298,9 @@ test("a skill about one language only counts in that language", async () => {
   assert.equal(find(t, "for loops")!.lang, "python");
   assert.ok(holdsIn(t, "for loops", "a.py", A));
   assert.ok(!holdsIn(t, "for loops", "main.cpp", A), "python's for loops don't write c++'s");
-  assert.ok(holdsIn(t, "recursion", "main.cpp", A), "ideas carry across languages");
+  assert.ok(!holdsIn(t, "recursion", "main.cpp", A), "nothing shown in c++ yet: every line is theirs");
+  t = note(t, e("c++ includes", { lang: "cpp" }), A);
+  assert.ok(holdsIn(t, "recursion", "main.cpp", A), "once they've shown some c++, ideas carry across");
   assert.ok(holdsIn(t, "for loops", "notes.md", A), "not source: no language to disagree with");
   assert.equal(langName("cpp"), "c++");
   assert.equal(langOf("src/x.hpp"), "c++");
