@@ -4,28 +4,67 @@ My custom agentic environment with a tighter development leash.
 
 ![dum-intern: the file tree on the left, a C++ guessing game with one TODO(dum) gap in the middle, and the wizard and dum on the right above the conversation](docs/screenshot.png)
 
-It interrogates me before it builds anything. Nothing gets written until I approve a spec made out of my own answers.
+It interrogates me before it builds anything, and nothing gets written until I approve a spec made out of my own answers. Then it builds around what I can't do yet and leaves that part for me.
+
+The bet: a coding agent makes it easy to ship code I can't explain, and I only find out when something breaks. dum keeps a tree of what I've actually shown I understand. It builds on that without asking, and anything I don't hold yet becomes a small gap for me to type or explain. The questions shrink as I learn instead of staying flat.
 
 
-### Understand everything, by default
+### Quickstart
+
+Node 22.6+ and the `claude` CLI logged in. No build step, no API key.
+
+```sh
+npm install
+npm link        # puts `dum` on your PATH
+cd some-repo    # dum works inside a git repo
+dum
+```
+
+An empty tree says how to fill it on the first screen. `dum --help` lists the commands, and `:help` inside dum lists the rest.
+
+
+### The loop
+
+1. **Ask.** "add a mode function to stats.py", or "teach me vectors in C++".
+2. **Explain.** The intern asks about the parts that aren't on my tree, one question at a time. `idk` gets a lesson. `type it` means I'll write that part.
+3. **Approve.** A short spec: what I'll have, what I type, what I decided. `y` builds it.
+4. **Fill the gaps.** Pieces on skills I hold get filled in front of me. The rest are `TODO(dum)` holes. I type one and say `done`, or explain it and dum fills it. Passing puts the skill on the tree.
+
+
+### The screen
+
+Three places, one rule each.
+
+- **The input**, at the bottom, is where I type, always. Its grey placeholder says what typing does right now. With the file showing, the prompt is `>` and I'm talking to dum, though `cd`, `gcc` or `./guess` still go to the shell. With the shell showing, the prompt is `$` and everything runs there, like any terminal. dum's own words (`done`, `go`, `idk`) still reach dum. A program waiting for input turns the prompt into `guess ›`, and `ctrl-c` stops it. It only quits dum when nothing's running.
+- **The middle** is code: the file, or the shell. `shift-tab` flips between them, and so does clicking the `file` / `shell` tabs. The shell is my own `$SHELL` in a pty, kept for the session, so `cd` and history stick.
+- **The right** is the characters: faces side by side, and the whole conversation under them, newest at the bottom. Nothing scrolls away when I look at the shell. Something too big for the thread, like the spec, a lesson or help, takes over as a board until it's answered, or `esc`.
+
+`tab` moves between the input, the file and the tree, and clicking a pane does the same. The trackpad scrolls whatever's under the pointer. That needs the terminal's mouse reporting, so plain drag-to-select becomes Option-drag (iTerm, Terminal.app) or shift-drag elsewhere.
+
+When dum has something to say about one line, it pins a live comment beside it rather than describing where to look. It's never saved to the file, and it clears on the next turn:
+
+```
+  3 const LEASE_MS = 30_000;  ◂ 30s: long enough for a slow job to finish
+```
+
+The file is a vim-ish buffer: `i` types, `:w` writes, `/` finds. It's for fixing the thing I just watched get written, not for living in. My edits are mine. Saving isn't a tool call and the intern isn't told.
+
+
+### Two modes
 
 ```sh
 dum "print hello world in rust"       # understand everything (default)
 dum -a "print hello world in rust"    # anti-vibe
 ```
 
-The mode sets how much I have to explain myself.
+Understand-everything means what, why, and how. The first time I ask for hello world in Rust, it asks about the `!` in `println!`. The second time it doesn't, because that's on my tree now.
 
-Understand-everything means what, why, and how. The first time I ask for hello world in Rust, it asks what the `!` in `println!` means. The second time it doesn't, because by then that's on my skill tree.
-
-Anti-vibe drops the how. I own the intent, the intern owns the mechanics. It only stops me when the intent has a hole.
-
-Anti-vibe used to be the default. Understand-everything asked about everything, every time, and a tool that interrogates me over a one-line change is one I turn off in a week. The skill tree is what makes it livable: the questions shrink as I learn instead of staying flat.
+Anti-vibe drops the how. I own the intent, the intern owns the mechanics, a new language's syntax included. No holes unless I say `type it`.
 
 
 ### The skill tree
 
-Every concept I explain, or get taught, lands on one tree in `~/.dum/skills/`. It follows me across repos, and it never goes in any repo.
+Every concept I explain, type, or get taught lands on one tree in `~/.dum/skills/`. It follows me across repos and never goes in one.
 
 ```
 $ dum --skills
@@ -35,518 +74,112 @@ $ dum --skills
     ● visibility timeout
       ● leases
   · heartbeats  not shown yet
-    ● leases  ↑ above
-  · hmac  not shown yet
-    ● stripe webhook signing  niche
+  ◐ for loops  python only
 ```
 
-`●` is known. I explained it, so the intern builds on it without asking. `◐` is claimed: I say I have it, dum hasn't seen it yet. `○` is shaky: it had to teach me, or I got it wrong. A quick check on those is fair. `·` is something a skill builds on that I haven't touched yet. That's the frontier.
+`●` known: I showed it, so the intern builds on it. `◐` claimed: I say I have it and dum hasn't seen it, so the first build that leans on it checks once. `○` shaky: I was taught it or got it wrong. `·` is something a skill builds on that I haven't touched, which is the frontier.
 
-Nobody curates the edges. When the intern records a skill it names what the skill builds on, so the tree grows into the shape of what I actually build.
+- **Mine to edit.** Each skill is a markdown note with `[[links]]` for what it builds on, so `~/.dum` opens as an Obsidian vault. `:skill for loops in python` adds one, `:skill -recursion` takes one off, `dum --add "structs" --in c` works outside a session. The rule, shown every time: only add what I can write from a blank file, completely without AI.
+- **Per language.** "range-based for" is C++ only. Python's for loops fill nothing in a `.cpp` file. Ideas like recursion carry across, but a language I've shown nothing in gets no fills at all.
+- **Honest about mistakes.** Every new skill shows as `+ skill: <name>`, and `not yet` right after takes it back for the session. A general skill goes stale after a year and a niche one (one library's quirk, counted only in its repo) after two months. Stale ones get one quick check.
+- **One idea, one node.** "Leases" and "lease" are one skill. Near-misses like "SQS visibility timeout" get caught before they're recorded, and the intern says whether it's the same idea. It isn't a merge, because "rust macros" and "rust procedural macros" pass the same word test and are different things.
+- **Seeded from real work.** `dum --scan ~/code/old-cli` reads projects I wrote by hand and lists concepts with the line that shows each. I drop what isn't mine and the rest lands as claimed. `dum --reset` starts over, with the old notes moved aside.
 
-General skills count everywhere. Idempotency is idempotency in every repo. Niche ones, like one library's webhook signing, only count in the repo where I showed them. Anywhere else they get one short check, because one-off knowledge fades.
-
-There's no level. It used to be a ladder: prove 2 topics and you're "trusted", 6 and you're "senior". Six easy topics bought the same rope as six hard ones. Now it's per skill. Fewer questions on the parts of a request I already hold, normal questions on the rest.
-
-A wrong "known" is the worst bug this thing can have. It's a question that never gets asked again. So every new one shows up as `+ skill: <name>` while it's fresh, and `dum --forget "<name>"` takes it back off.
-
-Skills go a bit stale. Something general I proved over a year ago, or something niche over two months ago, gets one quick check if a build leans on it. Explaining it again resets the clock.
-
-One idea should be one node. "Leases" and "lease", or "Rust macros (macro_rules!)" and "rust macros", land on the same skill. Near-misses like "SQS visibility timeout" next to "visibility timeout" get caught before they're recorded, and the intern has to say whether it's the same idea. It's deliberately not a merge: "rust macros" and "rust procedural macros" pass the same word test and are different things.
-
-It doesn't buy skipping the spec. Nothing does.
+`dum --graph` draws the tree and the project queue in the browser: Graphviz boxes like the Rust project's skill-tree, with Obsidian's hover and click. It's one offline file, `~/.dum/graph.html`, and `#open=<id>` on its URL opens a note directly.
 
 
-### It's notes, and they're mine
+### Holes, and how big they are
 
-Each skill is a markdown note. "Builds on" is a `[[link]]`, so the folder opens as an Obsidian vault and the graph view draws the tree. A skill nobody's recorded yet is an unresolved link, which Obsidian already draws as a grey node.
+In understand mode, code only enters a source file through a `TODO(dum)` hole. The intern writes the shape and hands dum the code for each block, and dum decides from my tree whether to fill it:
 
-```markdown
----
-name: module-relative file paths
-state: solid
-breadth: general
----
-
-They read `pathlib.Path(__file__).parent` correctly as the directory containing the file.
-
-builds on: [[python main guard]]
+```
+  · Write  stats.py
+  ✓ fill  stats.py: median  (a skill you hold)
+    │     s = sorted(xs)
+    │     mid = len(s) // 2
+  ▌ hole  stats.py: frequency counting  (yours to type)
 ```
 
-I can fix a wrong one, delete one, or write one. A note I write myself counts as claimed, not known, and so does one with no frontmatter at all. The file name is the skill.
+A fill types itself into the highlighted block, and the transcript keeps the code. Skipping a skill I hold means not retyping it, never not seeing it. A hole I type gets reviewed on `done`. A miss gets a question, never the fix: "secret 50, you type 30, and it says 'too high'. Is 30 bigger than 50?" A hole I explain in plain words gets filled once the explanation holds up. Open holes live in `.dum/todos.json`, and the next `dum` opens on them.
+
+Holes are what the research calls [completion problems](https://www.uky.edu/~gmswan3/544/Cognitive_Load_&_ID.pdf) (van Merriënboer & Krammer, 1987): working code with a part missing. Their size follows the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003). Given code helps novices and gets in experts' way, so the gaps [fade](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6) wider as I get better. My level counts the skills tagged with a language plus the ones I've typed in it:
+
+| Level | Skills in the language | Biggest gap | Gaps per request | Around it |
+| :--- | :--- | :--- | :--- | :--- |
+| novice | 0-2 | 1-3 lines | 1 the first time, then 2 | dum writes the scaffolding |
+| developing | 3-9 | 8 lines | 3 | dum writes the rest |
+| fluent | 10+ | any | 4 | every line goes through a hole |
+
+The gate measures the code proposed for a hole and sends back one too big for my level. Four is the ceiling because working memory holds [about four chunks](https://philpapers.org/rec/COWTMN) (Cowan, 2001). An idiom I haven't seen, like `while (std::cin >> x)`, is shown working in the scaffold first, then a gap can use it. The words under a gap fade too: exact steps at the start, then what it must do, then only the goal.
+
+A request well above my tree doesn't get built as asked. "Teach me vectors in C++" with no C++ on the tree got "want to start with a tiny program that reads numbers and prints the biggest, then vectors?", then one screen of C++ with one gap, a single `if`. That's [mastery learning](https://en.wikipedia.org/wiki/Mastery_learning) and the [4C/ID model](https://www.4cid.org/wp-content/uploads/2021/04/vanmerrienboer-4cid-overview-of-main-design-principles-2021.pdf): prerequisites first, whole tasks from simple to complex. It only works if the tree is right, which is why it's mine to edit: "the most important single factor influencing learning is what the learner already knows" ([Ausubel, 1968](https://www.simplypsychology.org/expository-method-of-teaching.html)).
 
 
-### The graph
+### Asking good questions
+
+The intern plans no list. It asks one question, reads the answer, and the next grows out of it. Most requests need zero to three. Plain words count as an explanation, a vague answer gets re-asked, and a wrong one gets called out in a line and goes on as shaky. Two `idk`s in a row and it stops asking and explains after the build.
+
+While the tree is small it asks to be taught ("how does print get the text onto the screen?"), because students work harder for a teachable agent ([Chase et al., 2009](https://doi.org/10.1007/s10956-009-9180-4)). It also prefers predictions ("does `1..=10` stop at 9 or 10?"), because a wrong guess followed by the answer sticks better than being told ([Kornell, Hays & Bjork, 2009](https://pubmed.ncbi.nlm.nih.gov/19586265/)).
+
+"Recommend me a project" gets a recommendation in a few lines, not a build.
+
+
+### The wizard
+
+Two voices. Questions come from the intern. The wizard only speaks about an answer I already gave, so it can't answer a pending question for me.
+
+```
+  > another worker should pick it back up after a while if the first one dies
+  wizard: that's a visibility timeout - the mechanism SQS and most job queues use for exactly this.
+```
+
+- **It names things.** The real name for what I described is the thing I go look up after, so a wrong name is worse than none.
+- **It nudges with a question.** "what does 0.1 + 0.2 give you as a float?" Every line is tagged `fact:` or `nudge:`, and a nudge whose first sentence isn't a question gets dropped in code.
+- **A second session checks every line** against what I actually said before I see it. `npm run eval:checker` scores it: the last run dropped 45/45 bad lines and kept 45/45 good ones.
+- **It looks things up.** Not recognising something is a reason to search, not an answer. `?` questions search too.
+- **It doesn't see the intern's question**, because with it, it answered the question instead of what I said.
+- **Sonnet, thinking off, effort medium.** Haiku got names wrong; Sonnet got them right at the same wall time. `npm run eval:wizard` measures it.
+
+Each voice shows its model and effort beside its name, read from the running session: `dum opus 5.5 · high`, `wizard sonnet 5 · medium`. The intern follows my own default model and `/effort`. Planning and rebuild reading run on Opus at high, the rest on Sonnet.
+
+
+### Learning on purpose
 
 ```sh
-dum --graph
+dum --learn "websockets"              # a small project around one topic, in ./learn-websockets
+dum --queue "a multiplayer game server"   # the steps up to a goal, planned against my tree
+dum --next                            # one small project for the fastest next unlock
+dum --rebuild ~/code/hysa             # rebuild something I have, from scratch
 ```
 
-The tree and the queue as one picture, in the browser. The layout copies the Rust project's skill-tree: Graphviz boxes top to bottom, each project a group of the skills it unlocks, with a box to tick for each, climbing from what's done toward the goal. A goal and its steps share a frame. Skills no project covers sit in "your tree", and prerequisites nobody's recorded are dashed.
+- **`--learn`** designs a project where the topic is the only new thing, and says how much I already hold: "you hold 5 of 14 skills (36%)". `go` takes the next feature, each under 30 minutes.
+- **`--queue`** maps what a goal rests on and turns every tier below it into stepping-stone projects, an evening each. A project is done when its skills are on my tree, so there's nothing to tick off. `--projects` shows the queue and `--plan` plans goals I wrote into `~/.dum/projects/` by hand.
+- **`--rebuild`** turns a project into milestones in a fresh repo beside it. The original is outside the repo, so the intern can't copy it. A milestone is built when its holes are.
 
-The interaction copies Obsidian's graph. Drag to pan, scroll to zoom, hover to light up what a node touches. Click to read the note: the brief, what it unlocks, what it comes after, the `dum` command that starts it, and a link that opens the note in Obsidian. `#open=<id>` on the URL opens one directly.
-
-It's one file, `~/.dum/graph.html`. Graphviz runs in Node as WebAssembly and the SVG goes in already laid out, and the pan-and-zoom script is inlined from `node_modules`. Nothing loads from a CDN, so it opens offline.
-
-
-### Claiming what I already had
-
-An empty tree means dum asks about everything, including things I knew before dum existed. So I can point it at projects I wrote by hand:
-
-```sh
-dum --scan ~/code/old-cli ~/code/raytracer
-```
-
-It reads them and lists the concepts the code actually rests on, each with the line that shows it. I drop what isn't mine (a vendored library, a file a friend wrote), and the rest lands as claimed.
-
-Claimed isn't known. Nobody watched me write that code. The first build that leans on a claimed skill gets one short check, and passing it makes it known. Something dum already judged in a session is never touched by a scan. A skill I fumbled in front of it stays shaky however much of it my old code uses.
-
-`dum --reset` starts the tree over. The old notes get moved aside, not deleted.
+The tiers are counted in code. The model only maps what builds on what.
 
 
-### A shell, and no chords to collide with
+### Taste, and scenarios that check it
 
-Learning a language includes running it, so the stage has a shell page next to the file, the reply and the log. It's my own `$SHELL` with my own prompt, running in the repo, started the first time I open it and kept for the session, so `cd`, history and env stick. `!` opens it from anywhere. Shell commands typed into the input go straight there with no `!`: `cd src`, `touch main.c`, `echo hi`, `gcc -o hi hi.c`, `./hi`, `git status`. A few commands are also words (`make`, `cat`, `rm`), and those only count when what follows looks like shell, a path or a flag, so "make it faster" is still an answer. Anything else takes a `!`. While it has focus every key is the shell's: Tab completes, ctrl-c interrupts, interactive programs read their input. `shift-tab` is the one key that isn't, and it takes me back to the input.
+`~/.dum/taste.md` holds rules in my own words, like "at the start the gaps are really small". The intern reads it every session, and `:taste <rule>` adds one mid-session.
 
-It's [node-pty](https://github.com/microsoft/node-pty) running the shell and xterm's headless emulator keeping the screen, so it behaves like the terminal it's inside.
-
-`:run` runs the open file for languages where that's one obvious command: python, node, ruby, go. For C, C++ and Rust it doesn't compile anything. It shows the line to type, because typing the compiler line is part of learning the language.
-
-dum's commands are typed, not chorded, and there are few of them: `:run`, `:log`, `:skill`, `:taste`, `:help`, like vim's ex line, and they work on the file pane's `:` line too, next to `:w`. `ctrl-g` belongs to a browser extension and `ctrl-e` to every shell's end-of-line, so the input gets readline's keys and dum takes none. The one global chord left is ctrl-c.
-
-What runs in the shell is mine. The intern doesn't see it.
-
-
-### Code in the middle, the characters on the right
-
-Three places, one rule each:
-
-- **The input** at the bottom is where I type, always, and its grey placeholder says what typing does right now. With the file showing, the prompt is `>` and I'm talking to dum, though `cd`, `gcc` or `./guess` still go to the shell. With the shell showing, the prompt is `$` and everything I type runs there, like any terminal. dum's own words (`done`, `go`, `idk`) still reach dum. When a program is waiting for input the prompt becomes `guess ›`, and `ctrl-c` stops it. It only quits dum when nothing's running.
-- **The middle** is code: the file, or the shell. `shift-tab` flips between them, into the terminal and back out, and so does clicking the `file` / `shell` tabs.
-- **The right** is the characters: their faces side by side, and the whole conversation under them, newest at the bottom, scrollable with the trackpad. Nothing scrolls away when I look at the shell. When dum says "run `g++ guess.cpp`", it's still there while I do. Something too big for the thread, like the spec to approve, a lesson or help, takes over the right panel as a board until it's answered, or `esc`.
-
-`tab` moves between the input, the file and the tree, and clicking a pane does the same.
-
-When dum has something to say about one line of code, it pins a live comment to it instead of describing where to look:
-
-```
-  3 const LEASE_MS = 30_000;  ◂ 30s: long enough for a slow job to finish
-```
-
-It sits beside the line and is never saved to the file. A line too long to leave room puts its comment on the file's status row, with the line number. Comments clear when the next turn starts.
-
-
-### A trackpad that scrolls
-
-The trackpad scrolls the pane under the pointer, focused or not. Full-screen programs don't get that for free: without mouse reports the wheel does nothing, and inside tmux it scrolls tmux's history instead. So dum turns on the terminal's standard mouse reporting and takes the reports out before Ink sees them, or they'd be typed into the input as `[<65;40;12M`. Ink 7 has no mouse support, and the one Ink mouse library targets Ink 5, so this piece is dum's own.
-
-The cost is plain drag-to-select. Option-drag (iTerm, Terminal.app) or shift-drag (most others) still selects text, and in tmux selection is tmux's anyway.
-
-
-### Starting where I am
-
-"Teach me vectors in C++" with nothing on my tree used to get built as vectors in C++. Now the intern holds a request against my tree in its language first. If the request rests on things I haven't done, it says so in one line and offers the first rung: one small, whole program at my level that leads toward it. For that request it offered "a tiny program that reads numbers and prints the biggest, and vectors as the next step", and built this:
-
-```cpp
-int x;
-while (std::cin >> x) {
-    // TODO(dum): running maximum
-    // if x is larger than biggest, biggest becomes x
-}
-```
-
-One screen, and one gap: a single `if`. The idiom I couldn't have worked out cold, `while (std::cin >> x)`, is given and working, so the next gap can use it. The spec's "not doing" line says "storing the numbers - that's what vectors will add".
-
-This follows [mastery learning](https://en.wikipedia.org/wiki/Mastery_learning) (prerequisites before what builds on them) and the [4C/ID model](https://www.4cid.org/wp-content/uploads/2021/04/vanmerrienboer-4cid-overview-of-main-design-principles-2021.pdf) (whole tasks, simple to complex). Beginners get guidance, not discovery. Minimal guidance [works worse for novices](https://www.tandfonline.com/doi/abs/10.1207/s15326985ep4102_1).
-
-It only works if the tree is right. "The most important single factor influencing learning is what the learner already knows. Ascertain this and teach him accordingly" ([Ausubel, 1968](https://www.simplypsychology.org/expository-method-of-teaching.html)). So the tree is mine to edit:
-
-```
-:skill for loops in python     add one, in a session
-:skill -recursion              take one off
-dum --add "structs" --in c     from the command line
-```
-
-The rule, shown every time: only add what I can write from a blank file, completely without AI. What I add counts toward my level right away, and gets one quick check the first time a build leans on it. An empty tree says all this on the first screen.
-
-
-### Small enough to hold
-
-A hole is what the research calls a completion problem: working code with a part missing, which I finish. Completion problems were proposed for teaching programming by [van Merriënboer and Krammer in 1987](https://www.uky.edu/~gmswan3/544/Cognitive_Load_&_ID.pdf). They beat plain worked examples because you can't skim the given part and still fill the gap.
-
-The limits come from the same line of research, and dum keeps them in code:
-
-- **Four new things per request.** Working memory holds [about four chunks](https://philpapers.org/rec/COWTMN) (Cowan, 2001). The gate refuses a fifth hole in one request, and the intern splits the build instead of merging blocks, which would be the same load in bigger pieces.
-- **Small steps, at my pace.** People learn more from [learner-paced segments](https://link.springer.com/article/10.1007/s10648-018-9456-4) than from one continuous unit (a meta-analysis of 56 studies). Features stay under 30 minutes and milestones under 45, and nothing moves on until I say `go`.
-- **One concept per hole, twelve lines per fill.** Nothing big rides in under one name.
-
-And the gaps fade. Worked examples help novices most, and they stop helping, or hurt, once you know the material. That's the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003), and the fix it points to is [fading](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6): start with most of the code given and small gaps, then widen them. dum used to do the reverse, all holes for an empty tree, which made a beginner's first task the hardest version of it.
-
-So the size of a gap depends on my level in that language. That counts the skills on my tree tagged with the language, plus the ones I've typed in it by filling a hole. Explaining an idea in words doesn't count toward a language, since it isn't C++ I wrote:
-
-| Level | Skills in the language | The gap | Around it |
-| :--- | :--- | :--- | :--- |
-| novice | 0-2 | 1-3 lines, the core of the concept | dum writes the scaffolding |
-| developing | 3-9 | up to 8 lines, a small function body | dum writes the rest |
-| fluent | 10+ | any size | every line goes through a hole |
-
-The gate measures the code the intern hands it for a hole, and sends back a gap that's too big for my level. The number of gaps grows the same way. The first request in a language gets one, and once I've solved it more can come, up to four once I'm fluent. The words under a gap fade too: exact steps at the start, then what it must do, then only the goal.
-
-The spec I approve is short on purpose. The intern fills in one-line fields (what I'll have, what I type, what I decided, what's left out, how to run it) and dum lays them out. It used to write the spec as free markdown, and my terminal showed it as a wall of raw tables and nested lists. Asked for a tiny vector class with no C++ on my tree, it wrote the class, `main` and the printing, and left two gaps: the grow condition in `push_back`, and copying into the new block and freeing the old one. It compiled as given.
-
-
-### My taste, and scenarios that check it
-
-dum should get better at being what I want, and I should be able to see whether it has. Two pieces.
-
-**Taste.** `~/.dum/taste.md` holds rules in my own words: "at the start the gaps are really small", "don't talk about dum's internals". The intern reads it every session. `:taste <rule>` adds one from inside a session, and it applies right away. It's my file, so it lives in `~/.dum` and never in the repo.
-
-**Scenarios.** `scenarios/*.json` are scripted sessions: a request, a skill tree, how to answer the questions, sometimes code to type into the first hole. Each one exists because dum got something wrong once. "Recommend me a project" used to build one. A C++ file used to get filled from Python skills.
-
-```sh
-npm run eval:scenarios              # all of them
-npm run eval:scenarios -- recommend # the ones whose name matches
-```
-
-Each scenario runs as a real session in a throwaway repo, with my real taste file copied in. Code checks the facts: questions before the spec, holes and fills, how much code dum wrote, how long its reply was, comment runs, and phrases it must never use. A judge on Sonnet then scores the transcript 1-5 against my taste and quotes the rules it broke. Results go to `~/.dum/evals/`, and each run prints what got better or worse since the last one.
-
-So the loop is: I react to something, it becomes a taste rule or a scenario, and the next change to dum has to hold up against both. Every bug from the session that produced this section would have been a failing check.
+`scenarios/*.json` are scripted sessions, each written from a real mistake. `npm run eval:scenarios` runs them in throwaway repos, checks facts in code (questions before the spec, holes, fills, reply length, comment runs), and has a judge score each transcript against my taste. Results go to `~/.dum/evals/`, compared with the last run. When I react to something, it becomes a taste rule or a scenario.
 
 
 ### Short, on purpose
 
-This is closer to a game than a document, and every long message is a turn I stop playing. The rules come from [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md), and they're kept in code wherever code can keep them:
-
-- **Where I am is always on screen.** `feature 2/9 ▰▱▱▱▱▱▱▱▱` in the header, and on its own line at every prompt in plain mode, with the open holes.
-- **One next action, and dum says it.** "next up: … say go", "your turn: … type it and say done, or explain it here". The intern doesn't have to.
-- **Wins show.** Every `✓ feature 3 of 9 ▰▰▰▱▱▱▱▱▱` moves the bar.
-- **Numbers, not "a bit of work".** Every feature, milestone and project comes with minutes, and none is allowed over 45.
-- **What dum says fits in working memory.** The pane shows six lines and points at `:log` for the rest.
-- **Lists stop at five.** The rest is a count.
-
-The intern's prompt carries the rest. After a build it gets three lines: what runs now, where my holes are, and nothing else. It doesn't recap, list the files, or write a "still open" essay. The spec's sections are five bullets at most, and a section with nothing real in it is left out. Lessons and `?` answers are two or three sentences.
-
-
-### Not too strict
-
-The intern used to over-ask. Now it's told most requests need zero to three questions, and that plain words count as an explanation. I don't need the jargon, I need to clearly get it.
-
-It still holds me to it. A vague answer gets re-asked. A wrong one gets called out in one line and goes on the tree as shaky.
-
-Two `idk`s in a row on one request and it stops asking. It writes the spec and explains the rest after the build. A third question at that point is a wall, not a check.
-
-
-### First sessions
-
-An empty tree is the worst moment for this tool. Everything is new, so everything is a question, and a first session that feels like an exam is the last one.
-
-So while the tree has fewer than five skills, the intern changes how it asks. The bar doesn't move.
-
-- It asks to be taught. "how does print get the text onto the screen?" instead of "explain print". The intern is a junior, and I'm the one teaching it. Students put more effort in for a teachable agent than for themselves, and the gain was biggest for the ones who started furthest behind ([Chase et al., 2009](https://doi.org/10.1007/s10956-009-9180-4)).
-- It opens with the real question I'm most likely to get right.
-- It prefers questions I can answer by predicting. "does `1..=10` stop at 9 or 10?" A wrong guess followed by the answer sticks better than being told outright ([Kornell, Hays & Bjork, 2009](https://pubmed.ncbi.nlm.nih.gov/19586265/)).
-- One or two questions on a first request. The rest waits for the next one.
-- The first question says `idk` is a fine answer, once.
-
-On a fresh tree, "add a done command" to a tiny todo CLI got exactly one question: "`list` prints todos as 1., 2., 3. If you run `todo done 2`, which array index does that need to touch?" That's the one real trap in the build, asked as a prediction.
-
-
-### Projects to climb toward
-
-The tree says what I hold. A project I want to build can sit far above it. A browser multiplayer game rests on websockets, which rest on HTTP and TCP, which rest on things I may never have touched. dum won't build what I can't explain, so a goal eight tiers up is a goal I can't start. Unless something walks me up to it.
-
-```sh
-dum --queue "a multiplayer game server for a tiny browser tag game"
-```
-
-```
-  ✓ a multiplayer game server for a tiny browser tag game: 8 tiers above your tree, so 12 steps first.
-
-  ▶ turn based tag in one terminal  client-server model, event loop, game state modeling
-    start: dum "..."
-  ▶ vector bumper toy  2d vectors
-  · async tcp tick counter  tcp sockets, async await, game loop
-  · websocket drift box  websockets, json encoding, movement integration
-  ...
-```
-
-A model maps what the goal rests on, down to my tree. The tiers are counted in code: what I hold is tier 0, anything else is one above the highest thing it builds on. Each tier below the goal becomes stepping stones, three skills at most, an evening each. A step only waits on another when one of its skills builds on one of the other's, so separate branches can be climbed in any order.
-
-Nothing gets ticked off by hand. A project is done when the skills it unlocks are on my tree, and ready when what it comes after is done. Explaining something, or typing it into a hole, is what moves the queue.
-
-The queue is a folder of notes in `~/.dum/projects/`, beside the skills, so one Obsidian vault on `~/.dum` links projects to skills. A markdown file I drop in there by hand is a goal too, and `dum --plan` plans it.
-
-`dum --next` is the short version: one small project that unlocks the next skill fastest. It goes for what my queue's ready steps need, then what I've been taught but haven't shown, then prerequisites my tree names but nobody's recorded. `dum --next 3` gives three.
-
-Planning runs on Opus, not the Sonnet the voices use. It runs once, and everything after follows the map it draws. A wrong prerequisite is a project I get sent to build for nothing.
-
-
-### Asking to learn something
-
-```sh
-dum --learn "websockets"             # into ./learn-websockets
-dum --learn "websockets" ~/chat      # or anywhere empty
-```
-
-The fastest way to learn one thing is a project where it's the only new thing. So the designer reads my tree first and builds around what I already hold. The questions, holes and fills all land on the topic, not on whatever's around it.
-
-```
-  ✓ live chat room  A tiny Python websocket chat server and terminal client...
-
-   1  Start a websocket server that echoes back whatever a client sends.
-   2  Write a terminal client that connects, sends a typed line, and prints the reply.
-   ...
-
-  you hold 5 of the 14 skills it rests on (36%). those get filled in front of you.
-  already yours: http request-response, json encoding, python dictionaries, ...
-  new to you: asyncio basics, websocket handshake, websocket connection lifecycle, ...
-```
-
-Nothing about what I know is assumed. The percentage is counted against my tree in code, and the design is asked to list the skills of mine it uses by their tree names. The folder runs like a rebuild: `go` takes the next feature, and a feature is done once its holes are.
-
-No stepping stones, unlike a queued goal. Learning fast means the gaps get handled inside the project.
-
-
-### A new language starts from nothing
-
-A skill can belong to one language. "range-based for" is C++, "list comprehensions" is Python, and the tree marks them `c++ only`, `python only`. One of those only counts in files of its language, decided in code from the file's extension. So knowing Python's for loops fills nothing in a `.cpp` file.
-
-Ideas that carry across languages don't get a language. Recursion, hash maps and idempotency count everywhere. Asked for a recursive factorial in C++ by someone who knew Python's printing and loops and knew recursion, dum filled the recursive function and left the `#include` and the `std::cout` line as holes.
-
-That's understand mode. In anti-vibe a new language's syntax is the intern's, same as any other mechanics.
-
-
-### Explaining a hole fills it
-
-A hole doesn't have to be typed. At "your turn" I can explain the concept in plain words instead:
-
-```
-  your turn: websocket persistent connection in server.py
-  > unlike an http request, the websocket stays open after the handshake, so the handler
-    just loops over the connection: for each message, await sending it straight back...
-  + skill: websocket persistent connection   (not yet keeps it off)
-  ✓ fill  server.py: websocket persistent connection  (a skill you hold)
-    │     async for message in websocket:
-    │         await websocket.send(message)
-  ✓ feature 1 of 9: Start a websocket server that echoes back whatever a client sends.
-```
-
-The intern judges it like any answer. If I've got it, the skill goes on the tree, and since dum only fills what the tree holds, it now fills the hole, typed in where I can watch. If I'm close, I get one question. It works on any later turn, because the spec that left the hole was already approved. So if I hold half a project, that half fills as it's built, and the other half fills as I explain it.
-
-
-### Rebuilding what I already have
-
-Having a project isn't the same as being able to explain it. Especially one I wrote fast, or with a model's help.
-
-```sh
-dum --rebuild ~/code/hysa            # into ~/code/hysa-rebuild
-dum --rebuild ~/code/hysa ~/rebuilt  # or anywhere empty
-```
-
-Opus reads the original and turns it into milestones, each a short request to dum, starting from the smallest thing that runs. It's also a goal like any other: mapped, tiered against my tree, and anything far above it gets stepping stones in the queue. The target gets `git init`, and `dum` there opens on the next milestone. `go` starts it.
-
-The original stays out of reach. The rebuild is its own repo, and the intern's path gate refuses anything outside it. The only ways code gets there are the usual ones.
-
-Skills I hold can be skipped. A piece that rests on one gets filled, and I don't retype what I've already shown. Skipped doesn't mean unseen, though. A fill types itself into the highlighted block at a pace I can follow, and the transcript keeps the code, not just a line saying it happened:
-
-```
-  ✓ fill  stats.py: median  (a skill you hold)
-    │     s = sorted(xs)
-    │     mid = len(s) // 2
-    │     ...
-  ▌ hole  stats.py: multimodal data  (yours to type)
-```
-
-A milestone isn't built until its holes are. Writing the skeleton doesn't count, and the last hole passing review does.
-
-
-### The intern asks, the wizard tells
-
-Two voices. Questions I have to answer come from the intern. The wizard only fires on an answer I already gave, so it can't answer a pending question for me.
-
-
-### The wizard talks without being asked
-
-```
-  > another worker should pick it back up after a while if the first one dies
-
-     │ 🧙 that's a visibility timeout - the mechanism SQS and most
-     │    job queues use for exactly this failure case.
-```
-
-When something I said has context attached, it mentions it. The real name for what I described, what does it in industry, how experienced engineers usually do it.
-
-Naming things is the most useful thing it does. The name is what I go look up after.
-
-"Senior engineers usually put the idempotency key in a unique index" is a suggestion dressed as a fact. The wizard is a persona with no career, so that only works if it's actually standard practice. It's told to spend that credibility only on things that are.
-
-
-### Nudges
-
-```
-  > i'll just store the amounts as floats in dollars
-
-     │ 🧙 what does 0.1 + 0.2 give you as a float? money usually
-     │    lives in integer cents to avoid rounding errors.
-```
-
-When I say something wrong, it asks the question that makes me run the case in my head, then points at where the answer lives.
-
-I built the wizard as a critic first. It was worse. Criticism makes you stop and deal with it, so it can only fire rarely. A nudge I can work out in two seconds is closer to trivia than to a code review.
-
-The question has to come first. Opening with the answer does the thinking for me. Asked nicely in the prompt, it still opened most corrections with the answer. So now the wizard tags every line `fact:` or `nudge:`, and a nudge whose first sentence isn't a question gets dropped in code. Dropping one is cheap, since the intern pushes back on wrong answers by itself.
-
-
-### A second opinion on every line
-
-The wizard's value is being right, and asking it harder to be right stopped working. In a real session it told me `println!` was "monomorphization" right after I'd explained it was a macro. In evals it said "yeah, `..=` is inclusive" to someone who'd just called it exclusive, which reads as agreeing with the mistake.
-
-So a second session reads every line against what I actually said before I see it. It doesn't write lines and has no stake in them. It first decides whether I was right, then checks the line: accurate claims, the standard name for exactly what I described, and no orders aimed at me. A `fact:` about a wrong answer gets dropped in code, since it's either agreement or a correction with the wrong tag.
-
-`npm run eval:checker` runs it over lines with known verdicts: real bad lines from sessions and evals, plus the near-miss names the wizard is prone to (dead letter queue for a lease, throttling for debouncing). The last run dropped 45/45 bad lines and kept 45/45 good ones over five runs each. A quip takes about 4s with the check, and the intern takes longer than that to form its next question.
-
-Lines the wizard searched for skip the check. The checker would veto them for being newer than it knows about, which is the failure search exists to fix.
-
-
-### It looks things up
-
-Ask a model about something released after its training cutoff and it'll tell you it doesn't exist. In a coding tool that's a real problem. Questions about a library version from last month come up all the time.
-
-The wizard and `?` answers get today's date and web search, with one rule: not recognizing something is a reason to search, not an answer. `? what's new in claude opus 5.5 compared to 4.5` searches, answers, and names the announcement it came from.
-
-Search costs time. That `?` answer took 23s. The wizard only searches when I name something it doesn't recognize, so most quips still land in a few seconds. When it does search, what it finds is the line: "opus 5.5 dropped yesterday and thinking can't be disabled anymore, so calls that hardcode a no-thinking mode from opus 5 will break." I checked that against Anthropic's announcement. It's right.
-
-
-### It doesn't know what the intern asked
-
-It gets what I'm building and the sentence I just said. Not the question.
-
-The question was in there at first. I described a worker reclaiming a dead worker's job, which is a lease, and it called it a dead letter queue in 2 runs out of 5. The question had mentioned retries and failures and it answered that instead. Prompting it not to didn't work. Removing the question did.
-
-Side effect: an answer like "yes" or "postgres" now gives it nothing to grab, so it stays quiet.
-
-
-### Sonnet, not Haiku
-
-Haiku got names wrong. Sonnet got that same lease case right 5 out of 5. Same wall time, since the latency is the round trip and not the model.
-
-The name is the whole product. A wrong one is worse than nothing, I'd repeat it in an interview.
-
-Each voice has its model and effort level next to its name, as the running session reports them rather than as configured: `dum  opus 5.5 · high`, `wizard  sonnet 5 · medium`. The intern runs on my default model at my own `/effort` setting, so that label is how I find out either changed.
-
-Every other call pins its level. The wizard and the line checker run at medium with thinking off, because they're in the latency path. The `?` reference and the build review run at high. Scanning, planning and reading a rebuild run at high too, on Opus for the last two, and their progress lines say so.
-
-Thinking off, effort medium, no settings files. Defaults took ~25s per quip, slower than me typing the next answer, so quips showed up after I'd moved on. Now a few seconds. Skipping settings also keeps my CLAUDE.md from overwriting the wizard's personality.
-
-
-### Measuring the wizard
-
-```sh
-npm run eval:wizard              # every case, 3 runs each
-npm run eval:wizard -- 5 nudge   # 5 runs of the nudge cases
-```
-
-Fixed exchanges, a fresh wizard per run, every line printed with its kind. It covers naming (lease, debounce, write-ahead log, and the macro exchange that produced "monomorphization"), nudging (a wrong Rust range, float money, sha256 passwords), correct statements that must never get nudged, the idempotency practice line, a stale Node version, a model newer than its training, and passing on a bare "yes". `DUM_DEBUG=1` logs every pass and every veto with its reason. A prompt change isn't done until this reads right.
-
-Two things I learned tuning it. Quoting a bad example in the prompt gets it said back: listing "backwards actually" as a thing not to say produced "backwards actually". And an example that matches an eval case gets parroted, so the eval stops measuring the voice.
-
-
-### idk
-
-Not knowing the answer and not having the concept are different. I type `idk` and the wizard explains the concept, why it exists, and what teams argue about with it. Then it hands the question back without answering it. That concept goes on the tree as shaky.
-
-I declare it. Nothing infers it.
-
-
-### Type it
-
-Explaining was the only way onto the tree, which made the tree exactly as good as the intern's read of my sentences. Tuning that is prompt work, and prompt work only goes so far.
-
-So a question has a second answer. I can explain it, or say `type it`.
-
-```
-  For an even-length list like [1, 2, 3, 4], what should median return?
-  answer it · idk · type it
-  > type it
-```
-
-The spec gets a "you type" section. The intern builds everything around that piece and leaves a hole where it goes:
-
-```python
-def median(xs):
-    s = sorted(xs)
-    # TODO(dum): median of a sorted list
-    # Given `s`, already sorted, return its middle value.
-    # Odd length: the single middle element. Even length: must be handled too.
-    raise NotImplementedError
-```
-
-What the code has to do, never how. The file pane opens on it, I type it in, `:w`, and say `done`.
-
-The intern reads it like a reviewer. If it works, the skill goes on the tree as solid, same as explaining it. If it doesn't, I get a question: "for median([1, 2, 3, 4]), which index does `s[len(s) // 2]` read?" Not the fix, and it doesn't touch my code. `done` on a file I haven't changed gets caught in code without a round trip.
-
-Open holes live in `.dum/todos.json`, so quitting halfway is fine. The next `dum` in that repo opens on the hole.
-
-Typing is harder to fake than a sentence. A deleted marker isn't an implementation, and a function that's wrong on the even case doesn't pass.
-
-
-### Every piece starts as a hole
-
-In understand mode, the parts of a build that rest on a concept get written as `TODO(dum)` blocks first. Glue and boilerplate don't, just the pieces I'd have to understand. Then the intern hands dum the code for each block, and dum decides from my tree, not the intern:
-
-```
-  · Write  stats.py
-  · fill  stats.py: median
-  ▌ hole  stats.py: frequency counting  (yours to type)
-```
-
-Known skill: the block sits on screen for a moment, then the code goes in. Not on the tree, shaky, or taken back with `not yet`: the block stays, and it's mine to type. Either way I see where the build leaned on something.
-
-The intern can't route around it. An Edit that rewrites a `TODO(dum)` block, or a Write that drops one, is refused at the gate. Open blocks are painted amber in the gutter until I type over them.
-
-Anti-vibe has no holes unless I say `type it`. The mechanics are the intern's there.
-
-
-### Not yet
-
-The intern can be right that I hold something, and I can still not want it counted. `not yet` right after a `+ skill` takes it back. It goes back to what it was before this session, or off the tree if it's new, and it stays off until the session ends. The intern is told, so a hole for it stays mine. `not yet <name>` picks one further back.
-
-It doesn't cost the turn, same as `?`. A bare `not yet` with nothing to take back is just an answer: "have you added tests?" "not yet".
+This is closer to a game than a document. Following [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md): where I am is always on screen (`feature 2/9 ▰▱▱▱▱▱▱▱▱`), every step has minutes and none runs over 45, and lists stop at five. After a build the intern gets three lines, and the spec is one-line fields that dum lays out itself. Comments in code it writes are three lines at most, which the gate enforces.
 
 
 ### Enforced in code, not in the prompt
 
-Mutating tools are denied until I approve the spec. v1 asked for this in the system prompt. On the first real run the intern skipped it, wrote two files, and printed "nothing was built".
+Every rule that only lived in a prompt got skipped eventually.
 
-Paths get checked on the way through too. `cwd` doesn't confine the agent - it wrote to `$HOME` while `cwd` was a scratch dir.
-
-Held and refused tool calls render differently from ones that ran. After a build, the wizard reads what got written against the spec I approved and only speaks up if they don't match.
-
-
-### The file is a buffer
-
-The wide pane used to `cat` the tail of whatever the intern was writing. Fine while it streams, useless the moment it stops: a 300-line file showed its last 30 and there was no way to see the rest.
-
-Now it is a buffer. Once a file is on disk it scrolls, searches and edits, and a file opened from the tree is that from the start. `tab` lands you in it, `i` types, `:w` writes, `esc` hands the keyboard back.
-
-The keys are vim's, because the tree beside it already speaks them. The arrows, page keys and home/end work in both modes anyway, so you can read a file without knowing any of it. Editing is `i`, `a`, `o`, `x`, `dd`, `u`, and the `/` and `:` lines. No visual mode, no counts, no registers beyond one line-wise one. It is for fixing the thing you just watched get written, not for living in.
-
-While a write streams the pane follows the tail and refuses edits. Once the write lands it swaps what the intern said it would write for the file as it is - for an Edit that means the whole file, opened at the edit, instead of the replaced fragment. The gate's verdict fires before the tool runs, so "landed" is its own signal, read off the tool result.
-
-Your edits are yours. Saving is not a tool call, the gate has no say, and the intern is not told. It sees the file the next time it reads it, which is the same rule as everything else here: nothing quietly feeds it context. A line in the transcript says `you wrote src/x.ts` so you can see it later.
-
-Buffers outlive the view. The intern starting a new file pulls the pane onto it, and unsaved edits to the last one stay where they were until you go back. If the intern writes a file you are mid-edit in, the pane says so and keeps yours; `:e` reloads and drops them. Dropping edits over a race the intern started is not a call the pane gets to make.
-
-
-### Not done
-
-Quips render inline, not in a real second pane. Every quip gets written to `.dum/wizard.jsonl`, so the pane is a reader over that file.
-
-The graph is a browser page. Inside the TUI the tree is still a printout (`dum --skills`), not a pane.
-
-There's no git protocol. dum writes files and never commits, branches, or checks what's dirty before it starts. What it should do there is still open.
-
-The intern runs on the Claude Code bundled with the Agent SDK, but it uses my default model. Switch to a model newer than that bundle and every request fails. dum says so and tells me to `npm update @anthropic-ai/claude-agent-sdk` in its own folder, but it can't fix it for me.
+- Mutating tools are denied until I approve the spec. v1 asked in the prompt, and the intern wrote two files anyway.
+- Paths are checked on the way through: `cwd` doesn't confine the agent, and it once wrote to `$HOME`.
+- Code outside a `TODO(dum)` block, a hole too big for my level, and a fifth hole are all refused. So is an Edit that rewrites a hole, and a fill over twelve lines, since nothing big rides in under one name.
+- Held and refused calls draw differently from ones that ran, with the reason, so the screen never claims something happened that didn't.
+- Nothing quietly feeds the intern context. Opening files, the shell and my edits never reach it.
 
 
 ### Keys
@@ -557,88 +190,86 @@ The intern runs on the Claude Code bundled with the Agent SDK, but it uses my de
 | `shift-tab` | the middle: file ⇄ shell (or click the tab) | anywhere |
 | `esc` | close a board: help, a lesson, the log | input |
 | `ctrl-c` | stop the program running in the shell; with none, quit | anywhere |
-| trackpad / wheel | scroll whatever's under the pointer | anywhere |
+| trackpad, `page up` / `page down` | scroll the conversation or a board | anywhere |
 | `?` + text | ask anything, answered off to the side without costing your turn | input |
-| `cd`, `gcc`, `echo`, `./a.out` ... | run on the shell page, as typed | input |
-| `!` + command | anything else on the shell page (`!` alone opens it) | input, file's `:` line |
-| `:run` | run the open file. Compiled languages get the line to type instead | input, file's `:` line |
-| `:log` | the full transcript on the stage | input, file's `:` line |
-| `:help` | all of this, on the stage | input |
+| `cd`, `gcc`, `echo`, `./a.out` ... | run in the shell, as typed | input |
+| `!` + command | anything else in the shell (`!` alone opens it) | input, file's `:` line |
+| `:run` | run the open file; compiled languages get the line to type instead | input, file's `:` line |
+| `:log` | everything said so far, on a board | input, file's `:` line |
+| `:help` | all of this | input |
 | `:taste` + a rule | how dum should work, kept for every session | input |
-| `:skill` x [in lang] | add a skill I can write from a blank file, no AI (`:skill -x` takes it off) | input |
+| `:skill` x [in lang] | add a skill I can write without AI (`:skill -x` takes it off) | input |
 | `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
-| `idk` | "I don't have this concept", the intern teaches it | answering a question |
-| `type it` | "I'll write this part", the intern leaves a hole for it | answering a question |
-| `done` | check what I typed into the hole | "what next?" |
-| `go` | start the next feature or milestone | "next up" |
-| an explanation | fills the hole it explains, if it holds up | "your turn" |
+| `idk` | "I don't have this concept" - the intern teaches it | answering a question |
+| `type it` | "I'll write this part" - it leaves a hole | answering a question |
+| `done` | check what I typed into the hole | your turn |
+| an explanation | fills the hole it explains, if it holds up | your turn |
+| `go` | start the next feature or milestone | next up |
 | `not yet` [name] | don't count the skill just checked off | anywhere |
-| `y` | approve the spec, anything else declines | spec |
-| `j` / `k`, arrows | move | file tree, file |
-| `h` / `l` | collapse / expand | file tree |
-| `enter` / `o` | open the file (only you see it, the intern doesn't) | file tree |
-| `g g` / `G` | top / bottom | file tree, file |
-| `ctrl-d` / `ctrl-u` | half page down / up | file tree, file |
-| `h` / `l`, `w` / `b`, `0` / `$` | left / right, by word, line ends | file |
-| `/` text, `n` / `N` | find, next / previous | file |
-| `i` `a` `o` `O` | start typing; `esc` stops | file |
+| `y` | approve the spec; anything else declines | spec |
+| `exit` or an empty line | end the session | what next? |
+| `j` / `k`, arrows, `g g` / `G`, `ctrl-d` / `ctrl-u` | move | file tree, file |
+| `h` / `l`, `enter` / `o` | collapse / expand, open (only I see it) | file tree |
+| `w` / `b`, `0` / `$`, `/` text, `n` / `N` | by word, line ends, find | file |
+| `i` `a` `o` `O`, `esc` | start typing, stop | file |
 | `x` `dd` `D` `J` `yy` `p` `u` `ctrl-r` | the usual | file |
-| `:w` or `ctrl-s`, `:q`, `:e`, `:` number | write, leave, reload from disk, go to line | file |
-| `esc` | back to the input | file |
-| `exit` or empty line | end the session | "what next?" |
+| `:w` or `ctrl-s`, `:q`, `:e`, `:` number | write, leave, reload, go to line | file, or the input with a file open |
 
 
-### Running it
-
-Node 22.6+ and the `claude` CLI logged in. No build step, no API key.
-
-```sh
-npm install
-npm link      # puts `dum` on your PATH
-cd some-repo
-dum
-```
+### Flags
 
 | Flag | |
 | :--- | :--- |
 | `-a`, `--anti-vibe` | own the intent, skip the mechanics |
 | `-u`, `--understand` | the default, spelled out |
 | `-p`, `--plain` | line printer instead of panes, also what you get in a pipe |
+| `-n`, `--new` | a fresh intern in this repo: its memory and open holes moved aside |
 | `-s`, `--skills` | print the skill tree |
-| `--forget <name>` | take a skill off the tree |
+| `-g`, `--graph` | the tree and the queue, in the browser |
+| `--add "<skill>" [--in <lang>]` | add a skill I can write without AI |
+| `--forget <name>` | take a skill off |
 | `--scan <folders>` | claim skills from projects I wrote myself |
 | `--reset` | start the tree over, the old one moved aside |
-| `--queue "<goal>"` | queue a project and plan the steps up to it |
-| `--plan` | plan goals I wrote into the queue by hand |
-| `--projects` | the queue, what's done, what's ready |
-| `--next [n]` | project ideas for the fastest next unlock |
+| `--learn "<topic>" [folder]` | a small project to learn a topic, feature by feature |
+| `--queue "<goal>"` | queue a goal and plan the steps up to it |
+| `--plan`, `--projects`, `--next [n]` | plan hand-written goals, show the queue, suggest what's next |
 | `--rebuild <dir> [target]` | rebuild a project from scratch, milestone by milestone |
-| `-g`, `--graph` | the tree and the queue as a graph, in the browser |
-| `--learn "<topic>" [folder]` | a small project to learn a topic fast, feature by feature |
-| `--add "<skill>" [--in <lang>]` | add a skill I can write without AI |
-| `-n`, `--new` | a fresh intern in this repo: its memory and open holes moved aside |
+| `-h`, `--help` | the short version of this |
 
-The tree flags work from anywhere. Everything else needs a git repo, since the intern works from the tracked files.
+The tree and project flags work from anywhere. A session needs a git repo, since the intern works from the tracked files.
 
 
 ### Where things live
 
 ```
 ~/.dum/
-  skills/          the skill tree, one note per skill, shared by every repo (DUM_HOME moves it)
+  skills/          the skill tree, one note per skill (DUM_HOME moves it)
   projects/        the project queue, one note per goal, step, or idea
-  graph.html       the graph, redrawn by every --graph
   taste.md         my rules for how dum should work
+  graph.html       the graph, redrawn by every --graph
   evals/           every scenario run, for comparing
-  skills.json.migrated         the old single-file tree, read once into notes
+  skills.json.migrated   the old single-file tree, read once into notes
 
 <repo>/.dum/
   session          so the next `dum` resumes the same intern
-  wizard.jsonl     every quip
   todos.json       holes left for me to type
-  milestones.json  a rebuild's milestones or a learning project's features, and which are built
+  milestones.json  a rebuild's milestones or a learning project's features
+  wizard.jsonl     every wizard line
   debug.log        with DUM_DEBUG=1
   knowledge.json   the old per-repo record, folded into the tree once and left alone
 ```
 
-Plain JSON, no database. The tree is written through a temp file and a rename, and re-read before every change, so two sessions in two repos don't erase each other's skills.
+Plain files, no database. Notes are written through a temp file and a rename and re-read before every change, so two sessions in two repos don't erase each other's skills.
+
+
+### Not done
+
+- No skill-tree pane inside the TUI yet. The tree is `dum --skills` or the browser graph.
+- No git protocol. dum writes files and never commits, branches, or checks what's dirty first.
+- In anti-vibe, the intern can claim the build matches the spec before checking. The build review catches it, but only afterwards.
+- The intern runs on the Claude Code bundled with the Agent SDK but uses my default model. A model newer than that bundle fails every request. dum says to `npm update @anthropic-ai/claude-agent-sdk` in its own folder, but can't do it for me.
+
+
+### Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md): the rules that are the product, how to check a change, and how scenarios work.
