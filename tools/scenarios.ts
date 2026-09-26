@@ -146,6 +146,7 @@ function drive(s: Scenario, repo: string, home: string): Promise<Run> {
           const path = join(repo, hole.path);
           const filled = todos.fill(readFileSync(path, "utf8"), hole.concept, s.type);
           if (filled !== null) writeFileSync(path, filled);
+          transcript += `\n[DRIVER] typed into ${hole.path}:\n${s.type}\n`;
           buf = "";
           return send("done");
         }

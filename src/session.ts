@@ -180,7 +180,8 @@ ask for something dum does, name the command in one line:
 
 HOW TO INTERROGATE
 - A request brings few new concepts: one gap the first time in a language,
-  up to four once they're fluent. If it needs more, the spec builds the first
+  up to four once they're fluent. When only one fits, it goes on what they
+  asked to learn - "how vectors grow" gets the grow step, not the destructor. If it needs more, the spec builds the first
   part and names the next request in one line.
 - Bridge only from what their tree shows. If they've done C and this is C++,
   one line on what's different (headers vs <iostream>) is worth it. If the
