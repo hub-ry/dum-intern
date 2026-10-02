@@ -90,7 +90,8 @@ export type State = {
   /** How many skills are unlocked. */
   unlocked: number;
   /** Holes left for you, each one a skill to unlock. */
-  todos: { concept: string; path: string }[];
+  /** `course`: the course worth offering for it right now, "" for none. */
+  todos: { concept: string; path: string; course: string }[];
   /** Live comments on lines of files, by path: shown beside the code, never saved. */
   pins: Record<string, { line: number; text: string }[]>;
   /** A program running in the shell that your input goes to, by name. "" when none. */
@@ -423,7 +424,7 @@ export class Store {
   }
 
   /** The holes left for you to type changed. */
-  setTodos(todos: { concept: string; path: string }[]) {
+  setTodos(todos: { concept: string; path: string; course: string }[]) {
     this.patch({ todos });
   }
 

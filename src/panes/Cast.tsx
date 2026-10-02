@@ -163,7 +163,8 @@ export function thread(s: State, width: number): Line[] {
   if (s.prompt?.type === "next") {
     const t = s.todos[0];
     gap();
-    if (t) turn(`your turn: ${t.concept} in ${t.path}`, s.mode === "anti-vibe" ? `explain it here, or course ${t.concept}` : `type it, :w, then done - or course ${t.concept}`);
+    const or = t?.course ? ` - or course ${t.course}` : "";
+    if (t) turn(`your turn: ${t.concept} in ${t.path}`, s.mode === "anti-vibe" ? `explain it here${or}` : `type it, :w, then done${or}`);
     else note("what next?");
   }
   if (s.prompt?.type === "plan") {

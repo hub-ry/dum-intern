@@ -144,7 +144,7 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
       // No editor here, so the hole is typed in yours - the line says where.
       const t = s.prompt.type === "next" ? s.todos[0] : undefined;
       const how = s.mode === "anti-vibe" ? "explain it here" : "type it and say done";
-      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - ${how}, or course ${t.concept}`)}`);
+      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - ${how}${t.course ? `, or course ${t.course}` : ""}`)}`);
       if (s.prompt.type === "plan") console.log(`  ${c.dim("y builds it · course <skill> unlocks one first")}`);
       if (s.prompt.type === "course") console.log(`  ${c.dim(`type the gap in ${s.prompt.card.path} and say done · quit leaves`)}`);
     }

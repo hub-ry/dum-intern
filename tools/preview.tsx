@@ -126,7 +126,7 @@ if (scene === "plan") {
   void store.askQuestion("what next?", "");
 } else if (scene === "hole") {
   // Handed a hole to type: the file open at the TODO, dum saying whose turn.
-  store.setTodos([{ concept: "median of a sorted list", path: "stats.py" }]);
+  store.setTodos([{ concept: "median of a sorted list", path: "stats.py", course: "" }]);
   store.streaming(
     "Write",
     "stats.py",

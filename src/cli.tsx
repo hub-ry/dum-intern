@@ -2,7 +2,7 @@
 
 import { argv, exit, cwd, stdout, stdin } from "node:process";
 import { readRepo } from "./repo.ts";
-import { run, mainLang, type Mode } from "./session.ts";
+import { run, mainLang, courseFor, type Mode } from "./session.ts";
 import { Store } from "./store.ts";
 import { banner, runPlain, Input } from "./plain.ts";
 import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
@@ -330,14 +330,18 @@ async function main() {
       } catch {
         /* the file went away; the review will say so */
       }
-      store.setTodos(holes.map((h) => ({ concept: h.concept, path: h.path })));
+      store.setTodos(holes.map((h) => ({ concept: h.concept, path: h.path, course: courseFor(skills.read(), h) })));
       store.openFile(t.path, at);
     }
     const how = mode === "anti-vibe" ? "explain it here and dum fills it" : "tab into the file, type it, :w, and say done";
     const request =
       fromArgs ||
       (holes.length
-        ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, `${how}. or course ${holes[0]!.concept}. or ask for something else.`, false)
+        ? await store.askQuestion(
+            `your turn: ${holes[0]!.concept} in ${holes[0]!.path}`,
+            `${how}.${courseFor(skills.read(), holes[0]!) ? ` or course ${courseFor(skills.read(), holes[0]!)}.` : ""} or ask for something else.`,
+            false,
+          )
         : await store.askQuestion("what do you want?", "", false)
       ).trim();
     if (!request) {

@@ -115,7 +115,7 @@ test("the thread keeps everything said, and ends on whose turn it is", async () 
   s.submit("done");
   await done;
   s.say('secret 50, you type 30, and it says "too high". is 30 bigger than 50?', true);
-  s.setTodos([{ concept: "conditionals", path: "guess.cpp" }]);
+  s.setTodos([{ concept: "conditionals", path: "guess.cpp", course: "conditionals" }]);
   void s.askNext();
   const text = thread(s.getSnapshot(), 40).map((l) => printable(l.text));
   assert.ok(text.some((l) => l.includes("g++")), "earlier messages stay");
@@ -235,4 +235,14 @@ test("a builder skill asked for from a language is the language-free one", async
   const t = unlock({ skills: [] }, { name: "functions", lang: "go", how: "typed", why: "" });
   const [p] = classify(t, [{ skill: "Command-line programs", lang: "go", what: "flags" }]);
   assert.deepEqual([p!.skill, p!.lang, p!.kind, p!.status.state], ["command-line programs", "", "concept", "open"]);
+});
+
+test("a hole offers the course you can take now: its own, the rung under it, or none for the core", async () => {
+  const { courseFor } = await import("../src/session.ts");
+  const { unlock } = await import("../src/skills.ts");
+  let t = { skills: [] as import("../src/skills.ts").Skill[] };
+  for (const name of ["printing", "variables"]) t = unlock(t, { name, lang: "python", how: "typed", why: "" });
+  assert.equal(courseFor(t, { concept: "conditionals", path: "a.py" }), "conditionals");
+  assert.equal(courseFor(t, { concept: "input", path: "a.py" }), "strings", "input needs strings first");
+  assert.equal(courseFor(t, { concept: "change detection", path: "a.py", core: true }), "");
 });

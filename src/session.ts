@@ -270,6 +270,17 @@ export function classify(
   return out;
 }
 
+/**
+ * The course worth offering for a hole: its own if it's open, else the lowest rung under it.
+ * None for the core - that's this program's own logic, not a skill with a course.
+ */
+export function courseFor(t: skills.Tree, hole: { concept: string; lang?: string; path: string; core?: boolean }): string {
+  if (hole.core) return "";
+  const lang = hole.lang ?? skills.langOf(hole.path);
+  const st = curriculum.status(t, hole.concept, lang);
+  return st.state === "locked" ? st.next : hole.concept;
+}
+
 /** Whether AI may write a piece: unlocked at its level, and in understand mode never the core. */
 export function aiWrites(p: Piece, mode: Mode): boolean {
   if (p.core && mode === "understand") return false;
@@ -418,7 +429,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   function setOpen(next: todos.Todo[]) {
     open = next;
     todos.save(repo.root, open);
-    store.setTodos(open.map((t) => ({ concept: t.concept, path: t.path })));
+    const tree = skills.read();
+    store.setTodos(open.map((t) => ({ concept: t.concept, path: t.path, course: courseFor(tree, t) })));
   }
   setOpen(open);
 
