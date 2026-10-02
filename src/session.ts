@@ -14,15 +14,18 @@ import { sentences } from "./lines.ts";
 import type { Store } from "./store.ts";
 import { debugTo } from "./debug.ts";
 import * as guard from "./guard.ts";
+import * as boundary from "./boundary.ts";
 
 /** What a locked skill costs you: typing it, or explaining it. Either way a course unlocks it. */
 export type Mode = "understand" | "anti-vibe";
 
 const BAR: Record<Mode, string> = {
-  understand: `MODE: understand everything. A locked skill is theirs to TYPE - or to unlock
-with a course first. Explaining it doesn't unlock anything in this mode.`,
-  "anti-vibe": `MODE: anti-vibe. A locked skill is theirs to EXPLAIN in plain words - or to
-unlock with a course first. Once an explanation holds, you fill that hole.`,
+  understand: `MODE: understand everything. A concept they haven't BUILT is theirs to type -
+or to unlock with a course first. A tool only needs recognizing. The core of a
+build is always theirs to type.`,
+  "anti-vibe": `MODE: anti-vibe. Anything they can EXPLAIN, you may write: a concept or tool
+they recognize, and the core once their reasoning about it holds. Otherwise it's
+theirs to explain, or to unlock with a course first.`,
 };
 
 const THEIR_TURN: Record<Mode, string> = {
@@ -31,59 +34,80 @@ When they say they've typed a hole you'll be asked to check it. Read their code
 and call check_todo. Judge it like a reviewer: does it do what the hole said, and
 would it work? Not whether it matches what you'd have written. A failure gets a
 question that makes them find it - never the fix, and never touch their code.
-If they try to explain a hole instead, say in one line that here it's type it
-or take the course.`,
+If they explain a concept hole instead, judge it with check_answer, level
+recognize - it counts toward their tree, but in this mode the hole stays theirs
+to type, so say that in one line.`,
   "anti-vibe": `THEIR TURN
-When they explain a hole, judge the explanation with check_explanation. It
-passes when it shows they get how that code works, in any words - the gist is
-enough, don't hold out for jargon. "yes" or a restated task is not an
-explanation. When it passes, call fill_todo for that hole. Close but missing
-something: one question that gets them the rest. Wrong: say what's off in one
-line. If they type the code and say done instead, check it with check_todo.`,
+When they explain a hole, judge it with check_answer, level recognize. "yes" or a
+restated task is not an explanation. When it passes, call fill_todo for that
+hole. Close but missing something: one question that gets them the rest. Wrong:
+say what's off in one line. If they type the code and say done instead, check it
+with check_todo.`,
 };
 
-const CONTRACT = `You are dum-intern: one intern, working for an engineer who wants to own every
-line of what gets built. You're a strong builder. What makes you different is a
-rule enforced in code: you only write code on skills they've unlocked.
+const CONTRACT = `You are dum-intern: one intern, working for an engineer who wants to be able to
+take you away and still make progress. You're a strong builder. You work at the
+edge of their competence, and code enforces where that edge is.
 
 HOW IT WORKS
-They have a skill tree. Every request rests on a handful of skills.
-- A skill on their tree is unlocked: you write that code.
-- A skill that isn't is locked. Its code becomes a TODO(dum) hole that's theirs.
-  Or they unlock it first with a short course - dum and the wizard run those,
-  not you. They start one by typing "course <skill>".
-- A course only opens once everything the skill builds on is unlocked. Someone
-  who can't print hello world doesn't get to unlock recursion.
+They have a skill tree, and every skill on it has a level: recognize (they can
+say what it is and what it's for), build (they wrote it themselves), apply (they
+decided when and why to use it, on a real project). Every request rests on a
+handful of skills, and each is one of two kinds:
+- a concept is something to know how to write: a language feature, a data
+  structure, an algorithm, anything on a curated track.
+- a tool is technology breadth: one library, framework, API or command. They
+  don't have to memorize breadth before you use it - recognizing it is enough.
+What isn't theirs becomes a TODO(dum) hole. Or they unlock it first with a short
+course - dum and the wizard run those, not you. They start one with "course x".
+A course only opens once everything it builds on is theirs: someone who can't
+print hello world doesn't get to unlock recursion.
 
 YOUR TOOLS - use them instead of writing questions as prose
-  ask           ONE question, only when the request has a real hole in intent
+  ask           ONE question: a hole in intent, or how they'd approach the core
   propose_plan  the skills this build rests on, before anything is written
+  check_answer  judge what they said: what a skill is for, or their approach
   fill_todo     after approval: the code for one TODO(dum) block
   check_todo    judge a hole they typed
   point         pin a short comment to a line of their code
 
 ASKING
-Ask only where intent has a hole: two reasonable readings produce different
-software and only they can say which they meant. Most requests need no
-question at all. Never quiz them on how something works - locked skills and
-courses do that. Never ask what the repo already answers.
+Friction belongs at decisions, not at the keyboard. Two kinds of question, both
+one line, both answered in five seconds:
+- intent: two reasonable readings produce different software and only they can
+  say which. Most requests need none.
+- the core: before the plan of any build with three or more pieces, ONE question
+  about how they'd approach its core - a decision about this program ("how would
+  you tell a file changed since the last backup?"). Judge it with check_answer,
+  level apply. Passing or not, then propose: a miss just keeps the core theirs.
+Never quiz them on trivia, never stack questions, never ask what the repo answers.
 
 THE PLAN
 Before writing anything, call propose_plan. pieces is every skill the code rests
-on, one per entry: printing, the loop, the data structure, the one idea the
-request is about.
-- spell each skill the way THE CURATED TRACKS below spell it, in the language of
-  the file it goes in. A skill on no track: give requires - up to three skills
-  it builds on directly, track names where they fit.
+on, one per entry: printing, the loop, the data structure, the library, and the
+one idea the request is about.
+- kind: concept or tool, as above. A skill on a curated track is always a
+  concept, whatever you call it.
+- core: true on the one piece that's the heart of the request - change detection
+  in a backup tool, the matching in a matcher. Name it for what it does, not for
+  a track skill. Every build of three or more pieces has exactly one.
+- spell skills the way THE CURATED TRACKS below spell them, in the language of the
+  file the code goes in. A builder-track skill (http, json, git) has no language:
+  leave lang out. A skill on no track: give requires - up to three skills it
+  builds on directly, track names where they fit.
 - the program skeleton (includes, imports, main) is part of the language's
   first skill, printing.
-- dum lays out which pieces are unlocked and which are locked. Don't repeat it.
-- at most four locked pieces. If the request needs more, it's above their tree:
-  don't propose it. Say so in one line and offer the first rung instead - one
-  small, whole program at their level that leads toward it. dum refuses a plan
-  with more locked pieces anyway.
-- a reply other than yes comes back as declined, with their words. Adjust and
-  propose again, or answer what they asked.
+- dum lays out what they know, what you may implement, what they must
+  implement, which tools need a "what's it for?", and what's locked. Don't
+  repeat it.
+- a tool they don't recognize shows as "what's it for?". When they answer at the
+  plan prompt it comes back to you: judge it with check_answer, level recognize,
+  and propose again.
+- at most four pieces that aren't yours to write. More than that and it's above
+  their tree: don't propose it. Say so in one line and offer the first rung - one
+  small, whole program that leads toward it. dum refuses a bigger plan anyway.
+- any other reply comes back as declined, with their words. Adjust and propose
+  again, or answer what they asked.
 
 BUILDING
 After approval, write each source file as TODO(dum) blocks and nothing else -
@@ -94,8 +118,9 @@ the code that goes there, indented to fit.
   what the code must do - never how. Then one stub line so the file still runs
   where the language allows it (\`pass\`, \`todo!()\`, \`return 0;\`).
 - one skill per block, at most 12 lines of code in it. One block per locked skill.
-- dum writes the unlocked blocks in front of them and leaves the locked ones as
-  holes. Don't argue and don't write a locked block another way.
+- dum writes the blocks that are yours in front of them and leaves the rest as
+  holes, the core included in understand mode. Don't argue and don't write a
+  hole another way.
 - you can't Edit a TODO(dum) block once it's theirs. The gate refuses it.
 - a lone closing brace may sit outside a block. Nothing else may.
 - comments you write anywhere: three lines in a row at most, one line of why.
@@ -192,27 +217,63 @@ const FILL_MIN_MS = 700;
 const FILL_MAX_MS = 2500;
 const FILL_FRAME_MS = 50;
 
+/**
+ * What a piece of a build is. A concept is something to know how to write: a language feature, a
+ * data structure, an algorithm, anything on a curated track. A tool is technology breadth: one
+ * library, framework, API or command. You don't have to memorize breadth before AI uses it.
+ */
+export type Kind = "concept" | "tool";
+
+/**
+ * The level a piece needs before AI may write it. Tools need recognizing - say what it's for. In
+ * understand-everything a concept needs building it yourself; anti-vibe takes your explanation.
+ */
+export function needFor(kind: Kind, mode: Mode): skills.Level {
+  return kind === "tool" || mode === "anti-vibe" ? "recognize" : "build";
+}
+
 /** One skill a plan rests on, and where it stands on their tree. */
-export type Piece = { skill: string; lang: string; what: string; status: curriculum.Status };
+export type Piece = {
+  skill: string;
+  lang: string;
+  what: string;
+  kind: Kind;
+  /** The heart of the request - the part that makes it this program and not another. */
+  core: boolean;
+  need: skills.Level;
+  status: curriculum.Status;
+};
 
 /** The pieces a plan names, spelled the tracks' way and checked against the tree. */
 export function classify(
   t: skills.Tree,
-  raw: { skill: string; lang?: string; what: string; requires?: string[] }[],
+  raw: { skill: string; lang?: string; what: string; requires?: string[]; kind?: Kind; core?: boolean }[],
+  mode: Mode = "understand",
   held: Set<string> = new Set(),
 ): Piece[] {
   const out: Piece[] = [];
   for (const p of raw) {
-    const lang = skills.langName(p.lang ?? "");
+    // "http" asked for from python is the builder track's, which no language owns.
+    const lang = curriculum.locate(p.skill, p.lang ?? "").lang;
     const skill = curriculum.canonical(p.skill, lang);
     if (!skills.key(skill) || out.some((o) => skills.id(o.skill, o.lang) === skills.id(skill, lang))) continue;
     if (p.requires?.length) curriculum.map(skill, lang, p.requires);
-    let status = curriculum.status(t, skill, lang);
+    // A curated skill is a concept, whatever the intern called it: a track is fundamentals.
+    const kind: Kind = curriculum.curated(skill, lang) ? "concept" : p.kind === "tool" ? "tool" : "concept";
+    const core = !!p.core && !out.some((o) => o.core);
+    const need = needFor(kind, mode);
+    let status = curriculum.status(t, skill, lang, need);
     // Taken back this session with "not yet": locked, whatever the tree says.
     if (held.has(skills.id(skill, lang)) && status.state === "unlocked") status = { state: "open" };
-    out.push({ skill, lang, what: p.what.replace(/\s+/g, " ").trim(), status });
+    out.push({ skill, lang, what: p.what.replace(/\s+/g, " ").trim(), kind, core, need, status });
   }
   return out;
+}
+
+/** Whether AI may write a piece: unlocked at its level, and in understand mode never the core. */
+export function aiWrites(p: Piece, mode: Mode): boolean {
+  if (p.core && mode === "understand") return false;
+  return p.status.state === "unlocked";
 }
 
 /**
@@ -222,17 +283,20 @@ export function classify(
 export function planCard(summary: string, pieces: Piece[], mode: Mode, run = ""): string {
   const one = (t: string) => t.replace(/\s+/g, " ").replace(/\|/g, "/").trim();
   const name = (p: Piece) => skills.label({ name: p.skill, lang: p.lang });
-  const mine = pieces.filter((p) => p.status.state === "unlocked");
-  const open = pieces.filter((p) => p.status.state === "open");
-  const deep = pieces.filter((p) => p.status.state === "locked");
+  const known = pieces.filter((p) => aiWrites(p, mode) && p.kind === "concept" && !p.core);
+  const may = pieces.filter((p) => aiWrites(p, mode) && (p.kind === "tool" || p.core));
+  const must = pieces.filter((p) => p.core && !aiWrites(p, mode));
+  const forWhat = pieces.filter((p) => !p.core && p.kind === "tool" && p.status.state === "open");
+  const open = pieces.filter((p) => !p.core && p.kind === "concept" && p.status.state === "open");
+  const deep = pieces.filter((p) => !p.core && p.status.state === "locked");
   const section = (title: string, lines: string[]) => (lines.length ? [`## ${title}`, ...lines, ""] : []);
   return [
     `**${one(summary)}**`,
     "",
-    ...section(
-      "dum writes",
-      mine.map((p) => `- ${name(p)}`),
-    ),
+    ...section("you already know - dum writes", known.map((p) => `- ${name(p)}`)),
+    ...section("ai may implement", may.map((p) => `- ${name(p)}${p.kind === "tool" ? ": a tool you recognize" : ": your reasoning holds"}`)),
+    ...section("you must implement", must.map((p) => `- ${name(p)}: ${one(p.what)}`)),
+    ...section("what's it for?", forWhat.map((p) => `- ${name(p)}: ${one(p.what)} · say what it's for, in a line`)),
     ...section(
       mode === "anti-vibe" ? "you explain, or take the course" : "you type, or take the course",
       open.map((p) => `- ${name(p)}: ${one(p.what)} · \`course ${p.skill}\``),
@@ -295,11 +359,32 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   }
 
   /** Is this skill theirs, for dum to write code on it in this file? */
-  function holds(concept: string, path: string): boolean {
+  function holds(concept: string, path: string, need: skills.Level): boolean {
     const lang = skills.langOf(path);
     if (held.has(skills.id(concept, lang)) || held.has(skills.id(concept, ""))) return false;
-    return skills.holds(skills.read(), concept, lang);
+    return skills.holds(skills.read(), concept, lang, need);
   }
+
+  /** The plan's piece for a block's skill, if it named one. */
+  function pieceFor(concept: string): Piece | undefined {
+    return plan.find((p) => skills.key(p.skill) === skills.key(concept));
+  }
+
+  /** What a hole needs before AI may fill it: its kind's level in this mode. */
+  function needOf(t: { concept: string; kind?: Kind }): skills.Level {
+    return needFor(t.kind ?? pieceFor(t.concept)?.kind ?? "concept", mode);
+  }
+
+  /** The core of a build is never AI's to write in understand mode: typing it is the point. */
+  function theirsAlways(t: { core?: boolean }): boolean {
+    return !!t.core && mode === "understand";
+  }
+
+  /** The core the last refused plan named, so the answer about it lands on the same skill. */
+  let pendingCore: Piece | null = null;
+
+  /** Cores they asked about this session, by skill id - answered well or not. */
+  const attempted = new Set<string>();
 
   store.onNotYet = (name: string) => {
     const target = name
@@ -344,8 +429,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     return [
       `(Open holes that are theirs: ${list}.`,
       mode === "anti-vibe"
-        ? "If what they say below explains one of those, judge it with check_explanation, and when it passes call fill_todo for it. If it's a new request instead, handle it as one; the holes stay theirs.)"
-        : "Explaining one doesn't unlock it here - if they try, say in one line it's type it or take the course. If it's a new request, handle it as one; the holes stay theirs.)",
+        ? "If what they say below explains one of those, judge it with check_answer, level recognize, and when it passes call fill_todo for it. If it's a new request instead, handle it as one; the holes stay theirs.)"
+        : "If they explain one, judge it with check_answer, level recognize - it counts, but the hole stays theirs to type, so say that in one line. If it's a new request, handle it as one; the holes stay theirs.)",
       "",
       text,
     ].join("\n");
@@ -376,11 +461,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
    * holes, the turn that fills that hole comes back to be sent to the intern.
    */
   async function takeCourse(cmd: { skill: string; lang: string }): Promise<string | null> {
-    const lang = cmd.lang || langFor(cmd.skill);
-    const passed = await course.take(cmd.skill, lang, { store, root: repo.root, unlock });
+    const where = curriculum.locate(cmd.skill, cmd.lang || langFor(cmd.skill));
+    const lang = where.lang;
+    const passed = await course.take(cmd.skill, lang, { store, root: repo.root, unlock }, where.exercise || langFor(cmd.skill));
     if (!passed) return null;
     const name = curriculum.canonical(cmd.skill, lang);
-    const hole = open.find((t) => skills.key(t.concept) === skills.key(name) && holds(t.concept, t.path));
+    const hole = open.find((t) => skills.key(t.concept) === skills.key(name) && !theirsAlways(t) && holds(t.concept, t.path, needOf(t)));
     if (!hole) return null;
     return `(They just unlocked "${hole.concept}" through a course. Fill its open hole in ${hole.path} with fill_todo now, then say nothing else.)`;
   }
@@ -404,6 +490,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     return [
       BAR[mode],
       skills.describe(skills.read()),
+      `WHAT AI MAY DO IN THIS REPO (from its files and manifests - a dependency they recognize is a tool you may use)\n${boundary.lines(boundary.boundary(skills.read(), repo.root, repo.files)).join("\n")}`,
       tracks(),
       describe(repo),
       `THEIR REQUEST:\n${withHoles(req)}`,
@@ -450,6 +537,14 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     skill: z.string().describe("The skill, spelled the way the curated track spells it"),
     lang: z.string().optional().describe("The language of the file this code goes in. Leave out only for an idea with no code."),
     what: z.string().max(100).describe("What this piece of code does, in a few words"),
+    kind: z
+      .enum(["concept", "tool"])
+      .optional()
+      .describe("concept: something to know how to write (language features, data structures, algorithms, anything on a track). tool: one specific library, framework, API or command (argparse, FastAPI, Spotify OAuth)."),
+    core: z
+      .boolean()
+      .optional()
+      .describe("True for the one piece that's the heart of this request - the logic that makes it this program. Every build of three or more pieces has exactly one."),
     requires: z
       .array(z.string())
       .max(3)
@@ -486,8 +581,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           run: z.string().max(120).optional().describe("The command to run it, if there is one"),
         },
         async (args) => {
-          let pieces = classify(skills.read(), args.pieces, held);
-          const locked = pieces.filter((p) => p.status.state !== "unlocked");
+          let pieces = classify(skills.read(), args.pieces, mode, held);
+          const core = pieces.find((p) => p.core);
+          if (!core && pieces.length >= 3) {
+            return say("Not shown to them: mark the one piece that's the heart of this request core: true, then propose again.");
+          }
+          // The decision before the code: how they'd approach the core, asked once, before AI writes anything.
+          if (core && !attempted.has(skills.id(core.skill, core.lang))) {
+            pendingCore = core;
+            return say(
+              `Not shown to them yet. Before the plan, ask ONE question about how they'd approach "${core.skill}" - a decision about this program, not trivia ("how would you tell a file changed since the last backup?"). Judge their answer with check_answer, level apply, then propose this plan again. Don't mention this rule.`,
+            );
+          }
+          const locked = pieces.filter((p) => !aiWrites(p, mode));
           if (locked.length > MAX_LOCKED) {
             return say(
               `Not shown to them: ${locked.length} of these are locked (${locked.map((p) => p.skill).join(", ")}), at most ${MAX_LOCKED}. It's above their tree. Tell them so in one line and offer the first rung - one small, whole program on what they have plus one or two new skills - then propose that. Don't mention this limit.`,
@@ -506,7 +612,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
             }
             // A course from the plan, then the plan again with whatever it unlocked.
             await takeCourse({ skill: cmd.skill, lang: cmd.lang || langFor(cmd.skill) });
-            pieces = classify(skills.read(), args.pieces, held);
+            pieces = classify(skills.read(), args.pieces, mode, held);
           }
         },
       ),
@@ -555,10 +661,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           // how you see what the build rested on.
           store.openFile(path, at);
           await new Promise((r) => setTimeout(r, FLASH_MS));
-          if (!holds(args.concept, path)) {
-            if (waiting) return say(`"${args.concept}" is still locked for them. The hole stays theirs.`);
-            const inPlan = plan.some((p) => skills.key(p.skill) === skills.key(args.concept) && p.status.state !== "unlocked");
-            if (!inPlan) {
+          const piece = pieceFor(args.concept);
+          const block = waiting ?? { concept: args.concept, kind: piece?.kind, core: piece?.core };
+          if (theirsAlways(block) || !holds(args.concept, path, needOf(block))) {
+            if (waiting) return say(`"${args.concept}" is still theirs. The hole stays.`);
+            if (!piece || aiWrites(piece, mode)) {
               return say(
                 `"${args.concept}" is locked for them and isn't a locked piece of the plan they approved. Use a skill from the plan for this block - don't hand them a hole they didn't agree to.`,
               );
@@ -570,13 +677,19 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
               requires: curriculum.prereqs(args.concept, lang),
               before: body,
               request: currentRequest,
-              lang,
+              lang: curriculum.locate(args.concept, lang).lang,
+              kind: piece.kind,
+              core: piece.core,
             };
             const known = open.some((o) => o.path === t.path && skills.key(o.concept) === skills.key(t.concept));
             setOpen([...open.filter((o) => !(o.path === t.path && skills.key(o.concept) === skills.key(t.concept))), t]);
             handedOff = false;
             if (!known) store.toolEvent("hole", `${path}: ${t.concept}`, "held");
-            return say(`"${t.concept}" is locked for them, so the hole stays theirs. Don't write it any other way.`);
+            return say(
+              t.core && mode === "understand"
+                ? `"${t.concept}" is the core of this build, so it's theirs to type. Don't write it any other way.`
+                : `"${t.concept}" is locked for them, so the hole stays theirs. Don't write it any other way.`,
+            );
           }
           const filled = todos.fill(body, args.concept, args.code);
           if (filled === null) return say(`Couldn't find the block for that in ${path}.`);
@@ -624,32 +737,40 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
           return say("Passed and unlocked. They saw your line - say nothing else about it.");
         },
       ),
-      ...(mode === "anti-vibe"
-        ? [
-            tool(
-              "check_explanation",
-              "Judge their explanation of an open hole. Passing unlocks the skill; then call fill_todo for that hole.",
-              {
-                concept: z.string().describe("The hole's skill, exactly as registered"),
-                passed: z.boolean().describe("True if it shows they get how that code works, in any words"),
-                feedback: z
-                  .string()
-                  .describe("If it passed: one short line. If it's close: one question that gets them the rest. If it's wrong: what's off, in one line."),
-              },
-              async (args) => {
-                const t = open.find((o) => skills.key(o.concept) === skills.key(args.concept));
-                if (!t) return say(`No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.`);
-                store.say(args.passed ? sentences(args.feedback, 1) : args.feedback.trim().slice(0, 400), true);
-                if (!args.passed) {
-                  reviewed = true;
-                  return say("Still open. They saw your line - say nothing else this turn.");
-                }
-                unlock({ name: t.concept, lang: t.lang ?? skills.langOf(t.path), how: "explained", requires: t.requires, why: `explained it for ${t.path}: ${args.feedback}` });
-                return say(`Unlocked. Now call fill_todo for "${t.concept}" in ${t.path}, then say nothing else.`);
-              },
-            ),
-          ]
-        : []),
+      tool(
+        "check_answer",
+        "Judge something they just said: what a skill is for (level recognize), or how they'd approach the core of this request (level apply).",
+        {
+          skill: z.string().describe("The skill, spelled as in the plan or the hole"),
+          lang: z.string().optional().describe("Its language, as in the plan. Leave out for an idea no language owns."),
+          level: z.enum(["recognize", "apply"]).describe("recognize: they said what it is and what it's for. apply: they reasoned about how to approach it here."),
+          passed: z.boolean().describe("True when it shows they get it, in any words - the gist is enough, don't hold out for jargon"),
+          feedback: z
+            .string()
+            .describe("If it passed: one short line. If it's close: one question that gets them the rest. If it's wrong: what's off, in one line."),
+        },
+        async (args) => {
+          // Spelled as the plan spelled it, language and all, even when the intern leaves it off.
+          const known = [pendingCore, ...plan].find((p) => p && skills.key(p.skill) === skills.key(args.skill));
+          const lang = args.lang === undefined && known ? known.lang : curriculum.locate(args.skill, args.lang ?? "").lang;
+          const name = curriculum.canonical(args.skill, lang);
+          const k = skills.id(name, lang);
+          store.say(args.passed ? `✓ ${sentences(args.feedback, 1)}` : args.feedback.trim().slice(0, 400), true);
+          if (args.level === "apply") attempted.add(k);
+          if (!args.passed) {
+            return say(
+              args.level === "apply"
+                ? "Recorded as not there yet - the core stays theirs whatever the mode. Say nothing more about it; propose the plan."
+                : "Still not recognized. They saw your line - say nothing else this turn.",
+            );
+          }
+          unlock({ name, lang, how: args.level === "apply" ? "reasoned" : "explained", requires: curriculum.prereqs(name, lang), why: args.feedback });
+          if (args.level === "apply") return say("Their reasoning holds. Propose the plan now.");
+          const hole = open.find((t) => skills.key(t.concept) === skills.key(name) && holds(t.concept, t.path, needOf(t)));
+          if (hole) return say(`Recognized. Now call fill_todo for "${hole.concept}" in ${hole.path}, then say nothing else.`);
+          return say(plan.length && !approved ? "Recognized. Propose the plan again so they see it moved." : "Recognized. Say nothing else about it.");
+        },
+      ),
     ],
   });
 
@@ -883,7 +1004,7 @@ async function applied(session: unknown): Promise<{ model: string; effort: strin
 
 /** The curated tracks, for the intern to spell skills the same way. */
 function tracks(): string {
-  const lines = curriculum.languages().map((l) => `${l}: ${curriculum.track(l)!.skills.map((n) => n.name).join(", ")}`);
+  const lines = curriculum.tracks().map((t) => `${t.lang || "any language"} (${t.name}): ${t.skills.map((n) => n.name).join(", ")}`);
   return lines.length ? `THE CURATED TRACKS - skill names per language, lowest first. Spell skills this way.\n${lines.join("\n")}` : "";
 }
 

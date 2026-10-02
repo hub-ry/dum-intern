@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { unlock, find, named, holds, spoken, key, id, read, write, remove, reset, folder, describe, label, langOf, extFor, type Tree } from "../src/skills.ts";
+import { unlock, find, named, holds, spoken, levelIn, key, id, read, write, remove, reset, folder, describe, label, langOf, extFor, type Tree } from "../src/skills.ts";
 
 const empty: Tree = { skills: [] };
 const home = () => mkdtempSync(`${tmpdir()}/dum-skills-`);
@@ -25,13 +25,28 @@ test("a language-scoped skill counts only in its language", () => {
   assert.ok(!holds(t, "for loops", "c++"));
 });
 
-test("an idea with no language counts only where they've unlocked something", () => {
-  let t = unlock(empty, { name: "recursion", how: "explained", why: "" });
+test("an idea with no language counts only where they've written something", () => {
+  let t = unlock(empty, { name: "recursion", how: "typed", why: "" });
   assert.ok(!holds(t, "recursion", "rust"), "knowing recursion doesn't write rust");
+  t = unlock(t, { name: "serde", lang: "rust", how: "explained", why: "" });
+  assert.ok(!spoken(t, "rust"), "recognizing a library isn't writing rust");
   t = unlock(t, { name: "printing", lang: "rust", how: "typed", why: "" });
   assert.ok(spoken(t, "rust"));
   assert.ok(holds(t, "recursion", "rust"));
   assert.ok(holds(t, "recursion", ""), "with no language at all, any unlock counts");
+});
+
+test("a level only goes up, and holds asks for one", () => {
+  let t = unlock(empty, { name: "hash maps", lang: "python", how: "explained", why: "said what it's for" });
+  assert.equal(find(t, "hash maps", "python")?.level, "recognize");
+  assert.ok(holds(t, "hash maps", "python", "recognize"));
+  assert.ok(!holds(t, "hash maps", "python"), "recognizing isn't building");
+  t = unlock(t, { name: "hash maps", lang: "python", how: "reasoned", why: "picked it for lookup by id" });
+  t = unlock(t, { name: "hash maps", lang: "python", how: "explained", why: "again" });
+  assert.equal(find(t, "hash maps", "python")?.level, "apply");
+  assert.equal(find(t, "hash maps", "python")?.how, "reasoned", "a lower showing doesn't overwrite how it got higher");
+  assert.equal(levelIn(t, "hash maps", "python"), "apply");
+  assert.equal(levelIn(t, "trees", "python"), null);
 });
 
 test("respellings are one node, a symbol is not", () => {
@@ -72,6 +87,8 @@ test("an older tree still loads: solid notes count, shaky ones were only taught 
   writeFileSync(`${folder(dir)}/broken.md`, "---\nname: [unclosed\n---\n");
   const t = read(dir);
   assert.equal(find(t, "leases")?.how, "explained");
+  assert.equal(find(t, "leases")?.level, "recognize", "explaining was recognition all along");
+  assert.equal(find(t, "for loops", "c++")?.level, "build");
   assert.equal(find(t, "for loops", "c++")?.how, "typed");
   assert.equal(find(t, "structs")?.how, "added", "a note written by hand is an add");
   assert.equal(find(t, "heartbeats"), undefined);
@@ -105,8 +122,8 @@ test("the intern sees what's unlocked by language, and that everything else is l
   const t = unlock(unlock(empty, { name: "printing", lang: "rust", how: "typed", why: "" }), { name: "recursion", how: "explained", why: "" });
   const text = describe(t);
   assert.match(text, /Anything not here is locked/);
-  assert.match(text, /rust:\n  - printing/);
-  assert.match(text, /any language:\n  - recursion/);
+  assert.match(text, /rust:\n  - printing \(build\)/);
+  assert.match(text, /any language:\n  - recursion \(recognize\)/);
 });
 
 test("file extensions map to languages and back", () => {

@@ -1,0 +1,21 @@
+# The builder track: what turns a language into software. No language owns these, so they count
+# in any language you've written something in. `in` is the language a course is written in when
+# the skill lives outside one; otherwise it's whatever you're working in.
+lang: ""
+track: builder
+skills:
+  - command-line programs: [functions]
+  - files: [command-line programs]
+  - json: [files]
+  - git: { requires: [command-line programs], in: shell }
+  - testing: [functions]
+  - http: [command-line programs]
+  - rest apis: [http, json]
+  - databases: [files]
+  - sql: { requires: [databases], in: sql }
+  - processes: { requires: [command-line programs], in: shell }
+  - concurrency: [processes]
+  - networking: [http, concurrency]
+  - linux shell: { requires: [processes], in: shell }
+  - docker: { requires: [linux shell, processes], in: shell }
+  - caching: [rest apis, databases]

@@ -18,6 +18,10 @@ export type Todo = {
   request?: string;
   /** The language the skill is scoped to, if any - carried to the tree when it passes. */
   lang?: string;
+  /** A concept to write, or a tool to recognize - what it needs before AI may fill it. */
+  kind?: "concept" | "tool";
+  /** The heart of its build: in understand mode, always theirs. */
+  core?: boolean;
 };
 
 /** The 0-based line the hole for `concept` starts on, or -1. Any marker if no concept matches. */

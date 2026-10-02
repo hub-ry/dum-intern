@@ -146,7 +146,7 @@ test("the plan is laid out by dum, and whether a piece is locked is the tree's c
   const card = planCard("a recursive | fibonacci", pieces, "understand", "python fib.py");
   assert.equal(
     card,
-    "**a recursive / fibonacci**\n\n## dum writes\n- printing (python)\n\n## you type, or take the course\n- return values (python): fib returns the nth number · `course return values`\n\n## locked deeper\n- recursion (python): needs return values · start with `course return values`\n\n## run\n- `python fib.py`",
+    "**a recursive / fibonacci**\n\n## you already know - dum writes\n- printing (python)\n\n## you type, or take the course\n- return values (python): fib returns the nth number · `course return values`\n\n## locked deeper\n- recursion (python): needs return values · start with `course return values`\n\n## run\n- `python fib.py`",
   );
   assert.match(planCard("x", pieces, "anti-vibe"), /## you explain, or take the course/);
   const shown = markdown(card, 60).map(printable);
@@ -158,7 +158,7 @@ test("a skill taken back with not yet reads as locked in the plan, whatever the 
   const { unlock, id } = await import("../src/skills.ts");
   const t = unlock({ skills: [] }, { name: "printing", lang: "rust", how: "typed", why: "" });
   assert.equal(classify(t, [{ skill: "printing", lang: "rust", what: "" }])[0]!.status.state, "unlocked");
-  assert.equal(classify(t, [{ skill: "printing", lang: "rust", what: "" }], new Set([id("printing", "rust")]))[0]!.status.state, "open");
+  assert.equal(classify(t, [{ skill: "printing", lang: "rust", what: "" }], "understand", new Set([id("printing", "rust")]))[0]!.status.state, "open");
 });
 
 test("the language a repo is written in is the one most of its files are", async () => {
@@ -190,4 +190,49 @@ test("a plan and a course each take the board, and a course ends back on the cod
   s.endCourse(card, true);
   assert.equal(s.getSnapshot().stage.kind, "code");
   assert.ok(s.getSnapshot().transcript.some((e) => e.kind === "course" && e.passed === true));
+});
+
+test("a tool only needs recognizing, a concept needs building, and the core is yours in understand mode", async () => {
+  const { classify, planCard, aiWrites, needFor } = await import("../src/session.ts");
+  const { unlock } = await import("../src/skills.ts");
+  let t = { skills: [] as import("../src/skills.ts").Skill[] };
+  for (const name of ["printing", "variables", "functions", "conditionals", "lists", "for loops"]) t = unlock(t, { name, lang: "python", how: "typed", why: "" });
+  t = unlock(t, { name: "watchdog", lang: "python", how: "explained", why: "watches a folder for changes" });
+  t = unlock(t, { name: "change detection", lang: "python", how: "reasoned", why: "compare hashes to the last run" });
+  const raw = [
+    { skill: "for loops", lang: "python", what: "walk the files" },
+    { skill: "watchdog", lang: "python", what: "watch the folder", kind: "tool" as const },
+    { skill: "argparse", lang: "python", what: "read the folder to watch", kind: "tool" as const },
+    { skill: "dictionaries", lang: "python", what: "the last hash per file", kind: "tool" as const },
+    { skill: "change detection", lang: "python", what: "which files changed since the last backup", core: true },
+  ];
+  const u = classify(t, raw, "understand");
+  assert.equal(u.find((p) => p.skill === "dictionaries")!.kind, "concept", "a track skill is a concept whatever the intern says");
+  assert.deepEqual(u.map((p) => [p.skill, aiWrites(p, "understand")]), [
+    ["for loops", true],
+    ["watchdog", true],
+    ["argparse", false],
+    ["dictionaries", false],
+    ["change detection", false],
+  ]);
+  const card = planCard("backs up what changed", u, "understand");
+  assert.match(card, /## you already know - dum writes\n- for loops \(python\)\n/);
+  assert.match(card, /## ai may implement\n- watchdog \(python\): a tool you recognize\n/);
+  assert.match(card, /## you must implement\n- change detection \(python\): which files changed since the last backup\n/);
+  assert.match(card, /## what's it for\?\n- argparse \(python\): read the folder to watch · say what it's for, in a line\n/);
+  assert.match(card, /## you type, or take the course\n- dictionaries \(python\)/);
+  const a = classify(t, raw, "anti-vibe");
+  assert.ok(aiWrites(a.find((p) => p.core)!, "anti-vibe"), "in anti-vibe, reasoning that holds lets AI write the core");
+  assert.match(planCard("x", a, "anti-vibe"), /- change detection \(python\): your reasoning holds/);
+  assert.equal(needFor("tool", "understand"), "recognize");
+  assert.equal(needFor("concept", "understand"), "build");
+  assert.equal(needFor("concept", "anti-vibe"), "recognize");
+});
+
+test("a builder skill asked for from a language is the language-free one", async () => {
+  const { classify } = await import("../src/session.ts");
+  const { unlock } = await import("../src/skills.ts");
+  const t = unlock({ skills: [] }, { name: "functions", lang: "go", how: "typed", why: "" });
+  const [p] = classify(t, [{ skill: "Command-line programs", lang: "go", what: "flags" }]);
+  assert.deepEqual([p!.skill, p!.lang, p!.kind, p!.status.state], ["command-line programs", "", "concept", "open"]);
 });

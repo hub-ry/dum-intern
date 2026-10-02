@@ -133,7 +133,7 @@ export function thread(s: State, width: number): Line[] {
         break;
       case "plan":
         gap();
-        say("dum", e.paused ? "plan on hold - course first." : e.approved === null ? "the plan's up - build it?" : e.approved ? "plan approved - building." : "not building that one.", newest);
+        say("dum", e.paused ? "plan on hold - course first." : e.approved === null ? "the plan's up - build it?" : e.approved ? "plan approved - building." : "plan sent back with your reply.", newest);
         break;
       case "course": {
         const what = e.card.lang ? `${e.card.skill} (${e.card.lang})` : e.card.skill;

@@ -8,6 +8,7 @@ import { banner, runPlain, Input } from "./plain.ts";
 import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
 import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
+import * as boundary from "./boundary.ts";
 import * as todos from "./todos.ts";
 import * as shell from "./shell.ts";
 import { debugTo } from "./debug.ts";
@@ -24,6 +25,7 @@ type Args = {
   plain: boolean;
   request: string;
   show: boolean;
+  bounds: boolean;
   forget: string[] | null;
   reset: boolean;
   add: string[] | null;
@@ -34,6 +36,7 @@ function parse(args: string[]): Args {
   let mode: Mode = "understand";
   let plain = false;
   let show = false;
+  let bounds = false;
   let forget: string[] | null = null;
   let reset = false;
   let addArgs: string[] | null = null;
@@ -45,6 +48,7 @@ function parse(args: string[]): Args {
     else if (a === "--anti-vibe" || a === "-a") mode = "anti-vibe";
     else if (a === "--plain" || a === "-p") plain = true;
     else if (a === "--skills" || a === "-s") show = true;
+    else if (a === "--boundary" || a === "-b") bounds = true;
     else if (a === "--forget") forget = args.slice(i + 1);
     else if (a === "--reset") reset = true;
     else if (a === "--add") addArgs = args.slice(i + 1);
@@ -52,7 +56,7 @@ function parse(args: string[]): Args {
     else rest.push(a);
     if (forget !== null || addArgs !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, forget, reset, add: addArgs, fresh };
+  return { mode, plain, request: rest.join(" ").trim(), show, bounds, forget, reset, add: addArgs, fresh };
 }
 
 /** `"recursion" --in python` into a name and a language. */
@@ -81,15 +85,34 @@ function printSkills(root: string) {
   }
   console.log();
   for (const l of curriculum.view(t, langs)) {
-    const m = /^(\s*)([●○·]) (.*)$/.exec(l);
+    const m = /^(\s*)([●◐○·]) (.*)$/.exec(l);
     if (!m) console.log(l ? `  ${c.bold(l)}` : "");
-    else if (m[2] === "●") console.log(`  ${m[1]}${c.green("●")} ${m[3]}`);
+    else if (m[2] === "●") console.log(`  ${m[1]}${c.green("●")} ${m[3]!.replace(/  applied$/, c.dim("  applied"))}`);
+    else if (m[2] === "◐") console.log(`  ${m[1]}${c.blue("◐")} ${m[3]!.replace(/  recognized$/, c.dim("  recognized"))}`);
     else if (m[2] === "○") console.log(`  ${m[1]}${c.blue("○")} ${m[3]!.replace(/  course open$/, c.dim("  course open"))}`);
     else console.log(`  ${m[1]}${c.dim(`· ${m[3]}`)}`);
   }
   const where = `${skills.folder()}/`.replace(homedir(), "~");
-  console.log(`  ${c.green("●")} ${c.dim("unlocked")}   ${c.blue("○")} ${c.dim("course open")}   ${c.dim("· locked")}`);
+  console.log(`  ${c.green("●")} ${c.dim("built - AI writes it")}   ${c.blue("◐")} ${c.dim("recognized - AI may use it as a tool")}   ${c.blue("○")} ${c.dim("course open")}   ${c.dim("· locked")}`);
   console.log(`  ${c.dim(`one note per skill in ${where} - open the folder in Obsidian if you like.`)}`);
+  console.log();
+}
+
+/** What AI may do in the repo you're standing in. */
+function printBoundary() {
+  const root = repoRoot();
+  if (!root) {
+    console.error(`\n  ${c.red("✗")} not in a git repo - the boundary is about one project.\n`);
+    exit(1);
+  }
+  const repo = readRepo(root);
+  console.log(`\n  ${c.bold(`what AI may do in ${repo.name}`)}\n`);
+  for (const l of boundary.lines(boundary.boundary(skills.read(), root, repo.files))) {
+    if (/^\s+✓/.test(l)) console.log(`  ${l.replace("✓", c.green("✓"))}`);
+    else if (/^\s+\?/.test(l)) console.log(`  ${c.dim(l)}`);
+    else if (/^\S/.test(l)) console.log(`  ${c.bold(l)}`);
+    else console.log(`  ${l}`);
+  }
   console.log();
 }
 
@@ -181,6 +204,7 @@ function printHelp() {
 
   ${d("your skill tree")}
   dum --skills              what's unlocked, open, and locked
+  dum --boundary            what AI may do in this repo
   dum --add "x, y" --in c   add skills you can write without AI, lowest first
   dum --forget "x" --in c   lock one again ${d("(--reset: start over)")}
 
@@ -199,10 +223,11 @@ function repoRoot(): string {
 
 async function main() {
   if (argv.slice(2).some((a) => a === "--help" || a === "-h")) return printHelp();
-  const { mode, plain, request: fromArgs, show, forget, reset, add: addArgs, fresh } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, bounds, forget, reset, add: addArgs, fresh } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works from anywhere.
   if (show) return printSkills(repoRoot());
+  if (bounds) return printBoundary();
   if (reset) return resetSkills();
   if (addArgs !== null) {
     const { name, lang } = nameAndLang(addArgs);
@@ -249,10 +274,13 @@ async function main() {
   store.onSkills = () => {
     const t = skills.read();
     const lines = curriculum.view(t, langsToShow(t, repo.root));
-    return [...(lines.length ? lines : ["nothing unlocked yet."]), "● unlocked   ○ course open   · locked", "course <skill> takes one."].join("\n");
+    return [...(lines.length ? lines : ["nothing unlocked yet."]), "● built   ◐ recognized   ○ course open   · locked", "course <skill> takes one."].join("\n");
   };
-  // An empty tree is where people go wrong: say how it works, once, up front.
+  store.onBoundary = () => boundary.lines(boundary.boundary(skills.read(), repo.root, repo.files)).join("\n");
+  // An empty tree is where people go wrong: say how it works, once, up front. Otherwise, in a
+  // repo with something in it, the first thing is what AI may do here.
   if (!skills.read().skills.length) store.show("nothing's unlocked yet", EMPTY_TREE);
+  else if (!fromArgs && repo.files.some((f) => skills.langOf(f))) store.command("boundary");
 
   // A pane layout needs a terminal it can own.
   const tui = !plain && stdout.isTTY && stdin.isTTY;
@@ -309,8 +337,8 @@ async function main() {
     const request =
       fromArgs ||
       (holes.length
-        ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, `${how}. or course ${holes[0]!.concept}. or ask for something else.`)
-        : await store.askQuestion("what do you want?", "")
+        ? await store.askQuestion(`your turn: ${holes[0]!.concept} in ${holes[0]!.path}`, `${how}. or course ${holes[0]!.concept}. or ask for something else.`, false)
+        : await store.askQuestion("what do you want?", "", false)
       ).trim();
     if (!request) {
       store.note("nothing to do.");

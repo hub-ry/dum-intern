@@ -5,7 +5,24 @@ import { homedir } from "node:os";
 import { fileName, fromNote, toNote } from "./notes.ts";
 
 /** How a skill got unlocked. Every way is something they did, never something dum assumed. */
-export type How = "typed" | "explained" | "course" | "added";
+export type How = "typed" | "explained" | "course" | "added" | "reasoned";
+
+/**
+ * How far they've shown it. Recognize: they can say what it is and what it's for. Build: they
+ * wrote it themselves. Apply: they decided when and why to reach for it, on a real project.
+ */
+export type Level = "recognize" | "build" | "apply";
+
+export const LEVELS: Level[] = ["recognize", "build", "apply"];
+
+export function rank(l: Level): number {
+  return LEVELS.indexOf(l) + 1;
+}
+
+/** The level a way of unlocking shows. */
+export function levelOf(how: How): Level {
+  return how === "explained" ? "recognize" : how === "reasoned" ? "apply" : "build";
+}
 
 export type Skill = {
   /** The name an engineer says out loud, so it matches the curated trees and what the wizard says. */
@@ -13,6 +30,7 @@ export type Skill = {
   /** The one language it's about, or "" for an idea that carries across languages. */
   lang: string;
   how: How;
+  level: Level;
   /** Skills this one builds on directly, by name. */
   requires: string[];
   why: string;
@@ -158,7 +176,7 @@ export function reset(dir = home()): string | null {
   return moved ? aside : null;
 }
 
-export type Unlock = { name: string; lang?: string; how: How; requires?: string[]; why: string };
+export type Unlock = { name: string; lang?: string; how: How; level?: Level; requires?: string[]; why: string };
 
 /** The tree with one more skill unlocked, or an existing one refreshed. */
 export function unlock(t: Tree, u: Unlock): Tree {
@@ -171,12 +189,16 @@ export function unlock(t: Tree, u: Unlock): Tree {
     const name = r.trim();
     if (name && key(name) !== key(u.name) && !requires.some((x) => key(x) === key(name))) requires.push(name);
   }
+  // A level never goes down by being shown again at a lower one.
+  const level = u.level ?? levelOf(u.how);
+  const raised = !prev || rank(level) >= rank(prev.level);
   const next: Skill = {
     name: prev?.name ?? u.name.trim(),
     lang,
-    how: u.how,
+    how: raised ? u.how : prev.how,
+    level: raised ? level : prev.level,
     requires: requires.slice(0, 3),
-    why: u.why,
+    why: raised ? u.why : prev.why,
     at: new Date().toISOString(),
   };
   return { skills: [...t.skills.filter((s) => idOf(s) !== me), next] };
@@ -194,20 +216,27 @@ export function named(t: Tree, name: string): Skill[] {
 }
 
 /**
- * Whether it's theirs, for writing code on it in this language. The language-free idea counts
- * too, but only in a language they've shown something in: knowing recursion doesn't write Rust.
+ * Whether it's theirs at `need` or above, in this language. The language-free idea counts too,
+ * but only in a language they've shown something in: knowing recursion doesn't write Rust.
  */
-export function holds(t: Tree, name: string, lang: string): boolean {
+export function holds(t: Tree, name: string, lang: string, need: Level = "build"): boolean {
   const l = langName(lang);
-  if (find(t, name, l)) return true;
-  if (!l) return named(t, name).length > 0;
-  return !!find(t, name, "") && spoken(t, l);
+  const enough = (s: Skill | undefined) => !!s && rank(s.level) >= rank(need);
+  if (enough(find(t, name, l))) return true;
+  if (!l) return named(t, name).some(enough);
+  return enough(find(t, name, "")) && spoken(t, l);
 }
 
-/** Whether they've unlocked anything at all in this language. */
+/** The highest level they've shown a skill at here, or null. */
+export function levelIn(t: Tree, name: string, lang: string): Level | null {
+  for (const l of [...LEVELS].reverse()) if (holds(t, name, lang, l)) return l;
+  return null;
+}
+
+/** Whether they've written anything at all in this language. Recognizing a library isn't that. */
 export function spoken(t: Tree, lang: string): boolean {
   const l = langName(lang);
-  return t.skills.some((s) => s.lang === l);
+  return t.skills.some((s) => s.lang === l && rank(s.level) >= rank("build"));
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -226,7 +255,7 @@ export function langName(l: string): string {
 const EXT_LANG: Record<string, string> = {
   c: "c", h: "c", cc: "c++", cpp: "c++", cxx: "c++", hpp: "c++", hh: "c++", py: "python", js: "javascript", mjs: "javascript",
   cjs: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", rs: "rust", go: "go", java: "java", rb: "ruby",
-  swift: "swift", kt: "kotlin", cs: "c#", php: "php", lua: "lua", sh: "shell", bash: "shell", zsh: "shell", zig: "zig", dart: "dart",
+  swift: "swift", kt: "kotlin", cs: "c#", php: "php", lua: "lua", sh: "shell", bash: "shell", zsh: "shell", zig: "zig", dart: "dart", sql: "sql",
 };
 
 /** The language a file is written in, by extension. "" when it isn't source. */
@@ -254,12 +283,14 @@ export function describe(t: Tree): string {
   const byLang = new Map<string, Skill[]>();
   for (const s of t.skills) byLang.set(s.lang, [...(byLang.get(s.lang) ?? []), s]);
   const out = [
-    "THEIR SKILL TREE - what they've unlocked. Anything not here is locked.",
+    "THEIR SKILL TREE - what they've unlocked, and how far: recognize (can say what",
+    "it is and what it's for), build (wrote it themselves), apply (decided when and",
+    "why to use it on a real project). Anything not here is locked.",
     "A skill under a language counts only in that language. An idea with no",
     "language counts in any language they've unlocked something in.",
   ];
   for (const [lang, list] of [...byLang].sort(([a], [b]) => a.localeCompare(b))) {
-    out.push("", `${lang || "any language"}:`, ...list.map((s) => `  - ${s.name}`));
+    out.push("", `${lang || "any language"}:`, ...list.map((s) => `  - ${s.name} (${s.level})`));
   }
   return out.join("\n");
 }

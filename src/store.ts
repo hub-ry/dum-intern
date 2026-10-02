@@ -38,7 +38,8 @@ export type Entry =
 
 /** What the agent is currently blocked on, if anything. */
 export type Prompt =
-  | { type: "question"; question: string; why: string }
+  /** `intern`: the intern asking, which takes the right side back from a help-type board. */
+  | { type: "question"; question: string; why: string; intern?: boolean }
   | { type: "plan"; plan: string }
   | { type: "course"; card: CourseCard }
   | { type: "next" }
@@ -135,6 +136,9 @@ export class Store {
   /** Set by the runner: what `:skills` shows. */
   onSkills: (() => string) | null = null;
 
+  /** Set by the runner: what `:boundary` shows. */
+  onBoundary: (() => string) | null = null;
+
   /** Set by the runner: "not yet", with the skill named or "" for the last one checked off. */
   onNotYet: ((name: string) => boolean) | null = null;
 
@@ -170,8 +174,8 @@ export class Store {
 
   /** A person submitted a line. */
   submit(text: string) {
-    // `:run`, `:log`, `:help`, `:skills` - dum's commands, vim's ex line.
-    const ex = /^:\s*(run|log|help|skills)\s*$/i.exec(text.trim());
+    // `:run`, `:log`, `:help`, `:skills`, `:boundary` - dum's commands, vim's ex line.
+    const ex = /^:\s*(run|log|help|skills|boundary)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
       return;
@@ -348,6 +352,7 @@ export class Store {
 
     if (name === "log") return this.toggleTranscript();
     if (name === "skills") return this.show("your skill tree", this.onSkills?.() ?? "");
+    if (name === "boundary") return this.show(`what AI may do in ${this.state.repo}`, this.onBoundary?.() ?? "");
     if (name === "help") {
       return this.show(
         "dum",
@@ -355,6 +360,7 @@ export class Store {
           "course x    unlock a skill: a short course with dum and the wizard",
           "            (course x in rust, for another language)",
           ":skills     what's unlocked, what's open, what's locked",
+          ":boundary   what AI may do in this repo",
           "cd, gcc, echo, git, ./a.out ...   run in the shell as typed",
           "!command    anything else in the shell  (! alone opens it)",
           ":run        run the file you're looking at",
@@ -422,9 +428,9 @@ export class Store {
   }
 
   /** Ask one question and park until it is answered. */
-  askQuestion(question: string, why: string): Promise<string> {
+  askQuestion(question: string, why: string, intern = true): Promise<string> {
     const id = this.append({ kind: "question", question, why, answer: null });
-    return this.park({ type: "question", question, why }, id);
+    return this.park({ type: "question", question, why, intern }, id);
   }
 
   /** The `what next` prompt between turns. Same channel, no question text. */
@@ -474,7 +480,7 @@ export class Store {
   private park<T = string>(prompt: Prompt, entryId: number): Promise<T> {
     // dum asking something takes the characters' side back from help-type
     // boards. A course or reply stays up, with the question at its foot.
-    if (prompt?.type === "question" && this.state.stage.kind === "info") {
+    if (prompt?.type === "question" && prompt.intern && this.state.stage.kind === "info") {
       this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
     }
     const early = this.typedAhead.shift();

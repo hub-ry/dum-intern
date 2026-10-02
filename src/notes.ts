@@ -1,9 +1,9 @@
 // One skill, as a markdown note you can open, edit, or write yourself.
 
 import YAML from "yaml";
-import { langName, type How, type Skill } from "./skills.ts";
+import { langName, levelOf, LEVELS, type How, type Level, type Skill } from "./skills.ts";
 
-const HOWS: How[] = ["typed", "explained", "course", "added"];
+const HOWS: How[] = ["typed", "explained", "course", "added", "reasoned"];
 
 /** The file a skill lives in. */
 export function fileName(name: string): string {
@@ -28,9 +28,10 @@ export function toNote(s: Skill): string {
   const front: Record<string, unknown> = { name: s.name };
   if (s.lang) front.lang = s.lang;
   front.how = s.how;
+  front.level = s.level;
   if (s.at) front.at = s.at;
-  // Tags, so Obsidian's graph can colour by how it was unlocked.
-  front.tags = [`dum/${s.how}`];
+  // Tags, so Obsidian's graph can colour by level.
+  front.tags = [`dum/${s.level}`];
   const body = [s.why.trim(), s.requires.length ? `builds on: ${s.requires.map((r) => link(r, s.lang)).join(", ")}` : ""]
     .filter(Boolean)
     .join("\n\n");
@@ -72,10 +73,12 @@ export function fromNote(text: string, file: string): Skill | null {
     const r = (alias ?? target!).trim();
     if (r && !requires.includes(r)) requires.push(r);
   }
+  const level: Level = str(front.level) && (LEVELS as string[]).includes(front.level) ? (front.level as Level) : levelOf(how);
   return {
     name,
     lang: str(front.lang) ? langName(front.lang) : "",
     how,
+    level,
     requires,
     why: body.replace(BUILDS_ON, "").trim(),
     at: str(front.at) ? front.at : front.at instanceof Date ? front.at.toISOString() : "",

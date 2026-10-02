@@ -1,6 +1,7 @@
 # Rust, roughly in the order people meet it. Each skill names only what it builds on directly.
 # printing includes fn main and println!.
 lang: rust
+track: basics
 skills:
   - printing
   - variables: [printing]

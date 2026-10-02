@@ -1,6 +1,7 @@
 # Java, roughly in the order people meet it. Each skill names only what it builds on directly.
 # printing includes the class and public static void main around it.
 lang: java
+track: basics
 skills:
   - printing
   - variables: [printing]

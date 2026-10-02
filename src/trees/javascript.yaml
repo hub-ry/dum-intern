@@ -1,5 +1,6 @@
 # JavaScript, roughly in the order people meet it. Each skill names only what it builds on directly.
 lang: javascript
+track: basics
 skills:
   - printing
   - variables: [printing]

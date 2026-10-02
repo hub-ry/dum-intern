@@ -43,8 +43,8 @@ export function lockedLine(name: string, lang: string, st: Extract<curriculum.St
 }
 
 function designPrompt(name: string, lang: string, t: skills.Tree, path: string): string {
-  const held = t.skills.filter((s) => s.lang === lang || !s.lang).map((s) => s.name);
-  const pool = curriculum.track(lang)?.skills.map((n) => n.name) ?? [];
+  const held = t.skills.filter((s) => (s.lang === lang || !s.lang) && skills.rank(s.level) >= skills.rank("build")).map((s) => s.name);
+  const pool = [...curriculum.names(lang), ...curriculum.names("")];
   return `You are dum, an intern, writing a course that takes about three minutes. One idea,
 taught to someone who has exactly the skills listed below and nothing more.
 
@@ -154,12 +154,16 @@ export type Ctx = {
 
 const QUIT = /^(quit|skip|exit|stop|leave|back|nevermind|never mind)[.!]*$/i;
 
-/** Run a course start to finish. True when the skill ends up unlocked. */
-export async function take(name: string, lang: string, ctx: Ctx): Promise<boolean> {
+/**
+ * Run a course start to finish. True when the skill ends up unlocked. `lang` is the skill's own
+ * ("" for an idea like http); `exercise` is the language its gap is written in.
+ */
+export async function take(name: string, lang: string, ctx: Ctx, exercise = lang): Promise<boolean> {
   const { store, root } = ctx;
   lang = skills.langName(lang);
-  if (!lang) {
-    store.say(`a course is in one language - say which: course ${name.trim()} in python`);
+  exercise = skills.langName(exercise) || lang;
+  if (!exercise) {
+    store.say(`a course is written in one language - say which: course ${name.trim()} in python`);
     return false;
   }
   const nm = curriculum.canonical(name, lang);
@@ -175,8 +179,8 @@ export async function take(name: string, lang: string, ctx: Ctx): Promise<boolea
   }
 
   store.working(`putting together a course on ${what}`);
-  const path = `.dum/courses/${slug(nm)}.${skills.extFor(lang)}`;
-  const [c, line] = await Promise.all([design(nm, lang, skills.read(), path), wizard.aside(nm, lang)]);
+  const path = `.dum/courses/${slug(nm)}.${skills.extFor(exercise)}`;
+  const [c, line] = await Promise.all([design(nm, exercise, skills.read(), path), wizard.aside(nm, exercise)]);
   if (!c) {
     store.say(`couldn't put a course on ${what} together. try again in a sec.`);
     return false;
@@ -199,7 +203,7 @@ export async function take(name: string, lang: string, ctx: Ctx): Promise<boolea
     store.say(`couldn't write ${path}: ${(err as Error).message}`);
     return false;
   }
-  const card: CourseCard = { ...c, wizard: line ?? "" };
+  const card: CourseCard = { ...c, lang, wizard: line ?? "" };
   store.course(card);
   const at = () => Math.max(0, todos.hole(read() ?? "", nm));
   const read = () => {

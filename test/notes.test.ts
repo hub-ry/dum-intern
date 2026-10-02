@@ -7,6 +7,7 @@ const skill = (over: Partial<Skill> = {}): Skill => ({
   name: "recursion",
   lang: "",
   how: "typed",
+  level: "build",
   requires: [],
   why: "",
   at: "2026-10-02T04:03:15.135Z",
@@ -14,9 +15,9 @@ const skill = (over: Partial<Skill> = {}): Skill => ({
 });
 
 test("a note round-trips every way a skill gets unlocked", () => {
-  for (const how of ["typed", "explained", "course", "added"] as const) {
+  for (const [how, level] of [["typed", "build"], ["explained", "recognize"], ["course", "build"], ["added", "build"], ["reasoned", "apply"]] as const) {
     for (const lang of ["", "python"]) {
-      const s = skill({ how, lang, requires: ["functions", "Side / ranking"], why: "They said `x`." });
+      const s = skill({ how, level, lang, requires: ["functions", "Side / ranking"], why: "They said `x`." });
       assert.deepEqual(fromNote(toNote(s), fileName(s.name)), s);
     }
   }
@@ -25,7 +26,8 @@ test("a note round-trips every way a skill gets unlocked", () => {
 test("builds-on links point at the prerequisite's note in the same language", () => {
   const text = toNote(skill({ lang: "python", requires: ["functions"] }));
   assert.match(text, /builds on: \[\[functions \(python\)\|functions\]\]/);
-  assert.match(text, /tags:\n  - dum\/typed/);
+  assert.match(text, /level: build/);
+  assert.match(text, /tags:\n  - dum\/build/);
   assert.match(toNote(skill({ requires: ["retries"] })), /builds on: \[\[retries\]\]/);
 });
 
@@ -40,6 +42,7 @@ test("a note with nothing in it is a skill somebody added by hand", () => {
     name: "pointers",
     lang: "",
     how: "added",
+    level: "build",
     requires: ["arrays"],
     why: "can do these\n\nsee [[arrays]]",
     at: "",

@@ -243,7 +243,7 @@ export function format(e: Entry, width: number): string[] {
       return [
         "",
         ...box(c.green, "plan", markdown(e.plan, width - 4), width),
-        ...(e.paused ? [c.dim("  on hold - course first")] : e.approved === null ? [] : [e.approved ? c.green("  approved") : c.dim("  not built")]),
+        ...(e.paused ? [c.dim("  on hold - course first")] : e.approved === null ? [] : [e.approved ? c.green("  approved") : c.dim("  sent back with your reply")]),
         "",
       ];
     case "question": {

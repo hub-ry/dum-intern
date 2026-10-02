@@ -1,6 +1,7 @@
 # C, roughly in the order people meet it. Each skill names only what it builds on directly.
 # printing includes the skeleton every C program needs: the include and main.
 lang: c
+track: basics
 skills:
   - printing
   - variables: [printing]
