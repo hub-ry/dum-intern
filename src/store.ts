@@ -129,6 +129,9 @@ export class Store {
   /** Set by the renderer: run a `:` command on the open file. */
   onEditorCommand: ((cmd: string) => void) | null = null;
 
+  /** Set by the runner: told about every file they save. */
+  onSaved: ((path: string) => void) | null = null;
+
   /** Set by the runner: what `:skills` shows. */
   onSkills: (() => string) | null = null;
 
@@ -292,6 +295,7 @@ export class Store {
       return (err as Error).message;
     }
     this.note(`you wrote ${path}`);
+    this.onSaved?.(path);
     const code = this.state.code;
     if (code && code.path === path) this.patch({ code: { ...code, body: text, onDisk: true } });
     return null;

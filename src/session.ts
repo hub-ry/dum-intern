@@ -13,6 +13,7 @@ import * as todos from "./todos.ts";
 import { sentences } from "./lines.ts";
 import type { Store } from "./store.ts";
 import { debugTo } from "./debug.ts";
+import * as guard from "./guard.ts";
 
 /** What a locked skill costs you: typing it, or explaining it. Either way a course unlocks it. */
 export type Mode = "understand" | "anti-vibe";
@@ -670,6 +671,33 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   /** Writes the gate let through, by tool-use id, until their result arrives. */
   const landing = new Map<string, string>();
 
+  /** Source files as they were before each shell command the gate let through, by tool-use id. */
+  const beforeShell = new Map<string, guard.Snapshot>();
+  /** Files they saved while a shell command was running. Never put back. */
+  const savedDuring = new Set<string>();
+  store.onSaved = (path) => {
+    if (beforeShell.size) savedDuring.add(path);
+  };
+
+  /** After a shell command: whatever it did to source files is undone, and the intern told. */
+  async function afterShell(input: any) {
+    const before = beforeShell.get(input.tool_use_id);
+    if (!before) return {};
+    beforeShell.delete(input.tool_use_id);
+    const undone = guard.restore(repo.root, before, savedDuring);
+    if (!beforeShell.size) savedDuring.clear();
+    if (!undone.length) return {};
+    for (const path of undone) store.openFile(path);
+    const cmd = typeof input.tool_input?.command === "string" ? input.tool_input.command : "";
+    store.toolEvent("Bash", cmd.split("\n")[0]!.slice(0, 60), "refused", `changed ${undone.join(", ")} - put back`);
+    return {
+      hookSpecificOutput: {
+        hookEventName: input.hook_event_name,
+        additionalContext: `dum put back what that command did to ${undone.join(", ")}. Source files only change through Write and Edit, as ${todos.MARKER} blocks, so the tree sees every line. Don't write code with the shell - run things with it.`,
+      },
+    };
+  }
+
   function onStreamEvent(ev: any) {
     if (ev?.type === "content_block_start" && ev.content_block?.type === "tool_use") {
       openBlocks.set(ev.index, { name: ev.content_block.name, buf: "" });
@@ -700,8 +728,12 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
       // The feed the code pane is built on.
       includePartialMessages: true,
       ...(resume ? { resume } : {}),
+      hooks: {
+        PostToolUse: [{ matcher: "Bash", hooks: [afterShell] }],
+        PostToolUseFailure: [{ matcher: "Bash", hooks: [afterShell] }],
+      },
       // dum's own tools are let through here rather than listed in allowedTools.
-      canUseTool: async (name: string, args: Record<string, unknown>) => {
+      canUseTool: async (name: string, args: Record<string, unknown>, opts: { toolUseID?: string }) => {
         if (name.startsWith("mcp__dum__")) return { behavior: "allow" as const, updatedInput: args };
         // Comments in their code are short: the code is theirs to read, not an essay.
         const essay = wordyCode(name, args);
@@ -744,6 +776,8 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
             return { behavior: "deny" as const, message: `Refused: ${why}` };
           }
         }
+        // A shell command can write anything; what it does to source is checked after it runs.
+        if (name === "Bash" && opts.toolUseID) beforeShell.set(opts.toolUseID, guard.snapshot(repo.root));
         store.toolEvent(name, detail(repo.root, args), "ran");
         return { behavior: "allow" as const, updatedInput: args };
       },
