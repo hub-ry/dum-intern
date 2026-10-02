@@ -1,7 +1,6 @@
-// The other way onto the skill tree: you type it.
+// Holes: where code you haven't unlocked goes, for you to type or explain.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
-import type { Breadth } from "./skills.ts";
 
 export const MARKER = "TODO(dum)";
 
@@ -12,7 +11,6 @@ export type Todo = {
   path: string;
   /** What the code has to do. Never how. */
   what: string;
-  breadth: Breadth;
   requires: string[];
   /** The file as the intern left it, so an untouched hole is caught in code. */
   before: string;
@@ -21,13 +19,6 @@ export type Todo = {
   /** The language the skill is scoped to, if any - carried to the tree when it passes. */
   lang?: string;
 };
-
-/** A reply that hands the concept to your fingers instead of your words. */
-export function wantsToType(reply: string): boolean {
-  return /^(let me |i'?ll |i will |i wanna |i want to )?type (it|this|that)( myself| out)?[.!]*$|^type[.!]*$/i.test(
-    reply.trim(),
-  );
-}
 
 /** The 0-based line the hole for `concept` starts on, or -1. Any marker if no concept matches. */
 export function hole(text: string, concept = ""): number {
@@ -98,6 +89,8 @@ export function gated(path: string): boolean {
   return lang(path) in COMMENTS;
 }
 
+const CLOSER = /^[\s})\];,]+$/;
+
 /** Lines in `text` that are code outside any hole - what "code just appearing" looks like. */
 export function loose(text: string, path: string): string[] {
   const comment = COMMENTS[lang(path)];
@@ -105,7 +98,8 @@ export function loose(text: string, path: string): string[] {
   const lines = text.split("\n");
   const inHole = new Set<number>();
   for (const [a, b] of spans(text)) for (let i = a; i <= b; i++) inHole.add(i);
-  return lines.filter((l, i) => l.trim() && !inHole.has(i) && !comment.test(l.trim()));
+  // A lone closer - the brace that ends main - isn't anybody's skill.
+  return lines.filter((l, i) => l.trim() && !inHole.has(i) && !comment.test(l.trim()) && !CLOSER.test(l));
 }
 
 /** The most comment lines in a row: a hole's description, a file header, anything. */

@@ -6,7 +6,7 @@ import { render } from "ink";
 import { App } from "../src/panes/App.tsx";
 import { Store } from "../src/store.ts";
 import { DEFAULT } from "../src/layout.ts";
-import { specCard } from "../src/session.ts";
+import { planCard } from "../src/session.ts";
 
 const cols = Number(process.argv[2]) || 100;
 const rows = Number(process.argv[3]) || 34;
@@ -33,7 +33,7 @@ const stdin = Object.assign(new EventEmitter(), {
   unref: () => {},
 });
 
-const store = new Store("some-repo", "anti-vibe", process.cwd(), [
+const store = new Store("some-repo", "understand", process.cwd(), [
   "README.md",
   "LICENSE",
   "package.json",
@@ -48,7 +48,6 @@ const store = new Store("some-repo", "anti-vibe", process.cwd(), [
   "src/tree.ts",
   "src/wizard.ts",
   "src/panes/App.tsx",
-  "src/panes/Chat.tsx",
   "src/panes/Code.tsx",
   "src/panes/Field.tsx",
   "src/panes/Tree.tsx",
@@ -56,17 +55,15 @@ const store = new Store("some-repo", "anti-vibe", process.cwd(), [
   "test/tree.test.ts",
 ]);
 store.setModel("intern", "claude-opus-5-5", "high");
-store.setModel("wizard", "claude-sonnet-5", "medium");
+store.setModel("wizard", "claude-sonnet-5-5", "medium");
+store.setUnlocked(6);
 store.say("Got it. Two decisions before I build anything.");
 void store.askQuestion(
   "When a worker dies holding a job, what should happen to that job?",
   "Decides whether jobs can run twice or can be lost.",
 );
 store.submit("another worker should pick it back up after a while if the first one dies");
-store.quip(
-  "that's a visibility timeout - the mechanism SQS and most job queues use for exactly this failure case.",
-  "",
-);
+store.quip("that's a visibility timeout - the mechanism SQS and most job queues use for exactly this failure case.");
 store.toolEvent("Read", "src/queue.ts", "ran");
 store.toolEvent("Write", "src/lease.ts", "ran");
 store.toolEvent("Bash", "npm test", "held");
@@ -95,16 +92,33 @@ store.streaming(
 
 // Which screen to draw.
 const scene = process.argv[5] ?? "ask";
-if (scene === "spec") {
-  void store.proposeSpec(
-    specCard({
-      summary: "a tiny int vector that prints every time it grows",
-      you_type: ["vec.cpp: when push_back finds it full, grow the buffer"],
-      decisions: ["copying is blocked, so IntVec b = a; won't compile"],
-      not_doing: ["templates", "pop_back and erase"],
-      run: "c++ -std=c++17 -Wall vec.cpp -o vec && ./vec",
-    }),
+if (scene === "plan") {
+  void store.proposePlan(
+    planCard(
+      "a guessing game that says higher or lower",
+      [
+        { skill: "printing", lang: "c++", what: "", status: { state: "unlocked" } },
+        { skill: "input", lang: "c++", what: "", status: { state: "unlocked" } },
+        { skill: "while loops", lang: "c++", what: "keep asking until they guess it", status: { state: "open" } },
+        { skill: "random numbers", lang: "c++", what: "", status: { state: "locked", missing: ["functions"], next: "functions" } },
+      ],
+      "understand",
+      "g++ guess.cpp -o guess && ./guess",
+    ),
   );
+} else if (scene === "course") {
+  const card = {
+    skill: "recursion",
+    lang: "python",
+    lesson: "a function that calls itself on a smaller piece of the problem. it needs a base case, or it never stops and python throws RecursionError.",
+    example: "def countdown(n):\n    if n == 0:\n        return\n    print(n)\n    countdown(n - 1)",
+    wizard: "recursion's how every json parser walks nested objects - the call stack does the bookkeeping.",
+    task: "make fact(n) return n! for any n >= 0",
+    path: ".dum/courses/recursion.py",
+    run: "python .dum/courses/recursion.py",
+  };
+  store.course(card);
+  void store.askCourse(card);
 } else if (scene === "open") {
   // A real file from this repo, so the gutter, the scrollbar and the sideways clipping are
   // exercised by something with the shape of code.
@@ -147,26 +161,13 @@ if (scene === "spec") {
     "miner.py is set up, but it doesn't print an IP yet. Both regex pieces are yours to type, so python miner.py stops with NotImplementedError until you fill them in. Your holes: miner.py:5 (the IP pattern) and miner.py:12 (the search and print). Also the empty list case is still open, and mean() still crashes on an empty list with ZeroDivisionError instead of ValueError, which I left alone because you didn't ask.",
     "",
   );
-  store.setProgress({ done: 1, total: 9, unit: "feature" });
 } else if (scene === "transcript") {
   void store.askQuestion("what next?", "");
   store.toggleTranscript();
-} else if (scene === "lesson") {
-  void store.askQuestion("Is it worse for a job to run twice, or to never run at all?", "Decides at-least-once versus at-most-once delivery.");
-  store.submit("idk");
-  store.teach({
-    concept: "delivery semantics",
-    what_it_is: "The guarantee a queue makes about how many times a job is handed to a worker: at-most-once or at-least-once.",
-    why_it_exists: "A worker can die after doing the work but before acknowledging it. The queue can't tell that from dying before, so it picks which mistake to make.",
-    in_industry: "SQS and most brokers are at-least-once and push idempotency onto you.",
-    here: "Nothing here writes to an external system yet, so at-least-once costs a dedupe key on the jobs table.",
-  });
-  void store.askQuestion("so: run twice, or never run?", "", true, true);
 } else {
   void store.askQuestion(
     "Is it worse for a job to run twice, or to never run at all?",
     "Decides at-least-once versus at-most-once delivery.",
-    true,
   );
 }
 

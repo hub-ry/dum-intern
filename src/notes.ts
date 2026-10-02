@@ -1,13 +1,9 @@
 // One skill, as a markdown note you can open, edit, or write yourself.
 
 import YAML from "yaml";
-import { langName, type Breadth, type Skill } from "./skills.ts";
+import { langName, type How, type Skill } from "./skills.ts";
 
-export type State = "solid" | "shaky" | "claimed";
-
-export function stateOf(s: Skill): State {
-  return s.claimed ? "claimed" : s.solid ? "solid" : "shaky";
-}
+const HOWS: How[] = ["typed", "explained", "course", "added"];
 
 /** The file a skill lives in. */
 export function fileName(name: string): string {
@@ -19,9 +15,9 @@ export function fileName(name: string): string {
   return (safe || "skill") + ".md";
 }
 
-/** `[[target]]`, or `[[target|name]]` when the file name had to change. */
-function link(name: string): string {
-  const target = fileName(name).slice(0, -3);
+/** `[[target|name]]` pointing at the prerequisite's note in the same language. */
+function link(name: string, lang: string): string {
+  const target = fileName(lang ? `${name} (${lang})` : name).slice(0, -3);
   return target === name ? `[[${name}]]` : `[[${target}|${name}]]`;
 }
 
@@ -29,19 +25,13 @@ const LINK = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 const BUILDS_ON = /^builds on:.*$/im;
 
 export function toNote(s: Skill): string {
-  const state = stateOf(s);
-  const front: Record<string, unknown> = {
-    name: s.name,
-    state,
-    breadth: s.breadth,
-  };
+  const front: Record<string, unknown> = { name: s.name };
   if (s.lang) front.lang = s.lang;
-  if (s.shownIn.length) front["shown-in"] = s.shownIn;
-  if (s.repos.length) front.repos = s.repos;
+  front.how = s.how;
   if (s.at) front.at = s.at;
-  // Tags, so Obsidian's graph can colour by state.
-  front.tags = [`dum/${state}`, ...(s.breadth === "niche" ? ["dum/niche"] : [])];
-  const body = [s.why.trim(), s.requires.length ? `builds on: ${s.requires.map(link).join(", ")}` : ""]
+  // Tags, so Obsidian's graph can colour by how it was unlocked.
+  front.tags = [`dum/${s.how}`];
+  const body = [s.why.trim(), s.requires.length ? `builds on: ${s.requires.map((r) => link(r, s.lang)).join(", ")}` : ""]
     .filter(Boolean)
     .join("\n\n");
   return `---\n${YAML.stringify(front).trimEnd()}\n---\n${body ? "\n" + body + "\n" : ""}`;
@@ -49,7 +39,18 @@ export function toNote(s: Skill): string {
 
 const str = (v: unknown): v is string => typeof v === "string";
 
-/** A note back into a skill, or null if it is not one. */
+/**
+ * How an older note was unlocked. Shaky ones were taught, never shown, so they read as locked;
+ * a note with nothing to say is one somebody wrote by hand, which is adding it.
+ */
+function howOf(front: Record<string, unknown>): How | null {
+  if (str(front.how) && (HOWS as string[]).includes(front.how)) return front.how as How;
+  if (front.state === "shaky") return null;
+  if (front.state === "solid") return Array.isArray(front["shown-in"]) && front["shown-in"].length ? "typed" : "explained";
+  return "added";
+}
+
+/** A note back into a skill, or null if it isn't an unlocked one. */
 export function fromNote(text: string, file: string): Skill | null {
   let front: Record<string, unknown> = {};
   let body = text;
@@ -64,8 +65,8 @@ export function fromNote(text: string, file: string): Skill | null {
     body = text.slice(m[0].length);
   }
   const name = (str(front.name) && front.name.trim()) || file.replace(/\.md$/i, "").trim();
-  if (!name) return null;
-  const state: State = front.state === "solid" || front.state === "shaky" ? front.state : "claimed";
+  const how = howOf(front);
+  if (!name || !how) return null;
   const requires: string[] = [];
   for (const [, target, alias] of body.matchAll(LINK)) {
     const r = (alias ?? target!).trim();
@@ -73,14 +74,10 @@ export function fromNote(text: string, file: string): Skill | null {
   }
   return {
     name,
-    solid: state !== "shaky",
-    claimed: state === "claimed",
-    breadth: (front.breadth === "niche" ? "niche" : "general") as Breadth,
     lang: str(front.lang) ? langName(front.lang) : "",
-    shownIn: Array.isArray(front["shown-in"]) ? (front["shown-in"] as unknown[]).filter(str).map(langName) : [],
+    how,
     requires,
     why: body.replace(BUILDS_ON, "").trim(),
-    repos: Array.isArray(front.repos) ? front.repos.filter(str) : [],
     at: str(front.at) ? front.at : front.at instanceof Date ? front.at.toISOString() : "",
   };
 }

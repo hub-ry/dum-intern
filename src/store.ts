@@ -10,39 +10,37 @@ export type Outcome = "ran" | "held" | "refused";
 /** A model, and the effort level it runs at. */
 export type Voice = { model: string; effort: string };
 
-export type Lesson = {
-  concept: string;
-  what_it_is: string;
-  why_it_exists: string;
-  in_industry: string;
-  here: string;
+/** A course as it's shown: dum's lesson and example, the wizard's line, and the gap to type. */
+export type CourseCard = {
+  skill: string;
+  lang: string;
+  lesson: string;
+  example: string;
+  /** The wizard's line: what it's called out in the world, and where it shows up. "" if it passed. */
+  wizard: string;
+  task: string;
+  /** The scratch file the gap is in, repo-relative. */
+  path: string;
+  run: string;
 };
 
 /** One thing that happened, in order. The transcript is append-only. */
 export type Entry =
   | { kind: "say"; id: number; text: string; lead?: boolean }
   | { kind: "question"; id: number; question: string; why: string; answer: string | null }
-  | { kind: "lesson"; id: number; lesson: Lesson }
-  | { kind: "quip"; id: number; text: string; about: string }
-  | { kind: "spec"; id: number; spec: string; approved: boolean | null }
+  | { kind: "quip"; id: number; text: string }
+  /** `paused` while a course runs from it; the plan comes back after. */
+  | { kind: "plan"; id: number; plan: string; approved: boolean | null; paused?: boolean }
+  | { kind: "course"; id: number; card: CourseCard; passed: boolean | null }
   | { kind: "tool"; id: number; name: string; detail: string; outcome: Outcome; why?: string }
-  | { kind: "answer"; id: number; question: string; body: string }
-  | { kind: "review"; id: number; text: string }
   | { kind: "fill"; id: number; path: string; concept: string; code: string }
   | { kind: "note"; id: number; text: string };
 
 /** What the agent is currently blocked on, if anything. */
 export type Prompt =
-  | {
-      type: "question";
-      question: string;
-      why: string;
-      /** The intern's own question, where "idk" and "type it" mean something. */
-      choices?: boolean;
-      /** The same question as the last one, put back after a side question. */
-      again?: boolean;
-    }
-  | { type: "spec"; spec: string }
+  | { type: "question"; question: string; why: string }
+  | { type: "plan"; plan: string }
+  | { type: "course"; card: CourseCard }
   | { type: "next" }
   | null;
 
@@ -69,9 +67,8 @@ export type CodeView = {
 /** What the wide pane is showing. */
 export type Stage =
   | { kind: "code" }
-  | { kind: "answer"; question: string; body: string; pending: boolean }
-  | { kind: "spec"; spec: string }
-  | { kind: "lesson"; lesson: Lesson }
+  | { kind: "plan"; plan: string }
+  | { kind: "course"; card: CourseCard }
   | { kind: "info"; title: string; body: string }
   | { kind: "reply"; text: string }
   | { kind: "shell" }
@@ -89,20 +86,16 @@ export type State = {
   status: string;
   code: CodeView | null;
   stage: Stage;
-  /** Skills on the tree that count in this repo, and how many are still shaky. */
-  skills: { known: number; shaky: number; claimed: number };
-  /** Holes the intern left for you to type, each one a skill to unlock. */
+  /** How many skills are unlocked. */
+  unlocked: number;
+  /** Holes left for you, each one a skill to unlock. */
   todos: { concept: string; path: string }[];
-  /** What "what next?" offers - a rebuild's next milestone. "" for nothing. */
-  suggestion: string;
   /** Live comments on lines of files, by path: shown beside the code, never saved. */
   pins: Record<string, { line: number; text: string }[]>;
   /** A program running in the shell that your input goes to, by name. "" when none. */
   running: string;
   /** What the middle shows: code only - the file or the shell. */
   middle: "file" | "shell";
-  /** Where a milestone folder stands: done of total, and what a unit is called. */
-  progress: { done: number; total: number; unit: string } | null;
   /** The model behind each voice and the effort it runs at, as the SDK reported them. */
   models: { intern: Voice; wizard: Voice };
 };
@@ -113,7 +106,7 @@ const LONG_SAY = 600;
 const isBoardKind = (s: Stage) => s.kind !== "code" && s.kind !== "shell";
 
 /** Words that are always for dum, even typed while the shell is showing. */
-const DUM_WORDS = /^(done|go|idk|type it|not yet.*|exit)[.!]*$/i;
+const DUM_WORDS = /^(done|y|yes|quit|skip|not yet.*|:?course .*|exit)[.!]*$/i;
 
 export class Store {
   private state: State;
@@ -127,23 +120,17 @@ export class Store {
   /** Anything typed before the agent got around to asking. */
   private typedAhead: string[] = [];
 
-  /** Set by the runner: where a `?` question goes. */
-  onAsk: ((question: string) => void) | null = null;
-
   /** Set by the runner: `!cmd` - run it in a real shell. "" for an interactive shell. */
   onShell: ((cmd: string) => void) | null = null;
 
   /** Set by the runner: add a skill they can write without AI, or take one off. */
   onSkillEdit: ((action: "add" | "forget", name: string, lang: string) => void) | null = null;
 
-  /** Set by the runner: a rule for their taste file. */
-  onTaste: ((rule: string) => void) | null = null;
-
   /** Set by the renderer: run a `:` command on the open file. */
   onEditorCommand: ((cmd: string) => void) | null = null;
 
-  /** Set by the runner: draw the graph and open it. */
-  onGraph: (() => void) | null = null;
+  /** Set by the runner: what `:skills` shows. */
+  onSkills: (() => string) | null = null;
 
   /** Set by the runner: "not yet", with the skill named or "" for the last one checked off. */
   onNotYet: ((name: string) => boolean) | null = null;
@@ -160,10 +147,8 @@ export class Store {
       status: "",
       code: null,
       stage: { kind: "code" },
-      skills: { known: 0, shaky: 0, claimed: 0 },
+      unlocked: 0,
       todos: [],
-      suggestion: "",
-      progress: null,
       middle: "file",
       running: "",
       pins: {},
@@ -182,14 +167,8 @@ export class Store {
 
   /** A person submitted a line. */
   submit(text: string) {
-    // A `?` line is not an answer.
-    if (text.startsWith("?")) {
-      const question = text.slice(1).trim();
-      if (question) this.onAsk?.(question);
-      return;
-    }
-    // `:run`, `:log`, `:help` - dum's commands, vim's ex line.
-    const ex = /^:\s*(run|log|help)\s*$/i.exec(text.trim());
+    // `:run`, `:log`, `:help`, `:skills` - dum's commands, vim's ex line.
+    const ex = /^:\s*(run|log|help|skills)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
       return;
@@ -204,13 +183,6 @@ export class Store {
     const sk = /^:\s*skill\s+(.+?)(?:\s+in\s+([\w+#.]+))?\s*$/i.exec(text.trim());
     if (sk) {
       this.onSkillEdit?.("add", sk[1]!.trim(), sk[2] ?? "");
-      return;
-    }
-    // `:taste <rule>` - a rule in their words, for this session and every one after.
-    const tasted = /^:\s*taste\s+(.+)$/is.exec(text.trim());
-    if (tasted) {
-      this.onTaste?.(tasted[1]!.trim());
-      this.show("taste", `noted: ${tasted[1]!.trim()}\n\nin ~/.dum/taste.md - dum reads it every session.`);
       return;
     }
     // Editor commands meant for the open file: never a message to the intern.
@@ -257,7 +229,7 @@ export class Store {
 
   // -- agent side ---------------------------------------------------------
 
-  /** `lead` marks the line that matters this turn - a review's verdict - over any chatter after it. */
+  /** `lead` marks the line that matters this turn - a verdict - over any chatter after it. */
   say(text: string, lead = false) {
     this.append({ kind: "say", text, ...(lead ? { lead } : {}) });
     if (text.length > LONG_SAY || text.split("\n").length > 10) this.patch({ stage: { kind: "reply", text } });
@@ -267,13 +239,13 @@ export class Store {
     this.append({ kind: "note", text });
   }
 
-  teach(lesson: Lesson) {
-    this.append({ kind: "lesson", lesson });
-    this.patch({ stage: { kind: "lesson", lesson } });
+  quip(text: string) {
+    this.append({ kind: "quip", text });
   }
 
-  quip(text: string, about: string) {
-    this.append({ kind: "quip", text, about });
+  /** Busy on something that isn't the intern: putting a course together, checking a gap. */
+  working(status: string) {
+    this.patch({ prompt: null, busy: true, status });
   }
 
   /** `why` says what refused it, when it wasn't the usual reason for that outcome. */
@@ -335,9 +307,11 @@ export class Store {
       body = `could not read ${path}\n${(err as Error).message}`;
       onDisk = false;
     }
+    // A course's lesson stays up beside its scratch file: that's what you type the gap against.
+    const keep = this.state.stage.kind === "course";
     this.patch({
       code: { tool: "open", path, body, live: false, outcome: null, onDisk, ...(at !== undefined ? { at, jump: ++this.jumps } : {}) },
-      stage: { kind: "code" },
+      ...(keep ? { middle: "file" as const } : { stage: { kind: "code" as const } }),
     });
   }
 
@@ -348,29 +322,14 @@ export class Store {
     });
   }
 
-  /** Show a question being answered, then its answer. */
-  asking(question: string) {
-    this.patch({ stage: { kind: "answer", question, body: "", pending: true } });
-  }
-
-  answered(question: string, body: string) {
-    this.append({ kind: "answer", question, body });
-    this.patch({ stage: { kind: "answer", question, body, pending: false } });
-  }
-
   /** Something for you to read that isn't anyone speaking - help, a hint. */
   show(title: string, body: string) {
     this.patch({ stage: { kind: "info", title, body } });
   }
 
-  /** The wizard caught something in what dum just built. */
-  review(text: string) {
-    this.append({ kind: "review", text });
-  }
-
   /** The skill tree changed. */
-  setSkills(skills: { known: number; shaky: number; claimed: number }) {
-    this.patch({ skills });
+  setUnlocked(unlocked: number) {
+    if (this.state.unlocked !== unlocked) this.patch({ unlocked });
   }
 
   /** The shell page. Renderers that have one set `onShell` to type into it. */
@@ -384,23 +343,24 @@ export class Store {
     if (name === "run") return this.runFile();
 
     if (name === "log") return this.toggleTranscript();
+    if (name === "skills") return this.show("your skill tree", this.onSkills?.() ?? "");
     if (name === "help") {
       return this.show(
         "dum",
         [
-          "?question   ask anything, off to the side",
+          "course x    unlock a skill: a short course with dum and the wizard",
+          "            (course x in rust, for another language)",
+          ":skills     what's unlocked, what's open, what's locked",
           "cd, gcc, echo, git, ./a.out ...   run in the shell as typed",
           "!command    anything else in the shell  (! alone opens it)",
           ":run        run the file you're looking at",
           ":skill x    add a skill you can write without AI",
           "            (:skill -x takes it off)",
-          ":taste x    a rule for how dum works",
           ":log        everything said so far",
           "",
-          "when dum asks   answer · idk · type it",
-          "your turn       type it and say done, or explain it",
-          "not yet         undo the skill just checked off",
-          "tab · ⇧tab      move around · go back",
+          this.state.mode === "anti-vibe" ? "your turn       explain it here" : "your turn       type it, :w, then done",
+          "not yet         undo the skill just unlocked",
+          "tab · ⇧tab      move around · file ⇄ shell",
         ].join("\n"),
       );
     }
@@ -426,16 +386,6 @@ export class Store {
   /** Clear every live comment: a new turn starts clean. */
   unpin() {
     if (Object.keys(this.state.pins).length) this.patch({ pins: {} });
-  }
-
-  /** Where a milestone folder stands. */
-  setProgress(progress: { done: number; total: number; unit: string } | null) {
-    this.patch({ progress });
-  }
-
-  /** What "what next?" offers. */
-  setSuggestion(suggestion: string) {
-    if (this.state.suggestion !== suggestion) this.patch({ suggestion });
   }
 
   /** A hole being filled, one frame of it. */
@@ -468,9 +418,9 @@ export class Store {
   }
 
   /** Ask one question and park until it is answered. */
-  askQuestion(question: string, why: string, choices = false, again = false): Promise<string> {
+  askQuestion(question: string, why: string): Promise<string> {
     const id = this.append({ kind: "question", question, why, answer: null });
-    return this.park({ type: "question", question, why, choices, again }, id);
+    return this.park({ type: "question", question, why }, id);
   }
 
   /** The `what next` prompt between turns. Same channel, no question text. */
@@ -479,27 +429,48 @@ export class Store {
     return this.park({ type: "next" }, id);
   }
 
-  /** Show the spec and park until it is approved or declined. */
-  async proposeSpec(spec: string): Promise<boolean> {
-    const id = this.append({ kind: "spec", spec, approved: null });
-    this.patch({ stage: { kind: "spec", spec } });
-    const reply = (await this.park<string>({ type: "spec", spec }, id)).trim().toLowerCase();
-    const approved = reply === "y" || reply === "yes";
-    this.patch({ stage: { kind: "code" } });
+  /** Show the plan and park for the reply: y, a course to take first, or what to change. */
+  async proposePlan(plan: string): Promise<string> {
+    const id = this.append({ kind: "plan", plan, approved: null });
+    this.patch({ stage: { kind: "plan", plan } });
+    const reply = (await this.park<string>({ type: "plan", plan }, id)).trim();
+    const approved = /^(y|yes)$/i.test(reply);
+    const paused = /^:?\s*(course|learn|unlock)\s+\S/i.test(reply);
     this.patch({
+      stage: this.state.stage.kind === "plan" ? { kind: "code" } : this.state.stage,
       transcript: this.state.transcript.map((e) =>
-        e.id === id && e.kind === "spec" ? { ...e, approved } : e,
+        e.id === id && e.kind === "plan" ? { ...e, ...(paused ? { paused } : { approved }) } : e,
       ),
     });
-    return approved;
+    return reply;
+  }
+
+  /** A course starts: its card goes on the board and in the record. */
+  course(card: CourseCard) {
+    this.append({ kind: "course", card, passed: null });
+    this.patch({ stage: { kind: "course", card } });
+    if (card.wizard) this.quip(card.wizard);
+  }
+
+  /** Park inside a course: done, a question, or quit. */
+  askCourse(card: CourseCard): Promise<string> {
+    const id = this.append({ kind: "question", question: "", why: "", answer: null });
+    return this.park({ type: "course", card }, id);
+  }
+
+  endCourse(card: CourseCard, passed: boolean) {
+    this.patch({
+      transcript: this.state.transcript.map((e) => (e.kind === "course" && e.card === card ? { ...e, passed } : e)),
+      ...(this.state.stage.kind === "course" ? { stage: this.state.middle === "shell" ? { kind: "shell" as const } : { kind: "code" as const } } : {}),
+    });
   }
 
   // -- internals ----------------------------------------------------------
 
   private park<T = string>(prompt: Prompt, entryId: number): Promise<T> {
     // dum asking something takes the characters' side back from help-type
-    // boards. A lesson or reply stays up, with the question at its foot.
-    if (prompt?.type === "question" && prompt.choices && this.state.stage.kind === "info") {
+    // boards. A course or reply stays up, with the question at its foot.
+    if (prompt?.type === "question" && this.state.stage.kind === "info") {
       this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
     }
     const early = this.typedAhead.shift();

@@ -123,34 +123,25 @@ export function thread(s: State, width: number): Line[] {
         gap();
         say("wizard", e.text, newest);
         break;
-      case "review":
-        gap();
-        say("wizard", e.text, newest);
-        break;
       case "question":
         if (e.question) {
           gap();
           say("dum", e.question, newest && e.answer === null);
-          if (e.answer === null && s.prompt?.type === "question") {
-            if (s.prompt.why) note(s.prompt.why);
-            if (s.prompt.choices) out.push({ text: c.dim("answer it · idk · type it") });
-          }
+          if (e.answer === null && s.prompt?.type === "question" && s.prompt.why) note(s.prompt.why);
         }
         if (e.answer !== null && e.answer !== "") you(e.answer);
         break;
-      case "lesson":
+      case "plan":
         gap();
-        say("wizard", `${e.lesson.concept} - the whole lesson is up on the board.`, newest);
+        say("dum", e.paused ? "plan on hold - course first." : e.approved === null ? "the plan's up - build it?" : e.approved ? "plan approved - building." : "not building that one.", newest);
         break;
-      case "spec":
+      case "course": {
+        const what = e.card.lang ? `${e.card.skill} (${e.card.lang})` : e.card.skill;
         gap();
-        say("dum", e.approved === null ? "the spec is up - build it?" : e.approved ? "spec approved - building." : "spec declined.", newest);
+        say("dum", `course: ${what}. it's up on the board, and the gap's in ${e.card.path}.`, newest && e.passed === null);
+        if (e.passed === false) note(`left the course - ${what} stays locked.`);
         break;
-      case "answer":
-        gap();
-        note(`? ${e.question}`);
-        for (const l of wrap(e.body, "", width).slice(0, 6)) out.push({ text: l });
-        break;
+      }
       case "note":
         note(e.text);
         break;
@@ -158,7 +149,7 @@ export function thread(s: State, width: number): Line[] {
         note(`✓ filled ${e.path}: ${e.concept}`);
         break;
       case "tool":
-        if (e.name === "hole") note(`▌ ${e.detail} - yours to type`);
+        if (e.name === "hole") note(`▌ ${e.detail} - yours to ${s.mode === "anti-vibe" ? "explain" : "type"}`);
         else if (e.outcome !== "ran") note(`${e.outcome}: ${e.name} ${e.detail}${e.why ? ` (${e.why})` : ""}`);
         break;
     }
@@ -172,13 +163,16 @@ export function thread(s: State, width: number): Line[] {
   if (s.prompt?.type === "next") {
     const t = s.todos[0];
     gap();
-    if (t) turn(`your turn: ${t.concept} in ${t.path}`, "type it and say done, or explain it here");
-    else if (s.suggestion) turn(`next up: ${s.suggestion}`, "say go, or ask for something else");
+    if (t) turn(`your turn: ${t.concept} in ${t.path}`, s.mode === "anti-vibe" ? `explain it here, or course ${t.concept}` : `type it, :w, then done - or course ${t.concept}`);
     else note("what next?");
   }
-  if (s.prompt?.type === "spec") {
+  if (s.prompt?.type === "plan") {
     gap();
-    turn("build this? y/n");
+    turn("build this? y/n", "or course <skill> to unlock one first");
+  }
+  if (s.prompt?.type === "course") {
+    gap();
+    turn(`your gap: ${s.prompt.card.task}`, `type it in ${s.prompt.card.path}, :w, then done · quit leaves`);
   }
   return out;
 }

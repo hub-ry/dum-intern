@@ -4,48 +4,44 @@ import { fileName, fromNote, toNote } from "../src/notes.ts";
 import type { Skill } from "../src/skills.ts";
 
 const skill = (over: Partial<Skill> = {}): Skill => ({
-  name: "leases",
-  solid: true,
-  claimed: false,
-  breadth: "general",
+  name: "recursion",
   lang: "",
-  shownIn: [],
+  how: "typed",
   requires: [],
   why: "",
-  repos: [],
-  at: "2026-09-23T04:03:15.135Z",
+  at: "2026-10-02T04:03:15.135Z",
   ...over,
 });
 
-test("a note round-trips every state", () => {
-  for (const over of [{}, { solid: false }, { claimed: true }, { breadth: "niche" as const, repos: ["/r"] }, { lang: "c++" }, { shownIn: ["c++", "python"] }]) {
-    const s = skill({ ...over, requires: ["timeouts", "Side / ranking"], why: "They said `x`." });
-    assert.deepEqual(fromNote(toNote(s), fileName(s.name)), s);
+test("a note round-trips every way a skill gets unlocked", () => {
+  for (const how of ["typed", "explained", "course", "added"] as const) {
+    for (const lang of ["", "python"]) {
+      const s = skill({ how, lang, requires: ["functions", "Side / ranking"], why: "They said `x`." });
+      assert.deepEqual(fromNote(toNote(s), fileName(s.name)), s);
+    }
   }
 });
 
-test("builds-on is Obsidian links, aliased when the file name had to change", () => {
-  const text = toNote(skill({ requires: ["timeouts", "retrieval / ranking split"] }));
-  assert.match(text, /builds on: \[\[timeouts\]\], \[\[retrieval - ranking split\|retrieval \/ ranking split\]\]/);
-  assert.match(text, /tags:\n  - dum\/solid/);
+test("builds-on links point at the prerequisite's note in the same language", () => {
+  const text = toNote(skill({ lang: "python", requires: ["functions"] }));
+  assert.match(text, /builds on: \[\[functions \(python\)\|functions\]\]/);
+  assert.match(text, /tags:\n  - dum\/typed/);
+  assert.match(toNote(skill({ requires: ["retries"] })), /builds on: \[\[retries\]\]/);
 });
 
 test("file names drop what a file system or Obsidian refuses", () => {
-  assert.equal(fileName("Side features and the retrieval / ranking split"), "Side features and the retrieval - ranking split.md");
-  assert.equal(fileName("c++ templates"), "c++ templates.md");
-  assert.equal(fileName("  ..  "), "skill.md");
+  assert.equal(fileName("tcp/ip: basics"), "tcp - ip - basics.md");
+  assert.equal(fileName("  .hidden  "), "hidden.md");
+  assert.equal(fileName("///"), "skill.md");
 });
 
-test("any link in the body is a prerequisite, and an unknown state is a claim", () => {
-  const s = fromNote("---\nstate: expert\n---\nlike [[a]] and [[b|B]]\n", "x.md")!;
-  assert.deepEqual(s.requires, ["a", "B"]);
-  assert.ok(s.claimed);
-  assert.equal(s.name, "x");
-});
-
-test("a scan reply is read even with a fence or a sentence around it", async () => {
-  const { parse } = await import("../src/scan.ts");
-  const got = parse('here you go:\n```json\n[{"name":"sql joins","breadth":"general","requires":["sql"],"evidence":"db.py:4 - joins"},{"name":"SQL Joins"},{"name":""},{"nope":1}]\n```');
-  assert.deepEqual(got.map((f) => [f.name, f.breadth, f.requires]), [["sql joins", "general", ["sql"]]]);
-  assert.deepEqual(parse("no json here"), []);
+test("a note with nothing in it is a skill somebody added by hand", () => {
+  assert.deepEqual(fromNote("can do these\n\nsee [[arrays]]", "pointers.md"), {
+    name: "pointers",
+    lang: "",
+    how: "added",
+    requires: ["arrays"],
+    why: "can do these\n\nsee [[arrays]]",
+    at: "",
+  });
 });

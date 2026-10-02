@@ -1,50 +1,29 @@
-// What you have already shown you understand, as a tree that follows you.
+// What you've unlocked, as a tree that follows you across repos.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename } from "node:path";
 import { fileName, fromNote, toNote } from "./notes.ts";
 
-export type Breadth = "general" | "niche";
+/** How a skill got unlocked. Every way is something they did, never something dum assumed. */
+export type How = "typed" | "explained" | "course" | "added";
 
 export type Skill = {
-  /** The industry name, so it matches what the wizard and `teach` would say. */
+  /** The name an engineer says out loud, so it matches the curated trees and what the wizard says. */
   name: string;
-  /** True once they explained it. False when the intern had to teach it. */
-  solid: boolean;
-  /**
-   * They say they hold it - a scan of their own project, or a note they wrote - but never
-   * showed dum.
-   */
-  claimed: boolean;
-  breadth: Breadth;
-  /**
-   * The one language this skill is about, when it's syntax, a standard library or an idiom:
-   * "range-based for" is c++.
-   */
+  /** The one language it's about, or "" for an idea that carries across languages. */
   lang: string;
-  /** Languages they've typed it in, through a hole. What a level in a language counts. */
-  shownIn: string[];
-  /** Skills this one builds on directly, by name. May name skills not yet on the tree. */
+  how: How;
+  /** Skills this one builds on directly, by name. */
   requires: string[];
   why: string;
-  /** Repo roots where it was shown. Only meaningful while solid. */
-  repos: string[];
   at: string;
 };
 
 export type Tree = { skills: Skill[] };
 
-const EMPTY: Tree = { skills: [] };
-
 /** `DUM_HOME` exists for tests, and for anyone who wants their tree somewhere else. */
 export function home(): string {
   return process.env.DUM_HOME || `${homedir()}/.dum`;
-}
-
-/** The old single-file tree, read once to seed the notes. */
-function legacy(dir: string) {
-  return `${dir}/skills.json`;
 }
 
 /** Where the notes live. Obsidian can open this folder as a vault. */
@@ -57,10 +36,6 @@ export function folder(dir = home()) {
  * node.
  */
 export function key(name: string): string {
-  return words(name).join(" ");
-}
-
-function words(name: string): string[] {
   return name
     .toLowerCase()
     .replace(/\([^)]*\)/g, " ")
@@ -68,7 +43,8 @@ function words(name: string): string[] {
     .split(" ")
     .map((w) => w.replace(/^\.+|\.+$/g, ""))
     .filter(Boolean)
-    .map(singular);
+    .map(singular)
+    .join(" ");
 }
 
 /** Plural to singular for the obvious cases only. "status" and "redis" stay put. */
@@ -79,51 +55,22 @@ function singular(w: string): string {
   return w.endsWith("s") ? w.slice(0, -1) : w;
 }
 
-const MINOR = new Set(["a", "an", "the", "of", "in", "on", "for", "to", "and", "with"]);
-
-/** A skill already on the tree that might be this one under another name, or undefined. */
-export function similar(t: Tree, name: string): Skill | undefined {
-  const mine = new Set(words(name).filter((w) => !MINOR.has(w)));
-  if (!mine.size) return undefined;
-  return t.skills.find((s) => {
-    if (key(s.name) === key(name)) return false;
-    const theirs = new Set(words(s.name).filter((w) => !MINOR.has(w)));
-    if (!theirs.size) return false;
-    const [small, big] = mine.size <= theirs.size ? [mine, theirs] : [theirs, mine];
-    return [...small].every((w) => big.has(w));
-  });
+/** "printing" in python and "printing" in c++ are two skills. */
+export function id(name: string, lang: string): string {
+  return `${langName(lang)}:${key(name)}`;
 }
 
-const str = (v: unknown): v is string => typeof v === "string";
-
-function clean(raw: unknown): Skill | null {
-  if (!raw || typeof raw !== "object") return null;
-  const s = raw as Record<string, unknown>;
-  if (!str(s.name) || !s.name.trim() || typeof s.solid !== "boolean") return null;
-  return {
-    name: s.name.trim(),
-    solid: s.solid,
-    claimed: s.claimed === true,
-    breadth: s.breadth === "niche" ? "niche" : "general",
-    lang: typeof s.lang === "string" ? langName(s.lang) : "",
-    shownIn: Array.isArray(s.shownIn) ? s.shownIn.filter(str).map(langName) : [],
-    requires: Array.isArray(s.requires) ? s.requires.filter(str) : [],
-    why: str(s.why) ? s.why : "",
-    repos: Array.isArray(s.repos) ? s.repos.filter(str) : [],
-    at: str(s.at) ? s.at : "",
-  };
-}
+const idOf = (s: Skill) => id(s.name, s.lang);
 
 /** Every note in the folder, as a tree. */
 export function read(dir = home()): Tree {
-  seed(dir);
   let names: string[];
   try {
     names = readdirSync(folder(dir)).filter((n) => n.endsWith(".md") && !n.startsWith("."));
   } catch {
-    return EMPTY;
+    return { skills: [] };
   }
-  const byKey = new Map<string, Skill>();
+  const byId = new Map<string, Skill>();
   for (const n of names.sort()) {
     let s: Skill | null = null;
     try {
@@ -133,38 +80,22 @@ export function read(dir = home()): Tree {
     }
     if (!s || !key(s.name)) continue;
     // Two notes for one skill - a copy made by hand, usually. The newer wins.
-    const prev = byKey.get(key(s.name));
-    if (!prev || s.at > prev.at) byKey.set(key(s.name), s);
+    const prev = byId.get(idOf(s));
+    if (!prev || s.at > prev.at) byId.set(idOf(s), s);
   }
-  return { skills: [...byKey.values()] };
+  return { skills: [...byId.values()] };
 }
 
-function seed(dir: string) {
-  if (existsSync(folder(dir)) || !existsSync(legacy(dir))) return;
-  let raw: { skills?: unknown };
-  try {
-    raw = JSON.parse(readFileSync(legacy(dir), "utf8"));
-  } catch {
-    return; // unreadable - left where it is for a person to look at
-  }
-  const skills = Array.isArray(raw?.skills) ? raw.skills.map(clean).filter((s): s is Skill => !!s) : [];
-  write({ skills }, dir);
-  try {
-    renameSync(legacy(dir), `${legacy(dir)}.migrated`);
-  } catch {
-    /* the notes exist now, so the old file is never read again */
-  }
-}
-
-function noteFor(dir: string, name: string): string | undefined {
-  const k = key(name);
+/** The file a skill's note is in, if it has one already - it may have been named by hand. */
+function noteFor(dir: string, name: string, lang: string): string | undefined {
+  const want = id(name, lang);
   try {
     return readdirSync(folder(dir))
       .filter((n) => n.endsWith(".md"))
       .find((n) => {
         try {
           const s = fromNote(readFileSync(`${folder(dir)}/${n}`, "utf8"), n);
-          return s && key(s.name) === k;
+          return !!s && idOf(s) === want;
         } catch {
           return false;
         }
@@ -174,13 +105,17 @@ function noteFor(dir: string, name: string): string | undefined {
   }
 }
 
+/** The file name for a new note. The language goes in it, or two "printing"s would collide. */
+export function noteName(s: { name: string; lang: string }): string {
+  return fileName(s.lang ? `${s.name} (${s.lang})` : s.name);
+}
+
 /** Write every skill whose note changed, each through a temp file and a rename. */
 export function write(t: Tree, dir = home()) {
   try {
     mkdirSync(folder(dir), { recursive: true });
     for (const s of t.skills) {
-      const name = noteFor(dir, s.name) ?? fileName(s.name);
-      const path = `${folder(dir)}/${name}`;
+      const path = `${folder(dir)}/${noteFor(dir, s.name, s.lang) ?? noteName(s)}`;
       const text = toNote(s);
       let was: string | null = null;
       try {
@@ -198,9 +133,9 @@ export function write(t: Tree, dir = home()) {
   }
 }
 
-/** Delete a skill's note. How you dispute something, or take back a claim. */
-export function remove(name: string, dir = home()): boolean {
-  const n = noteFor(dir, name);
+/** Delete a skill's note. How you take one back. */
+export function remove(name: string, lang: string, dir = home()): boolean {
+  const n = noteFor(dir, name, lang);
   if (!n) return false;
   try {
     unlinkSync(`${folder(dir)}/${n}`);
@@ -210,7 +145,7 @@ export function remove(name: string, dir = home()): boolean {
   }
 }
 
-/** Start over. */
+/** Start over, with the old notes moved aside rather than deleted. */
 export function reset(dir = home()): string | null {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const aside = `${folder(dir)}.before-reset-${stamp}`;
@@ -219,101 +154,60 @@ export function reset(dir = home()): string | null {
     renameSync(folder(dir), aside);
     moved = true;
   }
-  // Or the old file would seed the fresh tree straight back.
-  if (existsSync(legacy(dir))) {
-    renameSync(legacy(dir), `${legacy(dir)}.before-reset-${stamp}`);
-    moved = true;
-  }
   mkdirSync(folder(dir), { recursive: true });
   return moved ? aside : null;
 }
 
-export type Entry = {
-  name: string;
-  solid: boolean;
-  breadth: Breadth;
-  lang?: string;
-  /** The language of the file they just typed it in, if that's how it was shown. */
-  shownIn?: string;
-  requires: string[];
-  why: string;
-};
+export type Unlock = { name: string; lang?: string; how: How; requires?: string[]; why: string };
 
-/** Record what a skill looks like now, as shown in `root`. */
-export function note(t: Tree, e: Entry, root: string): Tree {
-  const k = key(e.name);
-  if (!k) return t;
-  const prev = t.skills.find((s) => key(s.name) === k);
-
-  // Prerequisites are spelled the way the tree already spells them, so a casing difference does
-  // not grow a second node.
-  const canon = (n: string) => t.skills.find((s) => key(s.name) === key(n))?.name ?? n.trim();
+/** The tree with one more skill unlocked, or an existing one refreshed. */
+export function unlock(t: Tree, u: Unlock): Tree {
+  const lang = langName(u.lang ?? "");
+  if (!key(u.name)) return t;
+  const me = id(u.name, lang);
+  const prev = t.skills.find((s) => idOf(s) === me);
   const requires: string[] = [];
-  for (const r of [...(prev?.requires ?? []), ...e.requires]) {
-    const name = canon(r);
-    if (name && key(name) !== k && !requires.some((x) => key(x) === key(name))) requires.push(name);
+  for (const r of [...(prev?.requires ?? []), ...(u.requires ?? [])]) {
+    const name = r.trim();
+    if (name && key(name) !== key(u.name) && !requires.some((x) => key(x) === key(name))) requires.push(name);
   }
-
-  // Where it was shown only means something while it is solid.
-  const repos = e.solid
-    ? [...new Set([...(prev?.solid ? prev.repos : []), root])]
-    : [];
-
   const next: Skill = {
-    name: prev?.name ?? e.name.trim(),
-    solid: e.solid,
-    // dum saw it for itself, so whatever was claimed is now settled.
-    claimed: false,
-    breadth: e.breadth,
-    lang: e.lang !== undefined ? langName(e.lang) : prev?.lang ?? "",
-    shownIn: [...new Set([...(prev?.shownIn ?? []), ...(e.shownIn ? [langName(e.shownIn)] : [])])],
-    requires,
-    why: e.why,
-    repos,
+    name: prev?.name ?? u.name.trim(),
+    lang,
+    how: u.how,
+    requires: requires.slice(0, 3),
+    why: u.why,
     at: new Date().toISOString(),
   };
-  return { skills: [...t.skills.filter((s) => key(s.name) !== k), next] };
+  return { skills: [...t.skills.filter((s) => idOf(s) !== me), next] };
 }
 
-export type Claim = { name: string; breadth: Breadth; requires: string[]; why: string; lang?: string };
-
-/** Add what they say they hold, from a scan of their own project. */
-export function claim(t: Tree, c: Claim, root: string): Tree {
-  const k = key(c.name);
-  const prev = t.skills.find((s) => key(s.name) === k);
-  if (!k || (prev && !prev.claimed)) return t;
-  const next: Skill = {
-    name: prev?.name ?? c.name.trim(),
-    solid: true,
-    claimed: true,
-    breadth: c.breadth,
-    lang: c.lang !== undefined ? langName(c.lang) : prev?.lang ?? "",
-    shownIn: prev?.shownIn ?? [],
-    requires: [...new Set([...(prev?.requires ?? []), ...c.requires])].filter((r) => key(r) !== k).slice(0, 3),
-    why: c.why,
-    repos: [...new Set([...(prev?.repos ?? []), root])],
-    at: new Date().toISOString(),
-  };
-  return { skills: [...t.skills.filter((s) => key(s.name) !== k), next] };
+/** That exact skill: this name, in this language ("" for the language-free idea). */
+export function find(t: Tree, name: string, lang = ""): Skill | undefined {
+  const want = id(name, lang);
+  return t.skills.find((s) => idOf(s) === want);
 }
 
-export function find(t: Tree, name: string): Skill | undefined {
-  return t.skills.find((s) => key(s.name) === key(name));
+/** Every skill with this name, in any language. */
+export function named(t: Tree, name: string): Skill[] {
+  return t.skills.filter((s) => key(s.name) === key(name));
 }
 
-/** Take a skill off the tree. How you dispute something the intern got wrong. */
-export function forget(t: Tree, name: string): Tree {
-  return { skills: t.skills.filter((s) => key(s.name) !== key(name)) };
+/**
+ * Whether it's theirs, for writing code on it in this language. The language-free idea counts
+ * too, but only in a language they've shown something in: knowing recursion doesn't write Rust.
+ */
+export function holds(t: Tree, name: string, lang: string): boolean {
+  const l = langName(lang);
+  if (find(t, name, l)) return true;
+  if (!l) return named(t, name).length > 0;
+  return !!find(t, name, "") && spoken(t, l);
 }
 
-/** How long a skill counts as known before it earns one quick re-check. */
-const FRESH_DAYS: Record<Breadth, number> = { general: 365, niche: 60 };
-
-/** Known, but long enough ago that one quick check is fair. */
-export function stale(s: Skill, now = new Date()): boolean {
-  if (!s.solid || !s.at) return false;
-  const age = (now.getTime() - new Date(s.at).getTime()) / 86_400_000;
-  return Number.isFinite(age) && age > FRESH_DAYS[s.breadth];
+/** Whether they've unlocked anything at all in this language. */
+export function spoken(t: Tree, lang: string): boolean {
+  const l = langName(lang);
+  return t.skills.some((s) => s.lang === l);
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -341,217 +235,31 @@ export function langOf(path: string): string {
   return EXT_LANG[ext] ?? "";
 }
 
-/** Whether a skill on the tree lets dum write code for it in this file. */
-export function holdsIn(t: Tree, name: string, path: string, root: string): boolean {
-  const s = find(t, name);
-  if (!s || !s.solid) return false;
-  if (s.breadth === "niche" && !s.claimed && !s.repos.includes(root)) return false;
-  const here = langOf(path);
-  if (!here) return true;
-  if (s.lang && s.lang !== here) return false;
-  // A language they've never shown anything in: every line of it is theirs, however well they
-  // know the idea.
-  return spoken(t, here);
+/** A file extension for a language, for the scratch files a course writes. */
+export function extFor(lang: string): string {
+  const l = langName(lang);
+  return Object.entries(EXT_LANG).find(([, v]) => v === l)?.[0] ?? "txt";
 }
 
-export type Level = { name: "novice" | "developing" | "fluent"; count: number; gap: number; scaffold: boolean };
-
-/**
- * How far along they are in a language, for fading (Kalyuga et al., 2003):
- * novices get most of the code given and small gaps, fluent ones do the work.
- * `gap` is the most lines one hole may ask of them; `scaffold` is whether dum
- * may write the code around the gaps itself.
- */
-export function level(t: Tree, lang: string): Level {
-  // Tagged with the language, or typed in it: an idea explained in words
-  // isn't C++ they've written, but a hole they filled in C++ is.
-  // Claimed counts: they added it saying they can write it without AI.
-  const count = t.skills.filter((s) => s.solid && (!lang || s.lang === lang || s.shownIn.includes(lang))).length;
-  if (count < 3) return { name: "novice", count, gap: 3, scaffold: true };
-  if (count < 10) return { name: "developing", count, gap: 8, scaffold: true };
-  return { name: "fluent", count, gap: Infinity, scaffold: false };
+/** "recursion (python)", or just the name for an idea that isn't one language's. */
+export function label(s: { name: string; lang?: string }): string {
+  return s.lang ? `${s.name} (${s.lang})` : s.name;
 }
 
-/** Whether they've shown anything at all in this language. */
-export function spoken(t: Tree, lang: string): boolean {
-  return t.skills.some((s) => s.solid && (s.lang === lang || s.shownIn.includes(lang)));
-}
-
-/** Solid and trusted in this repo: general anywhere, niche only where shown. */
-export function known(t: Tree, root: string): Skill[] {
-  return t.skills.filter((s) => s.solid && !s.claimed && (s.breadth === "general" || s.repos.includes(root)));
-}
-
-/** They say they hold it; dum has not seen it yet. */
-export function claimed(t: Tree): Skill[] {
-  return t.skills.filter((s) => s.claimed);
-}
-
-/** Solid, but niche and shown somewhere else. Worth one quick check here. */
-export function elsewhere(t: Tree, root: string): Skill[] {
-  return t.skills.filter((s) => s.solid && !s.claimed && s.breadth === "niche" && !s.repos.includes(root));
-}
-
-/** Taught, or claimed and then fumbled. */
-export function shaky(t: Tree): Skill[] {
-  return t.skills.filter((s) => !s.solid);
-}
-
-/** Fold a repo's old `.dum/knowledge.json` into the tree. */
-export function migrate(t: Tree, root: string): Tree {
-  let old: unknown;
-  try {
-    old = JSON.parse(readFileSync(`${root}/.dum/knowledge.json`, "utf8"));
-  } catch {
-    return t;
+/** The tree as the intern sees it. */
+export function describe(t: Tree): string {
+  if (!t.skills.length) {
+    return "THEIR SKILL TREE is empty. Every skill is locked: nothing gets written for them until they unlock it.";
   }
-  const topics = (old as { topics?: unknown })?.topics;
-  if (!Array.isArray(topics)) return t;
-  const added: Skill[] = [];
-  for (const raw of topics) {
-    const o = raw as Record<string, unknown>;
-    if (!o || !str(o.topic) || !o.topic.trim() || typeof o.solid !== "boolean") continue;
-    if (find(t, o.topic) || added.some((s) => key(s.name) === key(o.topic as string))) continue;
-    added.push({
-      name: o.topic.trim(),
-      solid: o.solid,
-      claimed: false,
-      lang: "",
-      shownIn: [],
-      breadth: "general",
-      requires: [],
-      why: str(o.why) ? o.why : "",
-      repos: o.solid ? [root] : [],
-      at: str(o.at) ? o.at : "",
-    });
-  }
-  return added.length ? { skills: [...t.skills, ...added] } : t;
-}
-
-/** The tree as the intern sees it. Empty string when there is nothing to say. */
-export function describe(t: Tree, root: string): string {
-  if (!t.skills.length) return "";
-  const line = (s: Skill) => {
-    const on = s.requires.length ? `  [builds on: ${s.requires.join(", ")}]` : "";
-    const only = s.lang ? `  (${s.lang} only)` : "";
-    return `  - ${s.name}${only}${on}`;
-  };
-  const out: string[] = [
-    "THEIR SKILL TREE",
-    "",
-    "Everything they have shown you or been taught, across every project. Use",
-    "these exact names when you record something that is the same idea.",
-    "A skill marked (<language> only) counts only in that language. In another",
-    "language it is NOT known: their Python for loops don't write C++'s.",
+  const byLang = new Map<string, Skill[]>();
+  for (const s of t.skills) byLang.set(s.lang, [...(byLang.get(s.lang) ?? []), s]);
+  const out = [
+    "THEIR SKILL TREE - what they've unlocked. Anything not here is locked.",
+    "A skill under a language counts only in that language. An idea with no",
+    "language counts in any language they've unlocked something in.",
   ];
-  const now = new Date();
-  const k = known(t, root).filter((s) => !stale(s, now));
-  if (k.length) {
-    out.push(
-      "",
-      "KNOWN. They explained these. Build on them without asking, and never",
-      "re-teach them:",
-      ...k.map(line),
-    );
-  }
-  const old = known(t, root).filter((s) => stale(s, now));
-  if (old.length) {
-    out.push(
-      "",
-      "KNOWN, BUT A WHILE AGO. If this build leans on one, ONE short check is fair",
-      "- never a re-teach:",
-      ...old.map(line),
-    );
-  }
-  const e = elsewhere(t, root);
-  if (e.length) {
-    out.push(
-      "",
-      "SHOWN IN ANOTHER PROJECT, AND NICHE. One-off knowledge fades. If this build",
-      "actually leans on one of these, ONE short check is fair - never a re-teach:",
-      ...e.map((s) => `${line(s)}  (in ${s.repos.map((r) => basename(r)).join(", ")})`),
-    );
-  }
-  const cl = claimed(t);
-  if (cl.length) {
-    out.push(
-      "",
-      "CLAIMED. They say they hold these - from code they wrote themselves - but",
-      "never showed you. Don't teach them. The first time this build actually",
-      "leans on one, ONE short check; if they get it, note_understanding solid:",
-      ...cl.map(line),
-    );
-  }
-  const w = shaky(t);
-  if (w.length) {
-    out.push(
-      "",
-      "SHAKY. You had to teach these, or they fumbled them. A quick check is fair",
-      "when this build leans on one, but do not teach it from scratch again:",
-      ...w.map(line),
-    );
+  for (const [lang, list] of [...byLang].sort(([a], [b]) => a.localeCompare(b))) {
+    out.push("", `${lang || "any language"}:`, ...list.map((s) => `  - ${s.name}`));
   }
   return out.join("\n");
-}
-
-/** Counts for a header. */
-export function summary(t: Tree, root: string): { known: number; shaky: number; claimed: number } {
-  return { known: known(t, root).length, shaky: shaky(t).length, claimed: claimed(t).length };
-}
-
-export type Row = {
-  depth: number;
-  name: string;
-  /** `ghost` is a prerequisite something builds on that they have not shown yet. */
-  state: "solid" | "shaky" | "claimed" | "ghost";
-  niche: boolean;
-  /** The language it's scoped to, or "". */
-  lang: string;
-  /** Already drawn further up under another parent, so its children are not repeated. */
-  repeat: boolean;
-};
-
-/** The tree as rows to draw, roots first. */
-export function rows(t: Tree): Row[] {
-  const byKey = new Map(t.skills.map((s) => [key(s.name), s]));
-  const ghosts = new Map<string, string>();
-  const children = new Map<string, string[]>();
-  for (const s of t.skills) {
-    for (const r of s.requires) {
-      const rk = key(r);
-      if (!byKey.has(rk) && !ghosts.has(rk)) ghosts.set(rk, r);
-      children.set(rk, [...(children.get(rk) ?? []), key(s.name)]);
-    }
-  }
-  const nameOf = (k: string) => byKey.get(k)?.name ?? ghosts.get(k) ?? k;
-  const byName = (a: string, b: string) => nameOf(a).localeCompare(nameOf(b));
-
-  // Real roots before ghosts, so a skill is drawn in full under the branch you actually built
-  // and only back-referenced under a prerequisite you have not shown yet.
-  const all = [...byKey.keys(), ...ghosts.keys()];
-  const roots = [
-    ...[...byKey.keys()].filter((k) => !byKey.get(k)!.requires.length).sort(byName),
-    ...[...ghosts.keys()].sort(byName),
-  ];
-
-  const out: Row[] = [];
-  const drawn = new Set<string>();
-  const walk = (k: string, depth: number) => {
-    const s = byKey.get(k);
-    const repeat = drawn.has(k);
-    out.push({
-      depth,
-      name: nameOf(k),
-      state: s ? (s.claimed ? "claimed" : s.solid ? "solid" : "shaky") : "ghost",
-      niche: s?.breadth === "niche",
-      lang: s?.lang ?? "",
-      repeat,
-    });
-    if (repeat) return;
-    drawn.add(k);
-    for (const c of [...(children.get(k) ?? [])].sort(byName)) walk(c, depth + 1);
-  };
-  for (const r of roots) walk(r, 0);
-  for (const k of all.sort(byName)) if (!drawn.has(k)) walk(k, 0);
-  return out;
 }

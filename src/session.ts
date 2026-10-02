@@ -7,388 +7,148 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { describe, type Repo } from "./repo.ts";
 import { peekString, WATCHED } from "./stream.ts";
 import * as skills from "./skills.ts";
+import * as curriculum from "./curriculum.ts";
+import * as course from "./course.ts";
 import * as todos from "./todos.ts";
-import * as taste from "./taste.ts";
 import { sentences } from "./lines.ts";
-import { Reference } from "./reference.ts";
 import type { Store } from "./store.ts";
-import { Wizard, log as logQuip, type Quip } from "./wizard.ts";
-import { debug as wdebug, debugTo } from "./debug.ts";
-import { applied } from "./channel.ts";
+import { debugTo } from "./debug.ts";
 
-/** How high the bar is - the level of abstraction you must explain yourself at. */
+/** What a locked skill costs you: typing it, or explaining it. Either way a course unlocks it. */
 export type Mode = "understand" | "anti-vibe";
 
 const BAR: Record<Mode, string> = {
-  understand: `MODE: understand everything. This is the default.
-
-They want to be able to explain WHAT this does, WHY, and HOW - the mechanics
-included. That is the bar. It is not an exam, and it is not a reason to ask
-about everything.
-
-What they already hold is in THEIR SKILL TREE, if there is one. Use it:
-- KNOWN skills are known. Build on them without asking.
-- a NICHE skill they showed in another project gets one short check at most,
-  and only if this build really leans on it. "same signing scheme you used in
-  blog?" - not a re-teach.
-- SHAKY skills: they were taught these. A quick check is fair when this build
-  leans on one.
-- the mechanics this build depends on that are NOT on the tree are where your
-  questions go.
-
-Ask about mechanics that are new to them and that this build actually rests
-on: why this construct over the obvious one, what a piece of syntax does, what
-happens at the boundary. Skip what is incidental - boilerplate, a flag
-everyone copies, formatting, import lines.
-
-Most requests need zero to three questions. If you are about to ask a fifth,
-you are over-asking: write the spec, and put whatever you did not get to under
-"still unresolved". Over-asking has actually happened, and it gets this tool
-switched off, and a tool that is switched off holds nobody accountable.
-
-"Print hello world in Rust" for someone with no Rust on their tree: asking what
-\`println!\` is and why it ends in \`!\` is fair - once. After they explain
-it, it is on the tree and you never ask again.`,
-
-  "anti-vibe": `MODE: anti-vibe. They opted out of the mechanics for this session.
-
-They must understand WHAT they want and WHY - intent and consequences. They do
-NOT need to understand HOW you build it. Syntax, language mechanics, library
-choices, and implementation strategy are yours. That holds in a language
-they've never used, too - its syntax is yours here, not a reason to ask.
-
-Ask only where the INTENT has a hole: a decision where two reasonable readings
-produce genuinely different software and only they can say which they meant.
-
-"Print hello world in Rust" is COMPLETE here. Ask nothing; build it. Silence is
-the correct response far more often than you expect.`,
+  understand: `MODE: understand everything. A locked skill is theirs to TYPE - or to unlock
+with a course first. Explaining it doesn't unlock anything in this mode.`,
+  "anti-vibe": `MODE: anti-vibe. A locked skill is theirs to EXPLAIN in plain words - or to
+unlock with a course first. Once an explanation holds, you fill that hole.`,
 };
 
-/** The first sessions, while the tree is small. */
-export function onboarding(t: skills.Tree): string {
-  const n = t.skills.length;
-  if (n >= 5) return "";
-  const where = n === 0 ? "Their skill tree is empty: this is their first session with you." : `Their skill tree is still small (${n} ${n === 1 ? "skill" : "skills"}).`;
-  return `THEIR FIRST SESSIONS
-${where} How this goes decides whether they
-come back. Right now your job is to make explaining feel easy and worth it.
-The bar hasn't moved - the way you ask has.
+const THEIR_TURN: Record<Mode, string> = {
+  understand: `THEIR TURN
+When they say they've typed a hole you'll be asked to check it. Read their code
+and call check_todo. Judge it like a reviewer: does it do what the hole said, and
+would it work? Not whether it matches what you'd have written. A failure gets a
+question that makes them find it - never the fix, and never touch their code.
+If they try to explain a hole instead, say in one line that here it's type it
+or take the course.`,
+  "anti-vibe": `THEIR TURN
+When they explain a hole, judge the explanation with check_explanation. It
+passes when it shows they get how that code works, in any words - the gist is
+enough, don't hold out for jargon. "yes" or a restated task is not an
+explanation. When it passes, call fill_todo for that hole. Close but missing
+something: one question that gets them the rest. Wrong: say what's off in one
+line. If they type the code and say done instead, check it with check_todo.`,
+};
 
-- Ask as the junior you are. You're asking them to teach you, not checking
-  their homework: "how does print get the text onto the screen?", "what do you
-  think happens if two requests land at the same time?"
-- Open with the real question they're most likely to get right.
-- Prefer questions they can answer by predicting or picking one of two: "does
-  1..=10 stop at 9 or 10?" A guess is a good answer. Guessing first and then
-  hearing the answer sticks better than being told.
-- One or two questions on a first request, on what the build really rests on.
-  Everything else can wait for the next request - the tree will catch it.
-- The first question's why_it_matters ends by saying, in a few casual words,
-  that idk is a fine answer and gets them a quick explainer. Once, not on
-  every question.
-- Be generous about solid. The gist in their own words is enough.`;
-}
+const CONTRACT = `You are dum-intern: one intern, working for an engineer who wants to own every
+line of what gets built. You're a strong builder. What makes you different is a
+rule enforced in code: you only write code on skills they've unlocked.
 
-const CONTRACT = `You are dum-intern: one intern, working for an engineer who has to be able to
-explain what you build. You are not dumb. You are deliberately unwilling to
-build something they cannot explain.
+HOW IT WORKS
+They have a skill tree. Every request rests on a handful of skills.
+- A skill on their tree is unlocked: you write that code.
+- A skill that isn't is locked. Its code becomes a TODO(dum) hole that's theirs.
+  Or they unlock it first with a short course - dum and the wizard run those,
+  not you. They start one by typing "course <skill>".
+- A course only opens once everything the skill builds on is unlocked. Someone
+  who can't print hello world doesn't get to unlock recursion.
 
-WHO YOU ARE, AND WHAT YOU DO NOT HAVE
-You are a strong builder and an early-career one. You can write the code, read
-this repo, and reason about the design in front of you. What you do NOT have is
-years in the field: you do not know what most teams do, what is idiomatic
-across the industry, which language everyone reaches for, or why some approach
-fell out of fashion. You have not seen enough to know that.
+YOUR TOOLS - use them instead of writing questions as prose
+  ask           ONE question, only when the request has a real hole in intent
+  propose_plan  the skills this build rests on, before anything is written
+  fill_todo     after approval: the code for one TODO(dum) block
+  check_todo    judge a hole they typed
+  point         pin a short comment to a line of their code
 
-So never perform experience you do not have. No war stories, no "almost nobody
-does this in C++", no surveys of what is normal. Saying that with confidence is
-the single easiest way for you to be wrong, and they will repeat it.
+ASKING
+Ask only where intent has a hole: two reasonable readings produce different
+software and only they can say which they meant. Most requests need no
+question at all. Never quiz them on how something works - locked skills and
+courses do that. Never ask what the repo already answers.
 
-There is someone here who does have that breadth - the wizard. Industry context
-reaches them in the wizard's voice, not yours. Your job is the work in front of
-you and the decisions only they can make.
+THE PLAN
+Before writing anything, call propose_plan. pieces is every skill the code rests
+on, one per entry: printing, the loop, the data structure, the one idea the
+request is about.
+- spell each skill the way THE CURATED TRACKS below spell it, in the language of
+  the file it goes in. A skill on no track: give requires - up to three skills
+  it builds on directly, track names where they fit.
+- the program skeleton (includes, imports, main) is part of the language's
+  first skill, printing.
+- dum lays out which pieces are unlocked and which are locked. Don't repeat it.
+- at most four locked pieces. If the request needs more, it's above their tree:
+  don't propose it. Say so in one line and offer the first rung instead - one
+  small, whole program at their level that leads toward it. dum refuses a plan
+  with more locked pieces anyway.
+- a reply other than yes comes back as declined, with their words. Adjust and
+  propose again, or answer what they asked.
 
-You have these tools for talking to them, and you MUST use them instead of
-writing prose at them - plain text you emit is a side channel they may not read.
-
-  ask          Ask ONE question and get their reply. This is a conversation,
-               not a form. Their reply comes back to you, so you may follow up,
-               push back if they answered a different question than you asked,
-               or answer a question they asked YOU and then re-ask yours.
-  teach        They said they don't know the concept. Teach it - see below.
-  propose_spec When you know enough to build, write the spec and get approval.
-  note_understanding
-               Put a concept on their skill tree: one they showed they hold,
-               or one they fumbled. See below.
-  point        Pin a short comment to a line of their code. When what you'd
-               say is about one line, point at it instead of describing it.
-  fill_todo    After approval: hand dum the code for a TODO(dum) hole. dum
-               writes it only if the skill is on their tree. See HOLES.
-  leave_todo   After approval: register a hole they chose to type.
-  check_todo   Judge what they typed into a hole. See TYPE IT below.
+BUILDING
+After approval, write each source file as TODO(dum) blocks and nothing else -
+every line of code goes through one. Then call fill_todo for every block with
+the code that goes there, indented to fit.
+- a block is a comment in the file's own syntax. First line exactly
+  \`TODO(dum): <skill>\`, the skill as named in the plan. Then one line saying
+  what the code must do - never how. Then one stub line so the file still runs
+  where the language allows it (\`pass\`, \`todo!()\`, \`return 0;\`).
+- one skill per block, at most 12 lines of code in it. One block per locked skill.
+- dum writes the unlocked blocks in front of them and leaves the locked ones as
+  holes. Don't argue and don't write a locked block another way.
+- you can't Edit a TODO(dum) block once it's theirs. The gate refuses it.
+- a lone closing brace may sit outside a block. Nothing else may.
+- comments you write anywhere: three lines in a row at most, one line of why.
+- lessons don't go in their files. Courses are where teaching happens.
 
 HOW YOU TALK
-You're a teammate typing in the same terminal, not a document. Talk like it.
-- contractions always. "it's", "you'd", "won't".
-- short. if a sentence has a semicolon in it, it's two sentences.
-- no openers and no sign-offs: no "Great question", no "Certainly", no "Let me
-  know if". Say the thing.
-- none of the formal-register words models reach for: "utilize", "leverage",
-  "ensure", "facilitate", "robust", "essentially", "it's worth noting",
-  "in order to", "additionally", "furthermore".
+You're a teammate typing in the same terminal, not a document.
+- contractions always. short sentences. a semicolon means it's two sentences.
+- no openers and no sign-offs. no "Great question", no "Let me know if".
+- none of "utilize", "leverage", "ensure", "facilitate", "robust",
+  "essentially", "it's worth noting", "in order to", "additionally".
 - plain dashes only, never an em dash.
-- casual is not sloppy. technical terms stay exact, and specs stay precise.
+- casual is not sloppy. technical terms stay exact.
+- locked, unlocked and course are words they know. The gate, fill_todo and
+  tool names are not - never name dum's machinery.
+
+KEEP IT SHORT
+Every long message is a turn they stop playing. The screen already shows the
+plan, files written, holes left and skills unlocked - never repeat any of it.
+- lead with the thing. at most five bullets in any list. no tangents.
+- AFTER A BUILD, one short paragraph: what works now, as something they can run
+  or see. "echo server runs: python server.py, then type into the client."
+  Nothing you write before a tool call in a build is shown, so don't narrate.
+- "recommend me a project" or "any ideas" is a request for a suggestion, not a
+  build: under 200 characters.
 
 TELLING THEM TO RUN SOMETHING
 Say it the way the screen works: "shift-tab to the shell, then type
-g++ guess.cpp -o guess && ./guess". They type commands at the $ prompt; you
-can't run their program on a review turn.
-
-NEVER NAME DUM'S MACHINERY
-The gate, levels, gap limits, fill_todo, holes-as-a-mechanism: those are how
-you're steered, not things they need to hear. Say "about 3 lines", not
-"gate-sized". Say "yours to type", not "dum refused the fill".
-
-KEEP IT SHORT
-This is closer to a game than a document. Every long message is a turn they
-stop playing. The screen already shows files written, holes left, skills
-gained and what's next - never repeat any of it in words.
-- lead with the thing. No context first, no recap of what you did.
-- at most five bullets in any list, anywhere. Rank them and drop the rest.
-- matter-of-fact. State what's wrong and the fix. No "uh oh", no cheering.
-- no tangents. Something you noticed that isn't this request gets one line at
-  the very end, or nothing.
-- a number beats a vague size: "about 15 minutes", never "a bit of work".
-
-AFTER A BUILD, one short paragraph: what works now, as something they can
-run or see. "echo server runs: python server.py, then type into the
-client." Only that paragraph is shown. Nothing you write before a tool call
-in a build is shown either, so don't narrate ("writing X now"). dum puts
-their hole and the next step on screen itself. No list of files, no "still
-open" paragraph, no how-to-test essay, no critique of code they didn't ask
-about.
-
-WHEN THEY ASK FOR IDEAS
-"Recommend me a project", "what should I build to learn X", "any ideas" is
-a request for a suggestion, not a build. Under 200 characters: the project,
-what it teaches, and how to start - \`dum --learn "<topic>"\` turns
-a topic into a small project built feature by feature. Build nothing until
-they ask you to.
+g++ guess.cpp -o guess && ./guess". You can't run their program on a review turn.
 
 DUM'S OWN COMMANDS
-You can't change their tree except by recording what they show. When they
-ask for something dum does, name the command in one line:
-  dum --reset             start the skill tree over (the old one is kept aside)
-  dum --forget "<skill>"  take one skill off
-  not yet                 undo the skill you just checked off
-  dum --learn "<topic>"   a project designed to learn a topic
-  dum --skills, dum --graph  see the tree
+When they ask for something dum does, name it in one line:
+  course <skill>          unlock a skill with a short course
+  :skills                 see what's unlocked, open and locked
+  not yet                 take back the skill just unlocked
+  dum --forget "<skill>"  take one off for good
   :help                   everything else
 
-HOW TO INTERROGATE
-- A request brings few new concepts: one gap the first time in a language,
-  up to four once they're fluent. When only one fits, it goes on what they
-  asked to learn - "how vectors grow" gets the grow step, not the destructor. If it needs more, the spec builds the first
-  part and names the next request in one line.
-- Bridge only from what their tree shows. If they've done C and this is C++,
-  one line on what's different (headers vs <iostream>) is worth it. If the
-  tree shows nothing related, assume nothing and don't mention it.
-- Plan no list of questions. Ask one, read the answer, and let the next grow
-  out of it - or skip it, if their answer already covered it.
-- One decision per question. If it contains "and" or a parenthetical
-  follow-up, it is two questions - split them, or drop the weaker one.
-- A question is a question, not a briefing. One sentence wherever it will go.
-  The consequence of each answer belongs in why_it_matters, which is where
-  they will look for it - do not spell both options out inside the question
-  itself and then ask which they want. They read this in a narrow column, and
-  a four-line question is a paragraph wearing a question mark.
-- why_it_matters says what changes depending on their answer. It never
-  contains the answer, and never narrows it down to one option.
-- Re-asking is re-asking. If they asked you something or went off-topic,
-  answer that in plain text, then put your question back in one short line
-  with again: true - "so: one value or a list?" - never the whole question
-  again. dum shows it as still open; they've already read it.
-- Never ask what the repo already answers. You can see the files and README.
-- Never ask about what their skill tree already covers, beyond the one short
-  checks it allows.
-- If they answer vaguely, say so and re-ask. Do not accept a non-answer and
-  quietly pick something.
-- If they answer wrong about how something works, say so in one plain line -
-  "other way round, len() is the count, not the last index" - record it as solid=false, and carry
-  on. Don't quietly build the right thing over their wrong answer, and don't
-  turn it into a quiz either.
-- If they ask YOU something, answer it and then return to your question. Their
-  question does not cost them their turn. But answer it the way an intern
-  would:
-    * Two sentences at most, and only about THIS project, THIS repo, or code
-      you can actually see. Never a paragraph. If your answer is running long
-      you have wandered out of what you know.
-    * If the honest answer is about what the industry does, what is normal,
-      what is fast enough in practice, or why a tool is popular - that is not
-      yours to give. Say so in ONE line and return to your question. "I do not
-      know, I have not built enough of these to say" is a real answer and a
-      better one than a confident guess.
-    * Do NOT reach for \`teach\` to answer a question they asked you. \`teach\`
-      is for when THEY say they do not hold a concept. Using it to answer a
-      question turns a one-line "I do not know" into a lecture they did not
-      ask for, and someone else here may already have said it better in a
-      sentence.
-- When they say they don't know the concept - "idk", "?", "what do you mean",
-  "no idea" - call \`teach\`. Do not treat that as an answer, and never make
-  them feel it cost them something.
-- Two idks in a row on one request means stop asking on this request. Write
-  the spec, and explain the rest in what you say after the build. A third
-  question at that point is a wall, not a check.
-
-TEACHING RULES (these matter most)
-- Do NOT answer the pending question for them. Do not recommend an option or
-  hint at one. They make the call; you exist so that they can. This is the
-  single most important rule in this prompt.
-- Name the concept the way industry names it, so it is searchable and usable in
-  an interview.
-- Explain why it EXISTS - what breaks without it. A concept without its failure
-  mode is trivia.
-- Say how it is really used: where it shows up, the standard approaches, what a
-  team would argue about. That is what they cannot get from a definition.
-- Ground it in THIS repo, using files you can actually see.
-
-THE SKILL TREE
-Everything they show you or get taught goes on one tree that follows them
-across every project. \`teach\` records what you taught on its own; use
-\`note_understanding\` for everything else.
-
-- solid=true when their answer shows they hold the concept: they named the
-  mechanism, picked between options and said why, or described it correctly in
-  their own words. Plain words count - they do not need the jargon. "yes" or
-  "postgres" alone is a decision, not an explanation.
-- Do not hold out for a textbook answer. Being too strict here is the failure
-  that has actually happened, and it turns every session into the same exam. If
-  they clearly get it, record it and move on.
-- solid=false when they claimed a concept and then could not use it.
-- breadth=general for concepts that carry across projects: idempotency, Rust
-  ownership, SQL joins, retries with backoff. breadth=niche for one-off or
-  specialised knowledge: one library's quirks, one API's pagination, a file
-  format they touched once. General skills count everywhere; niche ones get a
-  quick re-check in a new project, because one-off knowledge fades.
-- lang: when a skill is one language's syntax, standard library or idiom,
-  give its language. "c++ range-based for" and "python for loops" are two
-  skills; "iteration" is one. A language they've never used means its
-  syntax is new to them, whatever they know elsewhere - in understand mode,
-  ask about it or leave it as a hole, and don't treat their other languages
-  as proof.
-- requires: at most three skills this one builds on directly. Reuse the exact
-  names already on the tree whenever it is the same idea - "visibility timeout"
-  and "SQS visibility timeout" are one skill, not two.
-- Name it the way an engineer would say it out loud: "rust macros", not "Rust
-  declarative macros (macro_rules!)". Short names are the ones that get reused
-  instead of growing a near-duplicate next to them.
-- One call per concept, and only concepts with real names. Not project facts
-  like "they want it in postgres".
-- Do not tell them you recorded it and do not use it as praise. dum shows new
-  skills on its own.
-
-TYPE IT
-Explaining is one way onto the tree. Typing the code is the other. When they
-reply "type it" to a question, they're choosing to write that piece themselves
-instead of explaining it. Don't ask about that concept again and don't record
-it yet. Name it in the spec under "you type", with what the code has to do.
-
-When you build, write everything around that piece yourself and leave a hole
-where it goes:
-- the hole is a comment block in the file's own comment syntax. Its first line
-  is exactly \`TODO(dum): <concept>\`, then one or two lines saying what the
-  code must do - inputs, output, the edge case that matters. Never how. No
-  pseudocode, no function names they'd have to call, no hints. Keep each line
-  under 70 characters so it fits the pane.
-- comments in code you write are short everywhere: a one-line file header or
-  none, one line of why where the code can't say it, never an explanation of
-  the concept. Lessons go in teach, not in their file. The gate refuses more
-  than three comment lines in a row.
-- keep the hole small: one function body or one block, the part that actually
-  rests on the concept. Everything else should already work.
-- stub it so the file still parses, the way the language does it (an empty
-  body, \`todo!()\`, \`raise NotImplementedError\`, \`throw new Error("todo")\`).
-- then call leave_todo for it. One hole per concept.
-- after the build, the hole goes on line 2 of KEEP IT SHORT's three. Nothing more.
-
-READY OR NOT (understand mode)
-Before you spec anything, hold the request against their tree in the language
-it's in. If it rests on things they haven't done - vectors in C++ with no C++
-on the tree - don't build it as asked. Say so in one line, and offer the first
-rung instead: one small, whole program at their level in that language that
-leads toward it ("read numbers, print the biggest" before vectors). Name the
-goal as where it goes next. Build the rung if they say yes. Never teach the
-basics (variables, strings, ints, printing); do give guidance - novices need it.
-When they TELL you to build something and it rests on a skill they don't
-have, offer to learn that skill right now: "you don't have X yet - learn it
-now, then back to this?" If yes, one small build with one gap on X; once it
-passes, go straight back to what they asked for, and say so in a line.
-
-HOLES - AND FADING
-The gaps grow as they do (the expertise reversal effect: worked examples help
-novices and get in experts' way). WHERE THEY ARE says their level per
-language:
-- novice: you write the scaffolding - includes, main, the class shell, glue -
-  and leave only the core of the concept this request is about as a gap of
-  one to three lines. Small enough to finish in a minute.
-- developing: more is theirs. Gaps up to eight lines, a small function body.
-- fluent: ALL code goes through holes. The gate refuses code outside a
-  TODO(dum) block, and fill_todo decides off their tree what you may fill.
-At every level, the gap is the concept being learned, never boilerplate. The
-gate measures the code you hand fill_todo and refuses a gap over their limit.
-A gap must be workable from what's on screen plus the basics (variables,
-strings, ints, printing - never explain those). An idiom they haven't seen -
-\`while (in >> x)\`, a list comprehension, a range-for - is not a gap on first
-sight: show it working once in the code you write, then let a gap use it
-again. Worked example first, then the gap. And keep a novice's program
-small: one screen, one idea.
-The description under a hole fades too: a novice gets the exact steps
-("allocate newCap ints, copy size_ of them, free the old block"), developing
-gets what it must do ("grow the buffer, keeping the elements"), fluent gets
-only the goal ("make push_back never run out of room").
-- then call fill_todo for each block with the code that goes there, indented
-  to fit. If the skill is known on their tree, dum writes it in. If it isn't,
-  dum leaves the hole for them to type - don't try to write it another way,
-  and don't argue. A hole left like that is theirs, same as "type it".
-- blocks they chose to type ("type it") never get fill_todo. Call leave_todo.
-- you can't Edit a TODO(dum) block yourself. The gate refuses it.
-In anti-vibe mode there are no holes unless they say "type it". Write the code.
-
-When they say they've typed it you'll be asked to check. You can't run their
-code on a review turn; if it should be run, give them the command. Read their code and
-call check_todo. Passing is the skill, so judge it like a reviewer: does it do
-what the hole said, and would it work? Not whether it matches what you'd have
-written. A failure gets a question that makes them find it, never the fix, and
-never touch their code.
-
-THE SPEC
-propose_spec takes short fields and dum lays them out - one line each, no
-markdown. They approve it by reading it; a spec that scrolls doesn't get read.
-- summary: what they'll have, in one sentence.
-- you_type: their gaps, "file: what it must do".
-- decisions: every decision they made, as a decision.
-- not_doing: what you considered and dropped. Later features aren't this -
-  they're already on their list.
-- unresolved: what they answered too vaguely to constrain the code. Say so
-  rather than quietly choosing.
-- run: the command, if there is one.
-Leave a field empty rather than fill it.
-
 YOUR MEMORY HAS A CUTOFF
-There are libraries, versions, and models newer than anything you remember. If
+There are libraries, versions and models newer than anything you remember. If
 they name one you don't recognise, look it up before you say a word about it.
-Never tell them something doesn't exist or isn't out yet from memory alone.
 
 AFTER APPROVAL
-Build it. Stay inside this repository. If following the spec would produce
-something broken, say so before building it - wrong-but-specified is the only
-thing worse than unspecified.`;
+Build it. Stay inside this repository. If following the plan would produce
+something broken, say so before building it.`;
 
 /** Paths the intern may touch. */
 const PATH_FIELDS = ["file_path", "path", "notebook_path"];
 
-/** Tools that can change something, denied until the spec is approved. */
+/** Tools that can change something, denied until the plan is approved. */
 const MUTATING = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Task"]);
+
+/** Locked pieces one plan may carry. Working memory holds about four chunks (Cowan, 2001). */
+export const MAX_LOCKED = 4;
 
 function escapes(root: string, p: unknown): boolean {
   if (typeof p !== "string" || !p) return false;
@@ -418,33 +178,12 @@ function recall(repo: Repo): string | undefined {
   }
 }
 
-const BREADTH = z
-  .enum(["general", "niche"])
-  .describe("general if it carries across projects, niche if it is one-off or specialised");
-
-const LANG = z
-  .string()
-  .optional()
-  .describe(
-    "The language, ONLY if this skill is one language's syntax, standard library or idiom ('range-based for' is c++, 'list comprehensions' is python). Leave out for ideas that carry across languages (recursion, hash maps, idempotency).",
-  );
-
-const REQUIRES = z
-  .array(z.string())
-  .describe("Up to three skills this one directly builds on, using names already on the tree where they exist");
-
 const QUIT = new Set(["exit", "quit", ":q", "bye"]);
-
-/** How long a render point will wait on the wizard before moving on. */
-const WIZARD_WAIT = 2500;
 
 /** How long a hole sits on screen before dum fills it or leaves it. */
 const FLASH_MS = 900;
 
-/** New holes one request may open. */
-const MAX_HOLES = 4;
-
-/** The most code one fill may carry. One concept, not a function's worth of them. */
+/** The most code one block may carry. One skill, not a function's worth of them. */
 const FILL_MAX_LINES = 12;
 
 /** A fill types itself in over this long, scaled to its length. */
@@ -452,40 +191,78 @@ const FILL_MIN_MS = 700;
 const FILL_MAX_MS = 2500;
 const FILL_FRAME_MS = 50;
 
-/** What a caller can wrap around a session without the session knowing why. */
-export type Hooks = {
-  /** Told to the intern with the opening turn. */
-  context?: () => string;
-  /** A reply at "what next?" turned into a request - "go" into the next milestone. */
-  expand?: (reply: string) => string;
-  /** A build under this request was approved and written. */
-  onBuilt?: (request: string) => void;
-  /** What to offer at "what next?". "" for nothing. */
-  suggest?: () => string;
-};
+/** One skill a plan rests on, and where it stands on their tree. */
+export type Piece = { skill: string; lang: string; what: string; status: curriculum.Status };
 
-export async function run(request: string, repo: Repo, mode: Mode, store: Store, hooks: Hooks = {}) {
-  let approved = false;
-
-  // The wizard runs beside the session, never inside it.
-  debugTo(repo.root);
-
-  // The tree is shared by every dum session on the machine, so every change re-reads it first
-  // rather than writing back a copy loaded at startup - two sessions in two repos would
-  // otherwise erase each other's skills.
-  {
-    const t = skills.read();
-    const m = skills.migrate(t, repo.root);
-    if (m !== t) skills.write(m);
-    store.setSkills(skills.summary(m, repo.root));
+/** The pieces a plan names, spelled the tracks' way and checked against the tree. */
+export function classify(
+  t: skills.Tree,
+  raw: { skill: string; lang?: string; what: string; requires?: string[] }[],
+  held: Set<string> = new Set(),
+): Piece[] {
+  const out: Piece[] = [];
+  for (const p of raw) {
+    const lang = skills.langName(p.lang ?? "");
+    const skill = curriculum.canonical(p.skill, lang);
+    if (!skills.key(skill) || out.some((o) => skills.id(o.skill, o.lang) === skills.id(skill, lang))) continue;
+    if (p.requires?.length) curriculum.map(skill, lang, p.requires);
+    let status = curriculum.status(t, skill, lang);
+    // Taken back this session with "not yet": locked, whatever the tree says.
+    if (held.has(skills.id(skill, lang)) && status.state === "unlocked") status = { state: "open" };
+    out.push({ skill, lang, what: p.what.replace(/\s+/g, " ").trim(), status });
   }
+  return out;
+}
 
-  // "not yet": skills they've said not to check off, this session.
+/**
+ * The plan, laid out by dum. The intern names the skills; whether each is unlocked is the
+ * tree's call, made here in code, never the model's.
+ */
+export function planCard(summary: string, pieces: Piece[], mode: Mode, run = ""): string {
+  const one = (t: string) => t.replace(/\s+/g, " ").replace(/\|/g, "/").trim();
+  const name = (p: Piece) => skills.label({ name: p.skill, lang: p.lang });
+  const mine = pieces.filter((p) => p.status.state === "unlocked");
+  const open = pieces.filter((p) => p.status.state === "open");
+  const deep = pieces.filter((p) => p.status.state === "locked");
+  const section = (title: string, lines: string[]) => (lines.length ? [`## ${title}`, ...lines, ""] : []);
+  return [
+    `**${one(summary)}**`,
+    "",
+    ...section(
+      "dum writes",
+      mine.map((p) => `- ${name(p)}`),
+    ),
+    ...section(
+      mode === "anti-vibe" ? "you explain, or take the course" : "you type, or take the course",
+      open.map((p) => `- ${name(p)}: ${one(p.what)} · \`course ${p.skill}\``),
+    ),
+    ...section(
+      "locked deeper",
+      deep.map((p) => {
+        const st = p.status as Extract<curriculum.Status, { state: "locked" }>;
+        return `- ${name(p)}: needs ${st.missing.join(", ")}${st.next ? ` · start with \`course ${st.next}\`` : ""}`;
+      }),
+    ),
+    ...(run ? ["## run", `- \`${one(run)}\``] : []),
+  ]
+    .join("\n")
+    .trim();
+}
+
+export async function run(request: string, repo: Repo, mode: Mode, store: Store) {
+  let approved = false;
+  let currentRequest = request;
+  /** The plan in force: what was shown, by piece. */
+  let plan: Piece[] = [];
+  debugTo(repo.root);
+  store.setUnlocked(skills.read().skills.length);
+
+  /** Taken back this session with "not yet", by skill id. */
   const held = new Set<string>();
   /** What each skill looked like before this session changed it, for undoing. */
   const was = new Map<string, skills.Skill | null>();
-  /** Checked off this session, newest last. What a bare "not yet" undoes. */
-  const checked: string[] = [];
+  /** Unlocked this session, newest last. What a bare "not yet" undoes. */
+  const checked: { name: string; lang: string }[] = [];
   /** Things to tell the intern with whatever it hears next. */
   const aside: string[] = [];
   const withAside = (text: string) => {
@@ -496,62 +273,53 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   };
   let hinted = false;
 
-  function record(entry: skills.Entry) {
-    // Capped here rather than in the schema: a fourth prerequisite is not worth failing the
-    // tool call over.
-    entry = { ...entry, requires: entry.requires.slice(0, 3) };
-    const k = skills.key(entry.name);
-    if (entry.solid && held.has(k)) return;
-    const before = skills.find(skills.read(), entry.name);
+  /** Put a skill on the tree. Every way onto it comes through here, so "not yet" can undo any. */
+  function unlock(u: skills.Unlock) {
+    const lang = skills.langName(u.lang ?? "");
+    const k = skills.id(u.name, lang);
+    held.delete(k);
+    const t = skills.read();
+    const before = skills.find(t, u.name, lang);
     if (!was.has(k)) was.set(k, before ?? null);
-    const t = skills.note(skills.read(), entry, repo.root);
-    skills.write(t);
-    store.setSkills(skills.summary(t, repo.root));
-    // Shown, so a wrong entry can be disputed while it is fresh rather than discovered weeks
-    // later as a question that stopped being asked.
-    if (entry.solid && (!before?.solid || before.claimed)) {
-      const name = skills.find(t, entry.name)?.name ?? entry.name;
-      checked.push(name);
-      const hint = hinted ? "" : "   (not yet keeps it off)";
-      hinted = true;
-      store.note(`+ skill: ${name}${entry.breadth === "niche" ? " (niche)" : ""}${hint}`);
-    }
+    const next = skills.unlock(t, { ...u, lang });
+    skills.write(next);
+    store.setUnlocked(next.skills.length);
+    if (before) return;
+    const name = skills.find(next, u.name, lang)?.name ?? u.name;
+    checked.push({ name, lang });
+    // Shown, so a wrong unlock can be disputed while it's fresh.
+    const hint = hinted ? "" : " - not yet takes it back";
+    hinted = true;
+    store.note(`+ skill: ${skills.label({ name, lang })}${hint}`);
   }
 
-  /** Is this skill theirs, for writing code on it in this file? */
+  /** Is this skill theirs, for dum to write code on it in this file? */
   function holds(concept: string, path: string): boolean {
-    if (held.has(skills.key(concept))) return false;
-    return skills.holdsIn(skills.read(), concept, path, repo.root);
+    const lang = skills.langOf(path);
+    if (held.has(skills.id(concept, lang)) || held.has(skills.id(concept, ""))) return false;
+    return skills.holds(skills.read(), concept, lang);
   }
-
-  store.onTaste = (rule: string) => {
-    taste.add(rule);
-    aside.push(`(They added to their taste: "${rule}". Follow it from now on.)`);
-  };
 
   store.onNotYet = (name: string) => {
-    const target = name ? skills.find(skills.read(), name)?.name : checked[checked.length - 1];
+    const target = name
+      ? checked.find((c) => skills.key(c.name) === skills.key(name)) ?? skills.named(skills.read(), name)[0]
+      : checked[checked.length - 1];
     if (!target) return false;
-    const k = skills.key(target);
+    const k = skills.id(target.name, target.lang);
     held.add(k);
-    const i = checked.findIndex((c) => skills.key(c) === k);
+    const i = checked.findIndex((c) => skills.id(c.name, c.lang) === k);
     if (i >= 0) checked.splice(i, 1);
-    if (was.has(k)) {
-      const prev = was.get(k)!;
-      if (prev) skills.write({ skills: [prev] });
-      else skills.remove(target);
-    } else {
-      const now = skills.find(skills.read(), target);
-      if (now?.solid) skills.write({ skills: [{ ...now, solid: false, claimed: false }] });
-    }
-    store.setSkills(skills.summary(skills.read(), repo.root));
-    store.note(`not yet: ${target} stays off your tree this session.`);
-    aside.push(
-      `(They said not to count "${target}" as known yet. Treat it as not on their tree: don't record it solid, and a hole for it stays theirs to type.)`,
-    );
+    const prev = was.get(k);
+    if (prev) skills.write({ skills: [prev] });
+    else skills.remove(target.name, target.lang);
+    store.setUnlocked(skills.read().skills.length);
+    const label = skills.label(target);
+    store.note(`not yet: ${label} stays locked this session.`);
+    aside.push(`(They said not to count "${label}" as unlocked yet. Treat it as locked: a hole for it stays theirs.)`);
     return true;
   };
-  // Holes left for them to type.
+
+  // Holes left for them.
   let open = todos.load(repo.root);
   let handedOff = false;
   const readRel = (p: string) => {
@@ -568,16 +336,15 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
   }
   setOpen(open);
 
-  /** With holes open, what they say next might be explaining one instead of typing it. */
+  /** With holes open, what they say next might be about one of them. */
   function withHoles(text: string): string {
-    if (!open.length || text.startsWith("They say they've typed")) return text;
+    if (!open.length || text.startsWith("They say they've typed") || text.startsWith("(They just unlocked")) return text;
+    const list = open.map((t) => `"${t.concept}" in ${t.path}`).join(", ");
     return [
-      `(Open holes they haven't filled: ${open.map((t) => `"${t.concept}" in ${t.path}`).join(", ")}.`,
-      "If what they say below explains one of those concepts, judge it like any answer. If it shows",
-      "they hold it, call note_understanding with solid=true and then fill_todo for that hole - dum",
-      "fills it in front of them. If it's close but missing something, ask ONE question that gets",
-      "them the rest, and don't fill it. If it's a new request instead, handle it as one; the holes",
-      "stay theirs.)",
+      `(Open holes that are theirs: ${list}.`,
+      mode === "anti-vibe"
+        ? "If what they say below explains one of those, judge it with check_explanation, and when it passes call fill_todo for it. If it's a new request instead, handle it as one; the holes stay theirs.)"
+        : "Explaining one doesn't unlock it here - if they try, say in one line it's type it or take the course. If it's a new request, handle it as one; the holes stay theirs.)",
       "",
       text,
     ].join("\n");
@@ -591,82 +358,65 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     store.openFile(t.path, body === null ? 0 : Math.max(0, todos.hole(body, t.concept)));
   }
 
-  const wizard = new Wizard(repo);
-  wizard.onModel((m, e) => store.setModel("wizard", m, e));
-  wizard.start();
+  /** The language a bare `course x` means: what the plan, a hole or the open file says. */
+  function langFor(skill: string): string {
+    const k = skills.key(skill);
+    const inPlan = plan.find((p) => skills.key(p.skill) === k && p.lang);
+    if (inPlan) return inPlan.lang;
+    const hole = open.find((t) => skills.key(t.concept) === k);
+    if (hole) return skills.langName(hole.lang ?? "") || skills.langOf(hole.path);
+    const showing = store.getSnapshot().code?.path;
+    if (showing && skills.langOf(showing) && !showing.startsWith(".dum/")) return skills.langOf(showing);
+    return mainLang(repo);
+  }
 
-  // Breadth: answers `?` questions and reviews finished builds.
-  const reference = new Reference(repo);
-  reference.start();
+  /**
+   * A course, from wherever they asked for it. If it unlocks the skill under one of their open
+   * holes, the turn that fills that hole comes back to be sent to the intern.
+   */
+  async function takeCourse(cmd: { skill: string; lang: string }): Promise<string | null> {
+    const lang = cmd.lang || langFor(cmd.skill);
+    const passed = await course.take(cmd.skill, lang, { store, root: repo.root, unlock });
+    if (!passed) return null;
+    const name = curriculum.canonical(cmd.skill, lang);
+    const hole = open.find((t) => skills.key(t.concept) === skills.key(name) && holds(t.concept, t.path));
+    if (!hole) return null;
+    return `(They just unlocked "${hole.concept}" through a course. Fill its open hole in ${hole.path} with fill_todo now, then say nothing else.)`;
+  }
 
-  store.onAsk = (question: string) => {
-    store.asking(question);
-    void reference
-      .ask(question, describe(repo))
-      .then((answer) =>
-        store.answered(question, answer ?? "no answer - the reference is not available."),
-      )
-      .catch(() => store.answered(question, "no answer - the reference is not available."));
-  };
-  let wizardPending: Promise<Quip | null> | null = null;
-  let wizardLate = false;
-  let currentRequest = request;
-
-  async function drainWizard() {
-    if (!wizardPending) return;
-    wdebug("drain: waiting");
-    const p = wizardPending;
-    const settled = await Promise.race([
-      p.then((q) => ({ q })),
-      new Promise<null>((r) => setTimeout(() => r(null), WIZARD_WAIT).unref()),
-    ]);
-    if (!settled) {
-      wdebug("drain: not ready, will land later");
-      wizardLate = true; // still thinking - it lands at the next render point
-      return;
+  /** At any prompt, "course x" runs the course right there, then the prompt comes back. */
+  async function listen(ask: () => Promise<string>): Promise<string> {
+    for (;;) {
+      const reply = (await ask()).trim();
+      const cmd = course.parseCommand(reply);
+      if (!cmd) return reply;
+      const fill = await takeCourse(cmd);
+      if (fill) return fill;
     }
-    wdebug("drain: settled", settled.q ? "with quip" : "with pass");
-    const late = wizardLate;
-    wizardPending = null;
-    wizardLate = false;
-    if (!settled.q) return;
-    logQuip(repo, settled.q);
-    store.quip(settled.q.text, late ? settled.q.about : "");
   }
 
   // The session outlives a single request.
   const pending: { deliver: ((text: string) => void) | null } = { deliver: null };
 
-  /** Their level in each language this repo or their tree touches, for the intern. */
-  function levels(): string {
-    if (mode !== "understand") return "";
-    const t = skills.read();
-    const langs = new Set([...repo.files.map(skills.langOf), ...t.skills.map((s) => s.lang)].filter(Boolean));
-    const line = (l: string) => {
-      const lv = skills.level(t, l);
-      return `  ${l}: ${lv.name} (${lv.count} skills) - gaps up to ${lv.gap === Infinity ? "any size" : `${lv.gap} lines`}${lv.scaffold ? ", you write the rest" : ", everything through holes"}`;
-    };
-    return [
-      "WHERE THEY ARE, PER LANGUAGE (the gate enforces these)",
-      ...[...langs].map(line),
-      "  any other language: novice (0 skills) - gaps up to 3 lines, you write the rest",
-    ].join("\n");
-  }
-
-  /** The first turn: the bar, the skill tree, the repo, and the request. */
+  /** The first turn: the bar, the tree, the tracks, the repo, and the request. */
   function opening(req: string): string {
     return [
       BAR[mode],
-      taste.describe(taste.read()),
-      hooks.context?.() ?? "",
-      levels(),
-      mode === "understand" ? onboarding(skills.read()) : "",
-      skills.describe(skills.read(), repo.root),
+      skills.describe(skills.read()),
+      tracks(),
       describe(repo),
       `THEIR REQUEST:\n${withHoles(req)}`,
     ]
       .filter(Boolean)
       .join("\n\n");
+  }
+
+  // A course can be the first thing asked for, before the intern has a turn.
+  while (course.parseCommand(request)) {
+    const fill = await takeCourse(course.parseCommand(request)!);
+    if (fill) break;
+    request = (await store.askNext()).trim();
+    if (!request || QUIT.has(request.toLowerCase())) return;
   }
 
   async function* turns(): AsyncGenerator<any> {
@@ -675,7 +425,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     if (open.length && /^done[.!]*$/i.test(request.trim())) {
       const typed = open.filter((t) => !todos.untouched(open, readRel).includes(t));
       if (typed.length) {
-        yield userTurn(todos.reviewTurn(typed));
+        yield userTurn(opening(todos.reviewTurn(typed)));
       } else {
         store.note(`${open.map((t) => t.path).join(", ")} still as dum left it - type it in, :w, then done`);
         handOff();
@@ -687,13 +437,26 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     for (;;) {
       const next = await new Promise<string>((res) => (pending.deliver = res));
       if (!next || QUIT.has(next.toLowerCase())) return; // ends the query cleanly
-      // Each new request earns its own spec.
+      // Each new request earns its own plan.
       approved = false;
       currentRequest = next;
       store.unpin();
       yield userTurn(withAside(withHoles(next)));
     }
   }
+
+  const PIECE = z.object({
+    skill: z.string().describe("The skill, spelled the way the curated track spells it"),
+    lang: z.string().optional().describe("The language of the file this code goes in. Leave out only for an idea with no code."),
+    what: z.string().max(100).describe("What this piece of code does, in a few words"),
+    requires: z
+      .array(z.string())
+      .max(3)
+      .optional()
+      .describe("Only for a skill on no curated track: up to three skills it builds on directly"),
+  });
+
+  const say = (text: string) => ({ content: [{ type: "text" as const, text }] });
 
   const tools = createSdkMcpServer({
     name: "dum",
@@ -703,122 +466,47 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     tools: [
       tool(
         "ask",
-        "Ask the engineer ONE question and get their reply. Use this for every question - never write questions as plain text.",
+        "Ask the engineer ONE question about what they want and get their reply. Only for a real hole in intent - never to quiz them.",
         {
-          question: z
-            .string()
-            .describe("The question itself. One decision, and one sentence wherever it fits."),
-          why_it_matters: z
-            .string()
-            .describe("One sentence: what changes depending on their answer."),
-          again: z
-            .boolean()
-            .optional()
-            .describe("True when this is your previous question put back after they asked or said something else. Keep it to one short line."),
+          question: z.string().describe("The question itself. One decision, one sentence."),
+          why_it_matters: z.string().describe("One sentence: what changes depending on their answer."),
         },
         async (args) => {
-          await drainWizard();
-          // The same question again (after a side question, say) is shown as
-          // "still:" with no why: they've read it, and a full re-ask reads
-          // as dum starting over.
-          const again = args.again === true || reasks(lastAsked, args.question);
-          lastAsked = args.question;
-          const reply = (await store.askQuestion(args.question, again ? "" : args.why_it_matters, true, again)).trim();
-          if (todos.wantsToType(reply)) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: "They'll type this one instead of explaining it. Don't ask about it again and don't record it. Put it under \"you type\" in the spec, and when you build, leave a TODO(dum) hole for it and call leave_todo.",
-                },
-              ],
-            };
-          }
-          if (reply && !notAnAnswer(reply)) {
-            wizardLate = false;
-            wizardPending = wizard.consider({ request: currentRequest, answer: reply });
-          }
-          return {
-            content: [
-              { type: "text" as const, text: withAside(reply || "(they said nothing - ask again)") },
-            ],
-          };
+          const reply = await listen(() => store.askQuestion(args.question, args.why_it_matters));
+          return say(withAside(reply || "(they said nothing - ask again, or go with the obvious reading)"));
         },
       ),
       tool(
-        "teach",
-        "Teach a concept the engineer said they do not know. Never answers the pending question for them.",
+        "propose_plan",
+        "Show the engineer the skills this build rests on and ask whether to build it. dum marks each piece unlocked or locked from their tree.",
         {
-          concept: z.string().describe("The industry name for it"),
-          what_it_is: z.string().describe("One or two sentences"),
-          why_it_exists: z.string().describe("What breaks without it. One or two sentences"),
-          in_industry: z.string().describe("Real-world use and the live tradeoffs. Two sentences at most"),
-          here: z.string().describe("What it would mean in this specific repo. One sentence"),
-          breadth: BREADTH,
-          requires: REQUIRES,
-          lang: LANG,
-        },
-        async ({ breadth, requires, lang, ...lesson }) => {
-          await drainWizard();
-          store.teach(lesson);
-          // Recorded here rather than left to the model: it just taught the concept, so "they
-          // did not hold this" is a fact, not a judgement.
-          record({ name: lesson.concept, solid: false, breadth, requires, lang, why: "taught in session" });
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: "Taught. If your question was a decision only they can make, put it back in one line with again: true - never answer it for them. If it only checked whether they knew something, the lesson just answered it: don't ask it again. The hole they type is the check.",
-              },
-            ],
-          };
-        },
-      ),
-      tool(
-        "note_understanding",
-        "Put a concept on their skill tree: one they showed they hold, or one they fumbled.",
-        {
-          concept: z
-            .string()
-            .describe("The industry name for it. Reuse the tree's exact name if it is already there."),
-          solid: z
-            .boolean()
-            .describe("True if their answer showed they hold it, in any words. False if they fumbled it."),
-          breadth: BREADTH,
-          requires: REQUIRES,
-          lang: LANG,
-          why: z.string().describe("One sentence: what they said that showed it, or did not."),
-          distinct: z
-            .boolean()
-            .optional()
-            .describe("Set true only after being told a similar skill exists, if this is genuinely a different idea."),
+          summary: z.string().max(140).describe("One sentence: what they'll have when it's built"),
+          pieces: z.array(PIECE).max(10).describe("Every skill the code rests on, one per entry"),
+          run: z.string().max(120).optional().describe("The command to run it, if there is one"),
         },
         async (args) => {
-          // A near-duplicate is caught before it lands, and the intern decides.
-          const near = args.distinct ? undefined : skills.similar(skills.read(), args.concept);
-          if (near) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Not recorded yet. "${near.name}" is already on their tree. If "${args.concept}" is the same idea, call note_understanding again with concept "${near.name}". If it's genuinely different, call again with distinct: true.`,
-                },
-              ],
-            };
+          let pieces = classify(skills.read(), args.pieces, held);
+          const locked = pieces.filter((p) => p.status.state !== "unlocked");
+          if (locked.length > MAX_LOCKED) {
+            return say(
+              `Not shown to them: ${locked.length} of these are locked (${locked.map((p) => p.skill).join(", ")}), at most ${MAX_LOCKED}. It's above their tree. Tell them so in one line and offer the first rung - one small, whole program on what they have plus one or two new skills - then propose that. Don't mention this limit.`,
+            );
           }
-          record({
-            name: args.concept,
-            solid: args.solid,
-            breadth: args.breadth,
-            requires: args.requires,
-            lang: args.lang,
-            why: args.why,
-          });
-          return {
-            content: [
-              { type: "text" as const, text: "Recorded. Do not mention this to them." },
-            ],
-          };
+          for (;;) {
+            plan = pieces;
+            const reply = await store.proposePlan(planCard(args.summary, pieces, mode, args.run));
+            if (/^(y|yes)$/i.test(reply)) {
+              approved = true;
+              return say("Approved. Build it now.");
+            }
+            const cmd = course.parseCommand(reply);
+            if (!cmd) {
+              return say(`Declined. They said: "${reply}". Ask what they want changed, or adjust and propose again - build nothing yet.`);
+            }
+            // A course from the plan, then the plan again with whatever it unlocked.
+            await takeCourse({ skill: cmd.skill, lang: cmd.lang || langFor(cmd.skill) });
+            pieces = classify(skills.read(), args.pieces, held);
+          }
         },
       ),
       tool(
@@ -830,79 +518,68 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           text: z.string().max(60).describe("Under 60 characters: what to notice about this line"),
         },
         async (args) => {
-          if (escapes(repo.root, args.path)) return { content: [{ type: "text" as const, text: `${args.path} is outside the repo.` }] };
+          if (escapes(repo.root, args.path)) return say(`${args.path} is outside the repo.`);
           store.pin(rel(repo.root, args.path), args.line, args.text.replace(/\s+/g, " ").trim());
-          return { content: [{ type: "text" as const, text: "Pinned. It's beside that line now - don't repeat it in words." }] };
+          return say("Pinned. It's beside that line now - don't repeat it in words.");
         },
       ),
       tool(
         "fill_todo",
-        "Hand dum the code for a TODO(dum) hole. dum writes it if the skill is known on their tree, and leaves the hole for them if not.",
+        "Hand dum the code for a TODO(dum) block. dum writes it if the skill is unlocked, and leaves the hole for them if it's locked.",
         {
-          path: z.string().describe("The file the hole is in, relative to the repo"),
-          concept: z.string().describe("The skill this piece rests on - the name after TODO(dum):"),
-          what: z.string().describe("What the code has to do. The same words as the hole."),
-          lang: LANG,
+          path: z.string().describe("The file the block is in, relative to the repo"),
+          concept: z.string().describe("The skill this block rests on - the name after TODO(dum):"),
+          what: z.string().describe("What the code has to do. The same words as the block."),
           code: z.string().describe("The code that replaces the whole block - marker, comment lines and stub - indented to fit"),
-          breadth: BREADTH,
-          requires: REQUIRES,
         },
         async (args) => {
-          const say = (text: string) => ({ content: [{ type: "text" as const, text }] });
           if (escapes(repo.root, args.path)) return say(`${args.path} is outside the repo.`);
           const path = rel(repo.root, args.path);
-          // A hole already left under an approved spec can be filled on any later turn - that's
-          // what explaining it afterwards is for.
+          const lang = skills.langOf(path);
+          // A hole left under an earlier plan can be filled on any later turn: that's what
+          // explaining it, or a course, is for.
           const waiting = open.find((o) => o.path === path && skills.key(o.concept) === skills.key(args.concept));
-          if (!approved && !waiting) return say("Not yet - holes are filled while building, after the spec is approved.");
+          if (!approved && !waiting) return say("Not yet - blocks are filled while building, after the plan is approved.");
           const body = readRel(path);
-          if (body === null) return say(`${path} doesn't exist. Write the file with its holes first.`);
+          if (body === null) return say(`${path} doesn't exist. Write the file with its blocks first.`);
           const at = todos.hole(body, args.concept);
-          if (at < 0) return say(`There's no ${todos.MARKER} line for that in ${path}. Write the hole first.`);
+          if (at < 0) return say(`There's no ${todos.MARKER} line for that in ${path}. Write the block first.`);
+          const size = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
+          if (size > FILL_MAX_LINES) {
+            return say(
+              `That's ${size} lines under one skill - at most ${FILL_MAX_LINES}. Split it into blocks, one skill each.`,
+            );
+          }
           // The block is on screen before anything happens to it, whichever way it goes: that's
           // how you see what the build rested on.
           store.openFile(path, at);
           await new Promise((r) => setTimeout(r, FLASH_MS));
-          if (mode === "understand" && !holds(args.concept, path)) {
-            // The gap is sized to where they are: a novice gets the core line
-            // or three, not the whole function.
-            const lv = skills.level(skills.read(), skills.langOf(path));
-            const lines = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
-            if (lines > lv.gap) {
+          if (!holds(args.concept, path)) {
+            if (waiting) return say(`"${args.concept}" is still locked for them. The hole stays theirs.`);
+            const inPlan = plan.some((p) => skills.key(p.skill) === skills.key(args.concept) && p.status.state !== "unlocked");
+            if (!inPlan) {
               return say(
-                `Too big a gap for a ${lv.name} in ${skills.langOf(path) || "this"} (${lv.count} skills): ${lines} lines, at most ${lv.gap}. Write the scaffolding around it yourself, and leave only the core of "${args.concept}" as the hole - rewrite this block, it isn't theirs yet. Don't mention this to them.`,
+                `"${args.concept}" is locked for them and isn't a locked piece of the plan they approved. Use a skill from the plan for this block - don't hand them a hole they didn't agree to.`,
               );
             }
             const t: todos.Todo = {
-              concept: args.concept.trim(),
+              concept: curriculum.canonical(args.concept, lang),
               path,
               what: args.what.trim(),
-              breadth: args.breadth,
-              requires: args.requires.slice(0, 3),
+              requires: curriculum.prereqs(args.concept, lang),
               before: body,
               request: currentRequest,
-              lang: args.lang,
+              lang,
             };
             const known = open.some((o) => o.path === t.path && skills.key(o.concept) === skills.key(t.concept));
-            setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
+            setOpen([...open.filter((o) => !(o.path === t.path && skills.key(o.concept) === skills.key(t.concept))), t]);
             handedOff = false;
             if (!known) store.toolEvent("hole", `${path}: ${t.concept}`, "held");
-            const lang = skills.langOf(path);
-            const why = lang && !skills.spoken(skills.read(), lang)
-              ? `They haven't shown anything in ${lang} yet, so every line of ${path} is theirs until they do - even ideas they hold.`
-              : `"${t.concept}" isn't known on their tree${lang ? ` for ${lang}` : ""}, so the hole stays for them to type.`;
-            return say(`${why} Don't write it any other way.`);
-          }
-          // A fill is one concept's worth of code.
-          const size = args.code.replace(/\n+$/, "").split("\n").filter((l) => l.trim()).length;
-          if (size > FILL_MAX_LINES) {
-            return say(
-              `That's ${size} lines under one concept - at most ${FILL_MAX_LINES}. Split the block into holes, one concept each: whatever it also leans on (includes, printing, loops, a class shell) is its own hole, and those stay theirs unless they're on the tree.`,
-            );
+            return say(`"${t.concept}" is locked for them, so the hole stays theirs. Don't write it any other way.`);
           }
           const filled = todos.fill(body, args.concept, args.code);
           if (filled === null) return say(`Couldn't find the block for that in ${path}.`);
-          // Animate the fill so held-skill code is seen, not just dropped in.
+          // Animated, so code on a skill they hold is seen, not just dropped in.
           const code = args.code.replace(/\n+$/, "");
           const ms = Math.min(FILL_MAX_MS, Math.max(FILL_MIN_MS, code.length * 12));
           const frames = Math.max(1, Math.round(ms / FILL_FRAME_MS));
@@ -916,60 +593,18 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
           } catch (err) {
             return say(`Couldn't write ${path}: ${(err as Error).message}`);
           }
-          wrote.push(path);
           store.filled(path, args.concept.trim(), code);
           store.openFile(path, at);
           if (!approved) filledLate = true;
-          if (waiting) {
-            setOpen(open.filter((o) => o !== waiting));
-            if (waiting.request && !open.some((o) => o.request === waiting.request)) hooks.onBuilt?.(waiting.request);
-          }
+          if (waiting) setOpen(open.filter((o) => o !== waiting));
           return say("Filled.");
-        },
-      ),
-      tool(
-        "leave_todo",
-        "Register a TODO(dum) hole you left in a file for them to type. Only after the spec is approved, and only after the hole is written.",
-        {
-          path: z.string().describe("The file the hole is in, relative to the repo"),
-          concept: z.string().describe("The skill typing it unlocks - the industry name, reusing the tree's name if it's there"),
-          what: z.string().describe("What their code has to do. The same words as the hole. Never how."),
-          lang: LANG,
-          breadth: BREADTH,
-          requires: REQUIRES,
-        },
-        async (args) => {
-          const fail = (text: string) => ({ content: [{ type: "text" as const, text }] });
-          if (!approved) return fail("Not yet - holes are left while building, after the spec is approved.");
-          if (escapes(repo.root, args.path)) return fail(`${args.path} is outside the repo.`);
-          const path = rel(repo.root, args.path);
-          const body = readRel(path);
-          if (body === null) return fail(`${path} doesn't exist. Write the file with the hole first.`);
-          if (todos.hole(body, args.concept) < 0) {
-            return fail(`There's no ${todos.MARKER} line in ${path}. Write the hole first, then call this again.`);
-          }
-          const t: todos.Todo = {
-            concept: args.concept.trim(),
-            path,
-            what: args.what.trim(),
-            breadth: args.breadth,
-            requires: args.requires.slice(0, 3),
-            before: body,
-            request: currentRequest,
-            lang: args.lang,
-          };
-          const known = open.some((o) => o.path === t.path && skills.key(o.concept) === skills.key(t.concept));
-          setOpen([...open.filter((o) => skills.key(o.concept) !== skills.key(t.concept)), t]);
-          handedOff = false;
-          if (!known) store.toolEvent("hole", `${path}: ${t.concept}`, "held");
-          return fail("Left. Tell them where it is in one line after the build.");
         },
       ),
       tool(
         "check_todo",
         "Judge the code they typed into a TODO(dum) hole. Passing unlocks the skill.",
         {
-          concept: z.string().describe("The hole's concept, exactly as registered"),
+          concept: z.string().describe("The hole's skill, exactly as registered"),
           passed: z.boolean().describe("True if their code does what the hole said and would work"),
           feedback: z
             .string()
@@ -977,99 +612,57 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
         },
         async (args) => {
           const t = open.find((o) => skills.key(o.concept) === skills.key(args.concept));
-          if (!t) {
-            return { content: [{ type: "text" as const, text: `No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.` }] };
-          }
-          // A pass is one line. A miss is the question, whole - cutting it to a
-          // sentence once dropped the question and kept only the setup.
+          if (!t) return say(`No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.`);
           reviewed = true;
+          // A pass is one line. A miss is the question, whole - cutting it to a sentence once
+          // dropped the question and kept only the setup.
           store.say(args.passed ? sentences(args.feedback, 1) : args.feedback.trim().slice(0, 400), true);
-          if (args.passed) {
-            setOpen(open.filter((o) => o !== t));
-            if (t.request && !open.some((o) => o.request === t.request)) hooks.onBuilt?.(t.request);
-            record({
-              name: t.concept,
-              solid: true,
-              breadth: t.breadth,
-              requires: t.requires,
-              lang: t.lang,
-              shownIn: skills.langOf(t.path) || undefined,
-              why: `typed it themselves in ${t.path}: ${args.feedback}`,
-            });
-          }
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: args.passed
-                  ? "Passed and recorded. They saw your line - say nothing else about it. No wrap-up, no suggestions."
-                  : "Still open. They saw your question - say nothing else this turn, and don't fix it for them.",
-              },
-            ],
-          };
+          if (!args.passed) return say("Still open. They saw your question - say nothing else this turn, and don't fix it for them.");
+          setOpen(open.filter((o) => o !== t));
+          unlock({ name: t.concept, lang: t.lang ?? skills.langOf(t.path), how: "typed", requires: t.requires, why: `typed it in ${t.path}: ${args.feedback}` });
+          return say("Passed and unlocked. They saw your line - say nothing else about it.");
         },
       ),
-      tool(
-        "propose_spec",
-        "Show the engineer the build spec and ask whether to build it. Call this once you know enough. Short fields, one line each - dum lays it out.",
-        {
-          summary: z.string().max(140).describe("One sentence: what they'll have when it's built"),
-          you_type: z.array(z.string().max(120)).max(4).default([]).describe("Their gaps, one line each: 'file: what it must do'"),
-          decisions: z.array(z.string().max(120)).max(4).default([]).describe("Decisions they made, one line each"),
-          not_doing: z.array(z.string().max(100)).max(3).default([]).describe("What's deliberately left out"),
-          unresolved: z.array(z.string().max(120)).max(2).default([]).describe("What they left open"),
-          run: z.string().max(120).optional().describe("The command to run it, if there is one"),
-        },
-        async (args) => {
-          await drainWizard();
-          const spec = specCard(args);
-          approved = await store.proposeSpec(spec);
-          if (!approved) gateEngaged = true;
-          if (approved) {
-            approvedSpec = spec;
-            wrote.length = 0;
-          }
-          return {
-            content: [
+      ...(mode === "anti-vibe"
+        ? [
+            tool(
+              "check_explanation",
+              "Judge their explanation of an open hole. Passing unlocks the skill; then call fill_todo for that hole.",
               {
-                type: "text" as const,
-                text: approved
-                  ? "Approved. Build it now."
-                  : "Declined. Ask what they want changed - do not build anything.",
+                concept: z.string().describe("The hole's skill, exactly as registered"),
+                passed: z.boolean().describe("True if it shows they get how that code works, in any words"),
+                feedback: z
+                  .string()
+                  .describe("If it passed: one short line. If it's close: one question that gets them the rest. If it's wrong: what's off, in one line."),
               },
-            ],
-          };
-        },
-      ),
+              async (args) => {
+                const t = open.find((o) => skills.key(o.concept) === skills.key(args.concept));
+                if (!t) return say(`No open hole called "${args.concept}". Open: ${open.map((o) => o.concept).join(", ") || "none"}.`);
+                store.say(args.passed ? sentences(args.feedback, 1) : args.feedback.trim().slice(0, 400), true);
+                if (!args.passed) {
+                  reviewed = true;
+                  return say("Still open. They saw your line - say nothing else this turn.");
+                }
+                unlock({ name: t.concept, lang: t.lang ?? skills.langOf(t.path), how: "explained", requires: t.requires, why: `explained it for ${t.path}: ${args.feedback}` });
+                return say(`Unlocked. Now call fill_todo for "${t.concept}" in ${t.path}, then say nothing else.`);
+              },
+            ),
+          ]
+        : []),
     ],
   });
 
   const resume = recall(repo);
   const blocked: string[] = [];
 
-  /** The spec currently in force, and what got written under it. */
-  let approvedSpec = "";
-  const wrote: string[] = [];
-
-  /**
-   * Whether the gate was engaged at all this turn - a write held, or a spec shown and turned
-   * down.
-   */
+  /** Whether the gate was engaged this turn - a write held, or a plan turned down. */
   let gateEngaged = false;
-
-  /** A hole from an earlier spec got filled this turn, by explaining it. */
+  /** A hole from an earlier plan got filled this turn. */
   let filledLate = false;
-
-  /** The last question asked, to tell a re-ask from a new one. */
-  let lastAsked = "";
-
   /** A hole of theirs was checked this turn. */
   let reviewed = false;
   /** A build turn's latest text, not yet shown. */
   let saying = "";
-
-  /** TODO(dum) blocks written under this request so far. */
-  let holesThisTurn = 0;
 
   /** Tool inputs still being generated, by content-block index. */
   const openBlocks = new Map<number, { name: string; buf: string }>();
@@ -1102,70 +695,46 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
     prompt: turns(),
     options: {
       cwd: repo.root,
-      systemPrompt: { type: "preset", preset: "claude_code", append: CONTRACT },
+      systemPrompt: { type: "preset", preset: "claude_code", append: `${CONTRACT}\n\n${THEIR_TURN[mode]}` },
       mcpServers: { dum: tools },
       // The feed the code pane is built on.
       includePartialMessages: true,
       ...(resume ? { resume } : {}),
       // dum's own tools are let through here rather than listed in allowedTools.
       canUseTool: async (name: string, args: Record<string, unknown>) => {
-        if (name.startsWith("mcp__dum__")) {
-          return { behavior: "allow" as const, updatedInput: args };
-        }
-        // Filling a hole is dum's call, made off the tree in fill_todo.
-        const more = mode === "understand" ? newHoles(repo.root, name, args) : 0;
-        const room = holesAllowed(skills.level(skills.read(), skills.langOf(typeof args.file_path === "string" ? args.file_path : "")));
-        if (more && holesThisTurn + more > room) {
-          store.toolEvent(name, detail(repo.root, args), "refused", `more than ${room} gap${room === 1 ? "" : "s"} at once`);
-          return {
-            behavior: "deny" as const,
-            message: `That's ${holesThisTurn + more} holes in one request - at their level, at most ${room}. Don't merge blocks to fit: that's the same load in bigger pieces. Give them the rest as scaffolding, or name it as the next request in one line. Don't mention this limit to them.`,
-          };
-        }
-        // Comments in their code are short: the code is theirs to read, not an essay to scroll
-        // past.
+        if (name.startsWith("mcp__dum__")) return { behavior: "allow" as const, updatedInput: args };
+        // Comments in their code are short: the code is theirs to read, not an essay.
         const essay = wordyCode(name, args);
         if (essay.length) {
           store.toolEvent(name, detail(repo.root, args), "refused", "comments too long");
           return {
             behavior: "deny" as const,
-            message: `Comments are at most ${todos.MAX_COMMENT_RUN} lines in a row - a hole's description, a file header, anything. Too long: ${essay
+            message: `Comments are at most ${todos.MAX_COMMENT_RUN} lines in a row. Too long: ${essay
               .slice(0, 2)
               .map((l) => JSON.stringify(l))
               .join(", ")}. Say why, not what, in a line.`,
           };
         }
-        // Fading: a novice in this language gets the scaffolding written for
-        // them, so only a fluent one has every line go through a hole.
-        const target = typeof args.file_path === "string" ? args.file_path : "";
-        const lv = skills.level(skills.read(), skills.langOf(target));
-        const leak = mode === "understand" && !lv.scaffold ? looseCode(name, args) : [];
+        // Code goes in through blocks, so every line passes the tree on its way in.
+        const leak = looseCode(name, args);
         if (leak.length) {
-          store.toolEvent(name, detail(repo.root, args), "refused", "code outside a hole");
+          store.toolEvent(name, detail(repo.root, args), "refused", "code outside a block");
           return {
             behavior: "deny" as const,
-            message: `In understand mode, code only goes in through holes. These lines aren't in a ${todos.MARKER} block: ${leak
+            message: `Code only goes in through ${todos.MARKER} blocks. These lines aren't in one: ${leak
               .slice(0, 3)
               .map((l) => JSON.stringify(l.trim()))
-              .join(", ")}${leak.length > 3 ? ` (+${leak.length - 3} more)` : ""}. Write the file as comments and TODO(dum) blocks only - includes, imports and control flow too - then call fill_todo for each block. dum fills the ones on their tree; the rest are theirs to type or explain.`,
+              .join(", ")}${leak.length > 3 ? ` (+${leak.length - 3} more)` : ""}. Write the file as blocks only - includes, imports and control flow too - then call fill_todo for each.`,
           };
         }
-        holesThisTurn += more;
         if (erasesHole(repo.root, name, args, open.map((t) => t.concept))) {
-          store.toolEvent(name, detail(repo.root, args), "refused", "a hole is filled through dum, not edited");
-          return {
-            behavior: "deny" as const,
-            message: "TODO(dum) blocks are filled through fill_todo, never edited directly.",
-          };
+          store.toolEvent(name, detail(repo.root, args), "refused", "a hole is theirs");
+          return { behavior: "deny" as const, message: "That TODO(dum) block is theirs. Holes are filled through fill_todo, never edited." };
         }
         if (!approved && MUTATING.has(name)) {
           gateEngaged = true;
           store.toolEvent(name, detail(repo.root, args), "held");
-          return {
-            behavior: "deny" as const,
-            message:
-              "Nothing may be built before the spec is approved. Call propose_spec first.",
-          };
+          return { behavior: "deny" as const, message: "Nothing may be built before the plan is approved. Call propose_plan first." };
         }
         for (const f of PATH_FIELDS) {
           if (escapes(repo.root, args[f])) {
@@ -1175,243 +744,149 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store,
             return { behavior: "deny" as const, message: `Refused: ${why}` };
           }
         }
-        const what = detail(repo.root, args);
-        // Only things with a real path field.
-        if (MUTATING.has(name)) {
-          for (const f of PATH_FIELDS) {
-            const v = args[f];
-            if (typeof v === "string" && v) {
-              wrote.push(rel(repo.root, v));
-              break;
-            }
-          }
-        }
-        store.toolEvent(name, what, "ran");
+        store.toolEvent(name, detail(repo.root, args), "ran");
         return { behavior: "allow" as const, updatedInput: args };
       },
     },
   });
 
-  try {
-    for await (const msg of session as AsyncIterable<any>) {
-      if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
-        remember(repo, msg.session_id);
-        // Read off the session rather than assumed: the intern inherits the default model from
-        // their settings, so it's whatever that is today.
-        if (typeof msg.model === "string") {
-          store.setModel("intern", msg.model);
-          // Effort too: it follows their own /effort setting, so it's whatever that resolves to
-          // for this model today.
-          void applied(session).then((a) => a && store.setModel("intern", a.model || msg.model, a.effort));
-        }
-        continue;
+  for await (const msg of session as AsyncIterable<any>) {
+    if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
+      remember(repo, msg.session_id);
+      // Read off the session rather than assumed: the intern inherits the default model from
+      // their settings, and its effort from their /effort.
+      if (typeof msg.model === "string") {
+        store.setModel("intern", msg.model);
+        void applied(session).then((a) => a && store.setModel("intern", a.model || msg.model, a.effort));
       }
-      if (msg.type === "stream_event") {
-        onStreamEvent(msg.event);
-        continue;
-      }
-      if (msg.type === "assistant") {
-        for (const b of msg.message?.content ?? []) {
-          if (b.type === "text" && b.text?.trim()) {
-            // After a review it's told to say nothing more; if it does, it
-            // would bury the verdict, so it's dropped.
-            if (reviewed) continue;
-            // Mid-build, text is held until we know whether a tool call follows it.
-            if (approved) saying = b.text.trim();
-            else store.say(b.text.trim());
-          }
-          if (b.type === "tool_use" && saying) {
-            // Text framing a question stays; "writing X now" before an edit is narration.
-            if (/(^|__)(ask|propose_spec)$/.test(b.name)) store.say(saying);
-            saying = "";
-          }
-          if (b.type === "tool_use" && b.id && WATCHED[b.name]) {
-            const path = detail(repo.root, b.input);
-            if (path) landing.set(b.id, path);
-          }
-          // Tool calls render from canUseTool, the only place that knows if they ran.
-        }
-        continue;
-      }
-      if (msg.type === "user") {
-        const content = msg.message?.content;
-        for (const b of Array.isArray(content) ? content : []) {
-          const path = b.type === "tool_result" ? landing.get(b.tool_use_id) : undefined;
-          if (!path) continue;
-          landing.delete(b.tool_use_id);
-          store.landed(path);
-        }
-        continue;
-      }
-      if (msg.type === "result") {
-        // What's left is the closing word on a build: its first paragraph. The spec, the
-        // hole and the next step are already on screen.
-        if (saying && !reviewed) store.say(saying.split(/\n\s*\n/)[0]!);
-        saying = "";
-        await drainWizard();
-        for (const why of blocked) store.note(`refused: ${why}`);
-        blocked.length = 0;
-        // A turn that filled an earlier hole built something, even with no spec of its own.
-        // A turn that reviewed or filled their hole did its job without a spec.
-        if (!approved && gateEngaged && !reviewed) store.note(filledLate ? "nothing else was built - this turn had no spec of its own." : "spec not approved - nothing was built.");
-        reviewed = false;
-        gateEngaged = false;
-        filledLate = false;
-        holesThisTurn = 0;
-
-        // Review the build against its spec; silent unless it departs.
-        if (approved && wrote.length && !open.some((t) => t.request === currentRequest)) hooks.onBuilt?.(currentRequest);
-        if (approved && wrote.length) {
-          const files = [...new Set(wrote)];
-          wrote.length = 0;
-          wdebug("review: checking", files.join(", "));
-          // A hole is a stub on purpose.
-          const holes = open.length
-            ? `\n\nLEFT FOR THEM TO TYPE, ON PURPOSE - a stub at a ${todos.MARKER} hole is not a departure:\n${open.map((t) => `- ${t.concept} in ${t.path}`).join("\n")}`
-            : "";
-          const found = await reference.review(approvedSpec + holes, files);
-          wdebug(found ? `review: found "${found.slice(0, 80)}"` : "review: ok");
-          if (found) store.review(sentences(found, 2));
-        }
-
-        // The turn is over, not the session.
-        const failed = failure(msg);
-        if (!failed && open.length && !handedOff) {
-          handedOff = true;
-          handOff();
-        }
-        let next = "";
-        store.setSuggestion(hooks.suggest?.() ?? "");
-        for (;;) {
-          next = (
-            failed
-              ? await store.askQuestion(failed, "type anything to try again once it's fixed, or exit")
-              : await store.askNext()
-          ).trim();
-          if (failed || !open.length || !/^done[.!]*$/i.test(next)) break;
-          // Settled here rather than spending a turn on it: nothing changed.
-          const same = todos.untouched(open, readRel);
-          if (same.length < open.length) {
-            next = todos.reviewTurn(open.filter((t) => !same.includes(t)));
-            break;
-          }
-          store.note(`${open.map((t) => t.path).join(", ")} ${open.length === 1 ? "is" : "are"} still as dum left ${open.length === 1 ? "it" : "them"} - type it in, :w, then done`);
-          handOff();
-        }
-        if (hooks.expand && !failed) next = hooks.expand(next);
-        pending.deliver?.(next);
-        if (!next || QUIT.has(next.toLowerCase())) return;
-        continue;
-      }
+      continue;
     }
-  } finally {
-    // Both hold a process open; nothing else ends them.
-    wizard.close();
-    reference.close();
+    if (msg.type === "stream_event") {
+      onStreamEvent(msg.event);
+      continue;
+    }
+    if (msg.type === "assistant") {
+      for (const b of msg.message?.content ?? []) {
+        if (b.type === "text" && b.text?.trim()) {
+          // After a check it's told to say nothing more; if it does, it would bury the verdict.
+          if (reviewed) continue;
+          // Mid-build, text is held until we know whether a tool call follows it.
+          if (approved) saying = b.text.trim();
+          else store.say(b.text.trim());
+        }
+        if (b.type === "tool_use" && saying) {
+          // Text framing a question stays; "writing X now" before an edit is narration.
+          if (/(^|__)(ask|propose_plan)$/.test(b.name)) store.say(saying);
+          saying = "";
+        }
+        if (b.type === "tool_use" && b.id && WATCHED[b.name]) {
+          const path = detail(repo.root, b.input);
+          if (path) landing.set(b.id, path);
+        }
+        // Tool calls render from canUseTool, the only place that knows if they ran.
+      }
+      continue;
+    }
+    if (msg.type === "user") {
+      const content = msg.message?.content;
+      for (const b of Array.isArray(content) ? content : []) {
+        const path = b.type === "tool_result" ? landing.get(b.tool_use_id) : undefined;
+        if (!path) continue;
+        landing.delete(b.tool_use_id);
+        store.landed(path);
+      }
+      continue;
+    }
+    if (msg.type === "result") {
+      // What's left is the closing word on a build: its first paragraph.
+      if (saying && !reviewed) store.say(saying.split(/\n\s*\n/)[0]!);
+      saying = "";
+      for (const why of blocked) store.note(`refused: ${why}`);
+      blocked.length = 0;
+      if (!approved && gateEngaged && !reviewed) store.note(filledLate ? "nothing else was built - this turn had no plan of its own." : "plan not approved - nothing was built.");
+      reviewed = false;
+      gateEngaged = false;
+      filledLate = false;
+
+      // The turn is over, not the session.
+      const failed = failure(msg);
+      if (!failed && open.length && !handedOff) {
+        handedOff = true;
+        handOff();
+      }
+      let next = "";
+      for (;;) {
+        next = failed
+          ? (await store.askQuestion(failed, "type anything to try again once it's fixed, or exit")).trim()
+          : await listen(() => store.askNext());
+        if (failed || !open.length || !/^done[.!]*$/i.test(next)) break;
+        // Settled here rather than spending a turn on it: nothing changed.
+        const same = todos.untouched(open, readRel);
+        if (same.length < open.length) {
+          next = todos.reviewTurn(open.filter((t) => !same.includes(t)));
+          break;
+        }
+        store.note(`${open.map((t) => t.path).join(", ")} ${open.length === 1 ? "is" : "are"} still as dum left ${open.length === 1 ? "it" : "them"} - type it in, :w, then done`);
+        handOff();
+      }
+      pending.deliver?.(next);
+      if (!next || QUIT.has(next.toLowerCase())) return;
+    }
   }
 }
 
-/** A reply that says they don't have it, rather than saying anything. */
-export function notAnAnswer(reply: string): boolean {
-  return /^(idk|i don'?t know|dunno|no idea|not sure|no clue|\?+|what do you mean\??|huh\??)[.!]*$/i.test(
-    reply.trim(),
-  );
+/** The model and effort a live session is actually using, or null if the SDK can't say. */
+async function applied(session: unknown): Promise<{ model: string; effort: string } | null> {
+  try {
+    const s = await (session as { getSettings?: () => Promise<any> }).getSettings?.();
+    const a = s?.applied;
+    if (!a) return null;
+    return { model: typeof a.model === "string" ? a.model : "", effort: typeof a.effort === "string" ? a.effort : "" };
+  } catch {
+    return null;
+  }
+}
+
+/** The curated tracks, for the intern to spell skills the same way. */
+function tracks(): string {
+  const lines = curriculum.languages().map((l) => `${l}: ${curriculum.track(l)!.skills.map((n) => n.name).join(", ")}`);
+  return lines.length ? `THE CURATED TRACKS - skill names per language, lowest first. Spell skills this way.\n${lines.join("\n")}` : "";
+}
+
+/** The language most of the repo is written in, or "" for a repo with no source yet. */
+export function mainLang(repo: { files: string[] }): string {
+  const count = new Map<string, number>();
+  for (const f of repo.files) {
+    const l = skills.langOf(f);
+    if (l) count.set(l, (count.get(l) ?? 0) + 1);
+  }
+  return [...count].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 }
 
 /** Comment runs over the limit that a Write or Edit would add, in a source file. */
 export function wordyCode(name: string, args: Record<string, unknown>): string[] {
-  const path = typeof args.file_path === "string" ? args.file_path : "";
-  if (!path || !todos.gated(path)) return [];
-  if (name === "Write") return todos.wordy(String(args.content ?? ""), path);
-  if (name === "Edit") return todos.wordy(String(args.new_string ?? ""), path);
-  if (name === "MultiEdit") {
-    const edits = Array.isArray(args.edits) ? args.edits : [];
-    return edits.flatMap((e: any) => todos.wordy(String(e?.new_string ?? ""), path));
-  }
-  return [];
+  return written(name, args, todos.wordy);
 }
 
-/**
- * The spec, laid out by dum from short fields. The model used to write it as
- * free markdown, which came out as a wall of raw tables and nested lists.
- */
-export function specCard(s: {
-  summary: string;
-  you_type?: string[];
-  decisions?: string[];
-  not_doing?: string[];
-  unresolved?: string[];
-  run?: string;
-}): string {
-  const one = (t: string) => t.replace(/\s+/g, " ").replace(/\|/g, "/").trim();
-  const section = (title: string, items?: string[]) =>
-    items?.length ? [`## ${title}`, ...items.map((i) => `- ${one(i)}`), ""] : [];
-  return [
-    `**${one(s.summary)}**`,
-    "",
-    ...section("you type", s.you_type),
-    ...section("you decided", s.decisions),
-    ...section("not doing", s.not_doing),
-    ...section("still open", s.unresolved),
-    ...(s.run ? ["## run", `- \`${one(s.run)}\``] : []),
-  ]
-    .join("\n")
-    .trim();
-}
-
-/** New holes allowed in one request, by level: the first time in a language, one. */
-export function holesAllowed(lv: skills.Level): number {
-  if (lv.count === 0) return 1;
-  if (lv.name === "novice") return 2;
-  if (lv.name === "developing") return 3;
-  return MAX_HOLES;
-}
-
-/** Whether `next` is mostly `prev` asked again: most of prev's words are back. */
-export function reasks(prev: string, next: string): boolean {
-  const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]+/g)?.filter((w) => w.length > 2) ?? []);
-  const a = words(prev);
-  if (a.size < 3) return false;
-  const b = words(next);
-  let kept = 0;
-  for (const w of a) if (b.has(w)) kept++;
-  return kept / a.size >= 0.6;
-}
-
-/** How many TODO(dum) blocks a Write or Edit would add. */
-export function newHoles(root: string, name: string, args: Record<string, unknown>): number {
-  const count = (s: unknown) => todos.spans(String(s ?? "")).length;
-  if (name === "Write") {
-    let now = "";
-    try {
-      now = readFileSync(resolve(root, String(args.file_path ?? "")), "utf8");
-    } catch {
-      /* new file */
-    }
-    return Math.max(0, count(args.content) - count(now));
-  }
-  if (name === "Edit") return Math.max(0, count(args.new_string) - count(args.old_string));
-  if (name === "MultiEdit") {
-    const edits = Array.isArray(args.edits) ? args.edits : [];
-    return Math.max(0, edits.reduce((a: number, e: any) => a + count(e?.new_string) - count(e?.old_string), 0));
-  }
-  return 0;
-}
-
-/** Code lines a Write or Edit would add outside any hole, in a gated source file. */
+/** Code lines a Write or Edit would add outside any block, in a gated source file. */
 export function looseCode(name: string, args: Record<string, unknown>): string[] {
+  return written(name, args, todos.loose);
+}
+
+/** Run a check over the text a Write, Edit or MultiEdit would put into a source file. */
+function written(name: string, args: Record<string, unknown>, check: (text: string, path: string) => string[]): string[] {
   const path = typeof args.file_path === "string" ? args.file_path : "";
   if (!path || !todos.gated(path)) return [];
-  if (name === "Write") return todos.loose(String(args.content ?? ""), path);
-  if (name === "Edit") return todos.loose(String(args.new_string ?? ""), path);
+  if (name === "Write") return check(String(args.content ?? ""), path);
+  if (name === "Edit") return check(String(args.new_string ?? ""), path);
   if (name === "MultiEdit") {
     const edits = Array.isArray(args.edits) ? args.edits : [];
-    return edits.flatMap((e: any) => todos.loose(String(e?.new_string ?? ""), path));
+    return edits.flatMap((e: any) => check(String(e?.new_string ?? ""), path));
   }
   return [];
 }
 
-/** Whether a tool call would rewrite a TODO(dum) block that already exists. */
+/** Whether a tool call would rewrite a TODO(dum) block that's already theirs. */
 export function erasesHole(root: string, name: string, args: Record<string, unknown>, open?: string[]): boolean {
   const markers = (s: unknown) => String(s ?? "").split("\n").filter((l) => l.includes(todos.MARKER));
   let gone: string[] = [];
@@ -1429,8 +904,7 @@ export function erasesHole(root: string, name: string, args: Record<string, unkn
     const next = String(args.content ?? "");
     gone = markers(now).filter((l) => !next.includes(l.trim()));
   }
-  // Only a hole already handed to them is theirs. One the intern is still
-  // shaping - say, cutting down to size - it may rewrite.
+  // Only a hole already handed to them is theirs. One the intern is still shaping it may rewrite.
   if (!open) return gone.length > 0;
   const concept = (l: string) => skills.key(l.slice(l.indexOf(todos.MARKER) + todos.MARKER.length).replace(/^[:\s]+/, ""));
   return gone.some((l) => open.some((c) => skills.key(c) === concept(l)));
@@ -1458,12 +932,12 @@ function userTurn(text: string) {
   };
 }
 
-/** One short line about what a tool call is doing. */
 function rel(root: string, p: string): string {
   const r = relative(root, isAbsolute(p) ? p : resolve(root, p));
   return r && !r.startsWith("..") ? r : p;
 }
 
+/** One short line about what a tool call is doing. */
 function detail(root: string, input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const i = input as Record<string, unknown>;

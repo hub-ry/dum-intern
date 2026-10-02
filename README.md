@@ -1,12 +1,12 @@
 # dum-intern
 
-My custom agentic environment with a tighter development leash.
+My custom agentic environment with a tighter development leash: it only writes code on skills I've unlocked.
 
 ![dum-intern: the file tree on the left, a C++ guessing game with one TODO(dum) gap in the middle, and the wizard and dum on the right above the conversation](docs/screenshot.png)
 
-It interrogates me before it builds anything, and nothing gets written until I approve a spec made out of my own answers. Then it builds around what I can't do yet and leaves that part for me.
+Everything I ask for rests on a handful of skills. dum checks each one against my skill tree. An unlocked skill means the intern writes that code. A locked one is mine to type, or I unlock it first with a three-minute course run by dum and the wizard.
 
-The bet: a coding agent makes it easy to ship code I can't explain, and I only find out when something breaks. dum keeps a tree of what I've actually shown I understand. It builds on that without asking, and anything I don't hold yet becomes a small gap for me to type or explain. The questions shrink as I learn instead of staying flat.
+The bet: a coding agent makes it easy to ship code I couldn't write myself, and I only find out when something breaks. So the agent's reach is capped by mine. Courses go in order, too. If I can't print hello world, I can't take the recursion course, and I can't prompt my way past it either.
 
 
 ### Quickstart
@@ -20,34 +20,30 @@ cd some-repo    # dum works inside a git repo
 dum
 ```
 
-An empty tree says how to fill it on the first screen. `dum --help` lists the commands, and `:help` inside dum lists the rest.
+An empty tree says how it works on the first screen. `dum --help` lists the commands, and `:help` inside dum lists the rest.
 
 
 ### The loop
 
-1. **Ask.** "add a mode function to stats.py", or "teach me vectors in C++".
-2. **Explain.** The intern asks about the parts that aren't on my tree, one question at a time. `idk` gets a lesson. `type it` means I'll write that part.
-3. **Approve.** A short spec: what I'll have, what I type, what I decided. `y` builds it.
-4. **Fill the gaps.** Pieces on skills I hold get filled in front of me. The rest are `TODO(dum)` holes. I type one and say `done`, or explain it and dum fills it. Passing puts the skill on the tree.
-
-
-### The screen
-
-Three places, one rule each.
-
-- **The input**, at the bottom, is where I type, always. Its grey placeholder says what typing does right now. With the file showing, the prompt is `>` and I'm talking to dum, though `cd`, `gcc` or `./guess` still go to the shell. With the shell showing, the prompt is `$` and everything runs there, like any terminal. dum's own words (`done`, `go`, `idk`) still reach dum. A program waiting for input turns the prompt into `guess ›`, and `ctrl-c` stops it. It only quits dum when nothing's running.
-- **The middle** is code: the file, or the shell. `shift-tab` flips between them, and so does clicking the `file` / `shell` tabs. The shell is my own `$SHELL` in a pty, kept for the session, so `cd` and history stick.
-- **The right** is the characters: faces side by side, and the whole conversation under them, newest at the bottom. Nothing scrolls away when I look at the shell. Something too big for the thread, like the spec, a lesson or help, takes over as a board until it's answered, or `esc`.
-
-`tab` moves between the input, the file and the tree, and clicking a pane does the same. The trackpad scrolls whatever's under the pointer. That needs the terminal's mouse reporting, so plain drag-to-select becomes Option-drag (iTerm, Terminal.app) or shift-drag elsewhere.
-
-When dum has something to say about one line, it pins a live comment beside it rather than describing where to look. It's never saved to the file, and it clears on the next turn:
+1. **Ask.** "print hello world in python", or "a guessing game in C++".
+2. **The plan.** The intern names the skills the code rests on. dum sorts them, in code, into what it writes, what's mine, and what's locked deeper. `y` builds it.
+3. **Unlock or type.** `course printing` from the plan runs the course right there, then the plan comes back with that skill moved over. Or I approve it as is and type the locked parts.
+4. **Fill the gaps.** Unlocked blocks type themselves in. Locked ones are `TODO(dum)` holes. I type one and say `done`, and passing puts the skill on the tree.
 
 ```
-  3 const LEASE_MS = 30_000;  ◂ 30s: long enough for a slow job to finish
+  a recursive fibonacci in fib.py
+
+  DUM WRITES
+  - printing (python)
+
+  YOU TYPE, OR TAKE THE COURSE
+  - return values (python): fib returns the nth number · course return values
+
+  LOCKED DEEPER
+  - recursion (python): needs return values · start with course return values
 ```
 
-The file is a vim-ish buffer: `i` types, `:w` writes, `/` finds. It's for fixing the thing I just watched get written, not for living in. My edits are mine. Saving isn't a tool call and the intern isn't told.
+A plan can carry at most four locked skills, because working memory holds [about four chunks](https://philpapers.org/rec/COWTMN) (Cowan, 2001). Past that, dum refuses the plan and the intern offers a first rung instead. With only printing unlocked, "write a recursive fibonacci function for me" came back as an iterative fibonacci on variables and arithmetic, with those two courses next.
 
 
 ### Two modes
@@ -57,127 +53,96 @@ dum "print hello world in rust"       # understand everything (default)
 dum -a "print hello world in rust"    # anti-vibe
 ```
 
-Understand-everything means what, why, and how. The first time I ask for hello world in Rust, it asks about the `!` in `println!`. The second time it doesn't, because that's on my tree now.
+The only difference is what a locked skill costs. In understand-everything I type it. In anti-vibe I explain it in plain words, and once the explanation holds up, dum fills the hole in front of me. A course unlocks a skill in either mode.
 
-Anti-vibe drops the how. I own the intent, the intern owns the mechanics, a new language's syntax included. No holes unless I say `type it`.
+
+### Courses
+
+`course recursion`, `course for loops in rust`, or `:course x`. They work at the plan, between requests, or as the first thing: `dum "course printing in python"`.
+
+A course is one idea and about three minutes:
+
+- **dum** writes a short lesson and a worked example, using only what's already on my tree.
+- **the wizard** adds one line: what it's called out in the world and where it shows up. "that's stdout - print just writes text to standard output, the same stream every unix tool like grep and cat uses."
+- **the gap** is 1-3 lines in a scratch file, `.dum/courses/<skill>.<ext>`. I type it, `:w`, `done`. A judge reads it like a reviewer: does it do what the gap asked, and would it run. A miss gets a question, never the fix. Anything else I type is a question about the course, answered without doing the gap. `quit` leaves it.
+
+Passing unlocks the skill. If an open hole was waiting on it, the intern fills that hole straight after.
+
+Working code with a part missing is what the research calls a [completion problem](https://www.uky.edu/~gmswan3/544/Cognitive_Load_&_ID.pdf) (van Merriënboer & Krammer, 1987). The order is [mastery learning](https://en.wikipedia.org/wiki/Mastery_learning): prerequisites first. It only works if the tree is right, because "the most important single factor influencing learning is what the learner already knows" ([Ausubel, 1968](https://www.simplypsychology.org/expository-method-of-teaching.html)).
 
 
 ### The skill tree
 
-Every concept I explain, type, or get taught lands on one tree in `~/.dum/skills/`. It follows me across repos and never goes in one.
-
 ```
 $ dum --skills
 
-  ● message queues
-    ○ idempotency keys
-    ● visibility timeout
-      ● leases
-  · heartbeats  not shown yet
-  ◐ for loops  python only
+  python  4/30
+    ● printing
+    ● variables
+    ○ arithmetic  course open
+    · recursion  needs return values, conditionals
 ```
 
-`●` known: I showed it, so the intern builds on it. `◐` claimed: I say I have it and dum hasn't seen it, so the first build that leans on it checks once. `○` shaky: I was taught it or got it wrong. `·` is something a skill builds on that I haven't touched, which is the frontier.
+`●` unlocked. `○` every prerequisite is mine, so the course is open. `·` locked behind something I don't have yet.
 
-- **Mine to edit.** Each skill is a markdown note with `[[links]]` for what it builds on, so `~/.dum` opens as an Obsidian vault. `:skill for loops in python` adds one, `:skill -recursion` takes one off, `dum --add "structs" --in c` works outside a session. The rule, shown every time: only add what I can write from a blank file, completely without AI.
-- **Per language.** "range-based for" is C++ only. Python's for loops fill nothing in a `.cpp` file. Ideas like recursion carry across, but a language I've shown nothing in gets no fills at all.
-- **Honest about mistakes.** Every new skill shows as `+ skill: <name>`, and `not yet` right after takes it back for the session. A general skill goes stale after a year and a niche one (one library's quirk, counted only in its repo) after two months. Stale ones get one quick check.
-- **One idea, one node.** "Leases" and "lease" are one skill. Near-misses like "SQS visibility timeout" get caught before they're recorded, and the intern says whether it's the same idea. It isn't a merge, because "rust macros" and "rust procedural macros" pass the same word test and are different things.
-- **Seeded from real work.** `dum --scan ~/code/old-cli` reads projects I wrote by hand and lists concepts with the line that shows each. I drop what isn't mine and the rest lands as claimed. `dum --reset` starts over, with the old notes moved aside.
+- **Per language.** "printing" in Python and "printing" in C++ are two skills. An idea with no language, like idempotency, only counts in a language I've unlocked something in. Knowing recursion doesn't write Rust.
+- **Curated tracks.** `src/trees/` has one YAML file per language: Python, JavaScript, TypeScript, C, C++, Rust, Go and Java. Each skill lists only what it builds on directly, and a test walks every track from an empty tree to make sure nothing is unreachable.
+- **Off the tracks, the model maps it.** A skill no track has, like websockets, gets its prerequisites from the intern or the course designer. They're saved to `~/.dum/prereqs.json` the first time, so the gate gives the same answer every time it's asked, not whatever the model says that day.
+- **Four ways on.** Typed, explained (anti-vibe), passed a course, or added by hand. Each note records which.
+- **Mine to edit.** Each skill is a markdown note with `[[links]]` to what it builds on, so `~/.dum` opens as an Obsidian vault. `:skill printing, variables in python` adds skills, lowest first, and refuses one whose prerequisites aren't on the tree. The rule, shown every time: only add what I can write from a blank file, completely without AI. `:skill -x` or `dum --forget` takes one off.
+- **Honest about mistakes.** Every unlock shows as `+ skill: <name>`, and `not yet` right after takes it back for the session.
 
-`dum --graph` draws the tree and the project queue in the browser: Graphviz boxes like the Rust project's skill-tree, with Obsidian's hover and click. It's one offline file, `~/.dum/graph.html`, and `#open=<id>` on its URL opens a note directly.
-
-
-### Holes, and how big they are
-
-In understand mode, code only enters a source file through a `TODO(dum)` hole. The intern writes the shape and hands dum the code for each block, and dum decides from my tree whether to fill it:
-
-```
-  · Write  stats.py
-  ✓ fill  stats.py: median  (a skill you hold)
-    │     s = sorted(xs)
-    │     mid = len(s) // 2
-  ▌ hole  stats.py: frequency counting  (yours to type)
-```
-
-A fill types itself into the highlighted block, and the transcript keeps the code. Skipping a skill I hold means not retyping it, never not seeing it. A hole I type gets reviewed on `done`. A miss gets a question, never the fix: "secret 50, you type 30, and it says 'too high'. Is 30 bigger than 50?" A hole I explain in plain words gets filled once the explanation holds up. Open holes live in `.dum/todos.json`, and the next `dum` opens on them.
-
-Holes are what the research calls [completion problems](https://www.uky.edu/~gmswan3/544/Cognitive_Load_&_ID.pdf) (van Merriënboer & Krammer, 1987): working code with a part missing. Their size follows the [expertise reversal effect](https://www.tandfonline.com/doi/abs/10.1207/S15326985EP3801_4) (Kalyuga et al., 2003). Given code helps novices and gets in experts' way, so the gaps [fade](https://link.springer.com/article/10.1023/B:TRUC.0000021815.74806.f6) wider as I get better. My level counts the skills tagged with a language plus the ones I've typed in it:
-
-| Level | Skills in the language | Biggest gap | Gaps per request | Around it |
-| :--- | :--- | :--- | :--- | :--- |
-| novice | 0-2 | 1-3 lines | 1 the first time, then 2 | dum writes the scaffolding |
-| developing | 3-9 | 8 lines | 3 | dum writes the rest |
-| fluent | 10+ | any | 4 | every line goes through a hole |
-
-The gate measures the code proposed for a hole and sends back one too big for my level. Four is the ceiling because working memory holds [about four chunks](https://philpapers.org/rec/COWTMN) (Cowan, 2001). An idiom I haven't seen, like `while (std::cin >> x)`, is shown working in the scaffold first, then a gap can use it. The words under a gap fade too: exact steps at the start, then what it must do, then only the goal.
-
-A request well above my tree doesn't get built as asked. "Teach me vectors in C++" with no C++ on the tree got "want to start with a tiny program that reads numbers and prints the biggest, then vectors?", then one screen of C++ with one gap, a single `if`. That's [mastery learning](https://en.wikipedia.org/wiki/Mastery_learning) and the [4C/ID model](https://www.4cid.org/wp-content/uploads/2021/04/vanmerrienboer-4cid-overview-of-main-design-principles-2021.pdf): prerequisites first, whole tasks from simple to complex. It only works if the tree is right, which is why it's mine to edit: "the most important single factor influencing learning is what the learner already knows" ([Ausubel, 1968](https://www.simplypsychology.org/expository-method-of-teaching.html)).
+Notes from the older tree still load. A solid note counts. A shaky one was only ever taught, so it stays locked.
 
 
-### Asking good questions
+### Holes
 
-The intern plans no list. It asks one question, reads the answer, and the next grows out of it. Most requests need zero to three. Plain words count as an explanation, a vague answer gets re-asked, and a wrong one gets called out in a line and goes on as shaky. Two `idk`s in a row and it stops asking and explains after the build.
-
-While the tree is small it asks to be taught ("how does print get the text onto the screen?"), because students work harder for a teachable agent ([Chase et al., 2009](https://doi.org/10.1007/s10956-009-9180-4)). It also prefers predictions ("does `1..=10` stop at 9 or 10?"), because a wrong guess followed by the answer sticks better than being told ([Kornell, Hays & Bjork, 2009](https://pubmed.ncbi.nlm.nih.gov/19586265/)).
-
-"Recommend me a project" gets a recommendation in a few lines, not a build.
-
-
-### The wizard
-
-Two voices. Questions come from the intern. The wizard only speaks about an answer I already gave, so it can't answer a pending question for me.
+Code only enters a source file through a `TODO(dum)` block tagged with one skill. The intern writes the file as blocks, then hands dum the code for each one:
 
 ```
-  > another worker should pick it back up after a while if the first one dies
-  wizard: that's a visibility timeout - the mechanism SQS and most job queues use for exactly this.
+  ▌ hole  greet.py: input  (locked - yours)
+  ✓ fill  greet.py: printing  (a skill you hold)
+    │     print("Hello, " + name + "!")
 ```
 
-- **It names things.** The real name for what I described is the thing I go look up after, so a wrong name is worse than none.
-- **It nudges with a question.** "what does 0.1 + 0.2 give you as a float?" Every line is tagged `fact:` or `nudge:`, and a nudge whose first sentence isn't a question gets dropped in code.
-- **A second session checks every line** against what I actually said before I see it. `npm run eval:checker` scores it: the last run dropped 45/45 bad lines and kept 45/45 good ones.
-- **It looks things up.** Not recognising something is a reason to search, not an answer. `?` questions search too.
-- **It doesn't see the intern's question**, because with it, it answered the question instead of what I said.
-- **Sonnet, thinking off, effort medium.** Haiku got names wrong; Sonnet got them right at the same wall time. `npm run eval:wizard` measures it.
-
-Each voice shows its model and effort beside its name, read from the running session: `dum opus 5.5 · high`, `wizard sonnet 5 · medium`. The intern follows my own default model and `/effort`. Planning and rebuild reading run on Opus at high, the rest on Sonnet.
+A fill types itself into the highlighted block, and the transcript keeps the code. Skipping a skill I hold means not retyping it, never not seeing it. Open holes live in `.dum/todos.json`, and the next `dum` opens on them.
 
 
-### Learning on purpose
+### The screen
 
-```sh
-dum --learn "websockets"              # a small project around one topic, in ./learn-websockets
-dum --queue "a multiplayer game server"   # the steps up to a goal, planned against my tree
-dum --next                            # one small project for the fastest next unlock
-dum --rebuild ~/code/hysa             # rebuild something I have, from scratch
+Three places, one rule each.
+
+- **The input**, at the bottom, is where I type, always. Its grey placeholder says what typing does right now. With the file showing, the prompt is `>` and I'm talking to dum, though `cd`, `gcc` or `./guess` still go to the shell. With the shell showing, the prompt is `$` and everything runs there. dum's own words (`done`, `y`, `quit`, `course x`) still reach dum. A program waiting for input turns the prompt into `guess ›`, and `ctrl-c` stops it. It only quits dum when nothing's running.
+- **The middle** is code: the file, or the shell. `shift-tab` flips between them, and so does clicking the `file` / `shell` tabs. The shell is my own `$SHELL` in a pty, kept for the session, so `cd` and history stick.
+- **The right** is the characters: faces side by side, and the whole conversation under them, newest at the bottom. Something too big for the thread, like the plan, a course or help, takes over as a board. A course board stays up beside its scratch file while I type the gap.
+
+`tab` moves between the input, the file and the tree, and clicking a pane does the same. The trackpad scrolls whatever's under the pointer. That needs the terminal's mouse reporting, so plain drag-to-select becomes Option-drag (iTerm, Terminal.app) or shift-drag elsewhere.
+
+When dum has something to say about one line, it pins a live comment beside it. It's never saved to the file, and it clears on the next turn:
+
+```
+  5 name = typed.strip()  ◂ your input hole needs to store the text as `typed`
 ```
 
-- **`--learn`** designs a project where the topic is the only new thing, and says how much I already hold: "you hold 5 of 14 skills (36%)". `go` takes the next feature, each under 30 minutes.
-- **`--queue`** maps what a goal rests on and turns every tier below it into stepping-stone projects, an evening each. A project is done when its skills are on my tree, so there's nothing to tick off. `--projects` shows the queue and `--plan` plans goals I wrote into `~/.dum/projects/` by hand.
-- **`--rebuild`** turns a project into milestones in a fresh repo beside it. The original is outside the repo, so the intern can't copy it. A milestone is built when its holes are.
-
-The tiers are counted in code. The model only maps what builds on what.
+The file is a vim-ish buffer: `i` types, `:w` writes, `/` finds. It's for typing gaps and fixing what I just watched get written, not for living in.
 
 
-### Taste, and scenarios that check it
+### The two voices
 
-`~/.dum/taste.md` holds rules in my own words, like "at the start the gaps are really small". The intern reads it every session, and `:taste <rule>` adds one mid-session.
+dum is the intern: the plan, the build, the checks, and the lesson half of a course. It follows my own default model and `/effort`, read back from the running session.
 
-`scenarios/*.json` are scripted sessions, each written from a real mistake. `npm run eval:scenarios` runs them in throwaway repos, checks facts in code (questions before the spec, holes, fills, reply length, comment runs), and has a judge score each transcript against my taste. Results go to `~/.dum/evals/`, compared with the last run. When I react to something, it becomes a taste rule or a scenario.
-
-
-### Short, on purpose
-
-This is closer to a game than a document. Following [i-have-adhd](https://github.com/ayghri/i-have-adhd/blob/main/skills/i-have-adhd/SKILL.md): where I am is always on screen (`feature 2/9 ▰▱▱▱▱▱▱▱▱`), every step has minutes and none runs over 45, and lists stop at five. After a build the intern gets three lines, and the spec is one-line fields that dum lays out itself. Comments in code it writes are three lines at most, which the gate enforces.
+The wizard co-hosts courses. It names the thing and says where it shows up, and nothing else: it never explains the mechanics and never tells me what to do. It runs on Sonnet 5.5 at medium effort, in parallel with dum's half, so it adds no wait. It replies `pass` rather than guess, and an em dash in its line gets replaced in code.
 
 
 ### Enforced in code, not in the prompt
 
 Every rule that only lived in a prompt got skipped eventually.
 
-- Mutating tools are denied until I approve the spec. v1 asked in the prompt, and the intern wrote two files anyway.
+- Whether a skill is unlocked is decided by `curriculum.ts` against the notes on disk. The model names skills; it never decides whether I have them.
+- A course is refused until its prerequisites are on the tree, and so is adding a skill by hand.
+- Mutating tools are denied until I approve the plan.
+- Code outside a `TODO(dum)` block is refused, except a lone closing brace. So is an Edit that rewrites a hole of mine, a block over twelve lines, a hole on a skill that wasn't a locked piece of the approved plan, and comment runs over three lines.
 - Paths are checked on the way through: `cwd` doesn't confine the agent, and it once wrote to `$HOME`.
-- Code outside a `TODO(dum)` block, a hole too big for my level, and a fifth hole are all refused. So is an Edit that rewrites a hole, and a fill over twelve lines, since nothing big rides in under one name.
 - Held and refused calls draw differently from ones that ran, with the reason, so the screen never claims something happened that didn't.
 - Nothing quietly feeds the intern context. Opening files, the shell and my edits never reach it.
 
@@ -188,25 +153,23 @@ Every rule that only lived in a prompt got skipped eventually.
 | :--- | :--- | :--- |
 | `tab` | input, file, file tree, and around (or click a pane) | anywhere |
 | `shift-tab` | the middle: file ⇄ shell (or click the tab) | anywhere |
-| `esc` | close a board: help, a lesson, the log | input |
+| `esc` | close a board: help, a course, the log | input |
 | `ctrl-c` | stop the program running in the shell; with none, quit | anywhere |
 | trackpad, `page up` / `page down` | scroll the conversation or a board | anywhere |
-| `?` + text | ask anything, answered off to the side without costing your turn | input |
+| `course` x [in lang] | unlock a skill with a short course (`:course` works too) | anywhere dum is listening |
+| `y` | build the plan; anything else goes back to the intern | plan |
+| `done` | check what I typed into a hole, or a course gap | your turn, course |
+| an explanation | fills the hole it explains, if it holds up | your turn, anti-vibe |
+| `quit` | leave a course; the skill stays locked | course |
+| `not yet` [name] | take back the skill just unlocked | anywhere |
+| `:skills` | what's unlocked, open and locked | input |
+| `:skill` x, y [in lang] | add skills I can write without AI (`:skill -x` takes one off) | input |
 | `cd`, `gcc`, `echo`, `./a.out` ... | run in the shell, as typed | input |
 | `!` + command | anything else in the shell (`!` alone opens it) | input, file's `:` line |
 | `:run` | run the open file; compiled languages get the line to type instead | input, file's `:` line |
 | `:log` | everything said so far, on a board | input, file's `:` line |
 | `:help` | all of this | input |
-| `:taste` + a rule | how dum should work, kept for every session | input |
-| `:skill` x [in lang] | add a skill I can write without AI (`:skill -x` takes it off) | input |
 | `ctrl-a` `ctrl-e` `ctrl-u` `ctrl-k` `ctrl-w` | start, end, delete to start, to end, a word | input |
-| `idk` | "I don't have this concept" - the intern teaches it | answering a question |
-| `type it` | "I'll write this part" - it leaves a hole | answering a question |
-| `done` | check what I typed into the hole | your turn |
-| an explanation | fills the hole it explains, if it holds up | your turn |
-| `go` | start the next feature or milestone | next up |
-| `not yet` [name] | don't count the skill just checked off | anywhere |
-| `y` | approve the spec; anything else declines | spec |
 | `exit` or an empty line | end the session | what next? |
 | `j` / `k`, arrows, `g g` / `G`, `ctrl-d` / `ctrl-u` | move | file tree, file |
 | `h` / `l`, `enter` / `o` | collapse / expand, open (only I see it) | file tree |
@@ -220,23 +183,17 @@ Every rule that only lived in a prompt got skipped eventually.
 
 | Flag | |
 | :--- | :--- |
-| `-a`, `--anti-vibe` | own the intent, skip the mechanics |
+| `-a`, `--anti-vibe` | explain locked skills instead of typing them |
 | `-u`, `--understand` | the default, spelled out |
 | `-p`, `--plain` | line printer instead of panes, also what you get in a pipe |
 | `-n`, `--new` | a fresh intern in this repo: its memory and open holes moved aside |
-| `-s`, `--skills` | print the skill tree |
-| `-g`, `--graph` | the tree and the queue, in the browser |
-| `--add "<skill>" [--in <lang>]` | add a skill I can write without AI |
-| `--forget <name>` | take a skill off |
-| `--scan <folders>` | claim skills from projects I wrote myself |
+| `-s`, `--skills` | print the tree |
+| `--add "<skill>, <skill>" [--in <lang>]` | add skills I can write without AI, lowest first |
+| `--forget "<skill>" [--in <lang>]` | lock one again |
 | `--reset` | start the tree over, the old one moved aside |
-| `--learn "<topic>" [folder]` | a small project to learn a topic, feature by feature |
-| `--queue "<goal>"` | queue a goal and plan the steps up to it |
-| `--plan`, `--projects`, `--next [n]` | plan hand-written goals, show the queue, suggest what's next |
-| `--rebuild <dir> [target]` | rebuild a project from scratch, milestone by milestone |
 | `-h`, `--help` | the short version of this |
 
-The tree and project flags work from anywhere. A session needs a git repo, since the intern works from the tracked files.
+The tree flags work from anywhere. A session needs a git repo, since the intern works from the tracked files.
 
 
 ### Where things live
@@ -244,19 +201,14 @@ The tree and project flags work from anywhere. A session needs a git repo, since
 ```
 ~/.dum/
   skills/          the skill tree, one note per skill (DUM_HOME moves it)
-  projects/        the project queue, one note per goal, step, or idea
-  taste.md         my rules for how dum should work
-  graph.html       the graph, redrawn by every --graph
-  evals/           every scenario run, for comparing
-  skills.json.migrated   the old single-file tree, read once into notes
+  prereqs.json     prerequisites the model mapped for skills off the tracks
 
 <repo>/.dum/
   session          so the next `dum` resumes the same intern
-  todos.json       holes left for me to type
-  milestones.json  a rebuild's milestones or a learning project's features
-  wizard.jsonl     every wizard line
+  todos.json       holes left for me
+  courses/         course scratch files, one per skill
+  layout.json      optional: where the panes go
   debug.log        with DUM_DEBUG=1
-  knowledge.json   the old per-repo record, folded into the tree once and left alone
 ```
 
 Plain files, no database. Notes are written through a temp file and a rename and re-read before every change, so two sessions in two repos don't erase each other's skills.
@@ -264,13 +216,13 @@ Plain files, no database. Notes are written through a temp file and a rename and
 
 ### Not done
 
-- No skill-tree pane inside the TUI yet. The tree is `dum --skills` or the browser graph. ([#1](https://github.com/hub-ry/dum-intern/issues/1))
+- No skill-tree pane. `:skills` shows it on a board, and `dum --skills` prints it. ([#1](https://github.com/hub-ry/dum-intern/issues/1))
 - No git protocol. dum writes files and never commits, branches, or checks what's dirty first. ([#2](https://github.com/hub-ry/dum-intern/issues/2))
-- In anti-vibe, the intern can claim the build matches the spec before checking. The build review catches it, but only afterwards. ([#3](https://github.com/hub-ry/dum-intern/issues/3))
-- The level thresholds and gap sizes are a first guess, not tuned against real sessions. ([#4](https://github.com/hub-ry/dum-intern/issues/4))
+- After approval the intern can still run Bash, and a shell command can write a file without going through a block. The gate only sees Write and Edit.
+- The curated tracks are a first pass, written by hand and not yet tuned against real sessions. ([#4](https://github.com/hub-ry/dum-intern/issues/4))
 - The intern runs on the Claude Code bundled with the Agent SDK but uses my default model. A model newer than that bundle fails every request. dum says to `npm update @anthropic-ai/claude-agent-sdk` in its own folder, but can't do it for me.
 
 
 ### Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md): the rules that are the product, how to check a change, and how scenarios work.
+[CONTRIBUTING.md](CONTRIBUTING.md): the rules that are the product, and how to check a change.

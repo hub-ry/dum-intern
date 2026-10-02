@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 
-export const PANES = ["tree", "chat", "code", "cast"] as const;
+export const PANES = ["tree", "code", "cast"] as const;
 export type Pane = (typeof PANES)[number];
 
 const Leaf = z.object({
@@ -35,7 +35,7 @@ export const DEFAULT: Node = {
     { pane: "tree", size: 22 },
     { pane: "code", flex: 1 },
     // The characters' side, and the board when something's too big for a face:
-    // wide enough for a spec card.
+    // wide enough for a plan.
     { pane: "cast", size: 46 },
   ],
 };

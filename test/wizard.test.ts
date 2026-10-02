@@ -89,35 +89,3 @@ test("a markdown link inside a line keeps its words", () => {
 test("a line that mentions sources mid-sentence is left alone", () => {
   assert.equal(parse("fact: kafka keeps sources of truth in a log."), "kafka keeps sources of truth in a log.");
 });
-
-// The checker's reply is parsed in code, and two of its rules live here rather
-// than in its prompt.
-import { judge } from "../src/checker.ts";
-
-test("a clean ok passes", () => {
-  assert.equal(judge("said: right\nline: ok", "fact").ok, true);
-});
-
-test("a drop carries its reason", () => {
-  const j = judge("said: no claim\nline: drop: wrong name, that's a lease", "fact");
-  assert.equal(j.ok, false);
-  assert.equal(j.reason, "wrong name, that's a lease");
-});
-
-test("a fact on a wrong answer is dropped even if the checker says ok", () => {
-  assert.equal(judge("said: wrong\nline: ok", "fact").ok, false);
-});
-
-test("a nudge on a choice the checker calls right still passes", () => {
-  // "i'll store the amounts as floats" contains no false claim, so the checker
-  // says right - and the nudge about it is the whole point.
-  assert.equal(judge("said: right\nline: ok", "nudge").ok, true);
-});
-
-test("a nudge on a wrong answer can pass", () => {
-  assert.equal(judge("said: wrong\nline: ok", "nudge").ok, true);
-});
-
-test("a reply that is neither ok nor drop is a drop", () => {
-  assert.equal(judge("hmm, hard to say", "fact").ok, false);
-});

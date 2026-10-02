@@ -1,7 +1,7 @@
 {
   "name": "dum-intern",
   "version": "0.0.1",
-  "description": "One intern. It builds what you can explain.",
+  "description": "One intern. It only writes code on skills you have unlocked.",
   "type": "module",
   "bin": {
     "dum": "./bin/dum",
@@ -14,9 +14,6 @@
     "typecheck": "tsc --noEmit",
     "preview": "tsx tools/preview.tsx",
     "test": "tsx --test test/*.test.ts",
-    "eval:wizard": "tsx tools/wizard-eval.ts",
-    "eval:checker": "tsx tools/checker-eval.ts",
-    "eval:scenarios": "tsx tools/scenarios.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "devDependencies": {
@@ -27,12 +24,10 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.280",
-    "@viz-js/viz": "^3.30.0",
     "@xterm/headless": "^6.0.0",
     "ink": "^7.1.1",
     "node-pty": "^1.1.0",
     "react": "^19.3.0",
-    "svg-pan-zoom": "^3.6.2",
     "tsx": "^4.23.13",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"

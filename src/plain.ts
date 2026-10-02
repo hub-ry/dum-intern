@@ -2,7 +2,7 @@
 
 import { stdout, stdin } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { c, collapse, format, voiceName, bar } from "./lines.ts";
+import { c, collapse, format, voiceName } from "./lines.ts";
 import type { Prompt, Store } from "./store.ts";
 
 const WIDTH = 74;
@@ -10,7 +10,7 @@ const WIDTH = 74;
 export function banner(repo: string, mode: string) {
   console.log();
   console.log(`  ${c.amber("▛▚▘")} ${c.bold("dum-intern")}  ${c.dim(repo)}  ${c.blue(mode)}`);
-  console.log(`  ${c.dim("it builds what you can explain.")}`);
+  console.log(`  ${c.dim("it only writes what you've unlocked.")}`);
   console.log();
 }
 
@@ -141,17 +141,12 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
     // Once per prompt.
     if (s.prompt !== hinted) {
       hinted = s.prompt;
-      // Where things stand, every turn: nobody should have to remember it.
-      if (s.prompt.type === "next" && s.progress) {
-        const p = s.progress;
-        const holes = s.todos.length ? ` · ${s.todos.length} hole${s.todos.length === 1 ? "" : "s"} open` : "";
-        console.log(`  ${c.dim(`${p.unit} ${Math.min(p.done + 1, p.total)}/${p.total}`)} ${c.green(bar(p.done, p.total))}${c.dim(holes)}`);
-      }
       // No editor here, so the hole is typed in yours - the line says where.
       const t = s.prompt.type === "next" ? s.todos[0] : undefined;
-      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - type it and say done, or explain it here`)}`);
-      else if (s.prompt.type === "next" && s.suggestion) console.log(`  ${c.dim(`next up: ${s.suggestion} - say go`)}`);
-      if (s.prompt.type === "question" && s.prompt.choices) console.log(`  ${c.dim("answer it · idk · type it")}`);
+      const how = s.mode === "anti-vibe" ? "explain it here" : "type it and say done";
+      if (t) console.log(`  ${c.dim(`your turn: ${t.concept} in ${t.path} - ${how}, or course ${t.concept}`)}`);
+      if (s.prompt.type === "plan") console.log(`  ${c.dim("y builds it · course <skill> unlocks one first")}`);
+      if (s.prompt.type === "course") console.log(`  ${c.dim(`type the gap in ${s.prompt.card.path} and say done · quit leaves`)}`);
     }
     const reply = (await input.ask(promptFor(s.prompt))).trim();
     console.log();
@@ -160,7 +155,8 @@ export async function runPlain(store: Store, input: Input): Promise<void> {
 }
 
 function promptFor(p: NonNullable<Prompt>): string {
-  if (p.type === "spec") return `  ${c.bold("build this?")} ${c.dim("[y/N]")} `;
+  if (p.type === "plan") return `  ${c.bold("build this?")} ${c.dim("[y/N]")} `;
+  if (p.type === "course") return `  ${c.amber("course ›")} `;
   if (p.type === "next") return `  ${c.dim("›")} `;
   return `  ${c.dim(">")} `;
 }

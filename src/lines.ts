@@ -9,7 +9,7 @@ export const c = {
   red: (s: string) => `\x1b[38;5;167m${s}\x1b[0m`,
 };
 
-import type { Entry, Lesson, Outcome } from "./store.ts";
+import type { CourseCard, Entry, Outcome } from "./store.ts";
 
 /** Hard-wrap to a printable width, ignoring the ANSI already in the string. */
 export function wrap(text: string, indent = "", width = 74): string[] {
@@ -35,31 +35,10 @@ export function modelName(id: string): string {
   return `${m[1]} ${m[2]}${m[3] ? "." + m[3] : ""}`;
 }
 
-/** ▰▰▱▱▱▱▱▱▱ - progress you can see at a glance. */
-export function bar(done: number, total: number): string {
-  if (total <= 0) return "";
-  const cells = Math.min(total, 10);
-  const on = Math.round((Math.min(done, total) / total) * cells);
-  return "▰".repeat(on) + "▱".repeat(cells - on);
-}
-
-/** "~20 min", "~1.5 h": a number, never "a bit". "" when there isn't one. */
-export function minutes(m: number | undefined): string {
-  if (!m || !Number.isFinite(m) || m <= 0) return "";
-  if (m < 90) return `~${Math.round(m / 5) * 5 || 5} min`;
-  const h = Math.round((m / 60) * 2) / 2;
-  return `~${h} h`;
-}
-
 /** The first `n` sentences of some text. */
 export function sentences(text: string, n: number): string {
   const parts = text.trim().match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) ?? [text];
   return parts.slice(0, n).join("").trim();
-}
-
-/** At most `n` items, and how many were left out: lists stay scannable. */
-export function cap<T>(items: T[], n = 5): { shown: T[]; more: number } {
-  return { shown: items.slice(0, n), more: Math.max(0, items.length - n) };
 }
 
 /** "opus 5.5 · high": the model, and the effort it runs at when that's known. */
@@ -186,27 +165,20 @@ export function printable(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-function lessonLines(l: Lesson, width: number): string[] {
-  const body: string[] = [c.bold(l.concept), ""];
-  const section = (label: string, text: string) => {
-    body.push(c.dim(label));
-    body.push(...wrap(text, "  ", width - 8));
-    body.push("");
-  };
-  section("what it is", l.what_it_is);
-  section("why it exists", l.why_it_exists);
-  section("in industry", l.in_industry);
-  section("here", l.here);
-  body.pop();
-  return box(c.amber, "wizard", body, width);
+/** A course: dum's lesson and worked example, the wizard's line, and the gap that's yours. */
+export function courseLines(k: CourseCard, width: number): string[] {
+  const out: string[] = [...wrap(k.lesson, "", width), ""];
+  if (k.example) out.push(...k.example.split("\n").map((l) => "  " + c.blue(l)), "");
+  if (k.wizard) out.push(...wrap(k.wizard, "", width - 3).map((l, i) => (i ? "   " : c.amber("🧙 ")) + c.dim(l)), "");
+  out.push(...wrap(`your gap: ${k.task}`, "", width).map(c.bold));
+  out.push(...wrap(`in ${k.path}${k.run ? ` · run: ${k.run}` : ""}`, "", width).map(c.dim));
+  return out;
 }
 
 /** The wizard, in the margin. */
-function quipLines(text: string, about: string, width: number): string[] {
+function quipLines(text: string, width: number): string[] {
   const bar = c.amber("│");
-  // A quip that arrived a beat late gets anchored to the answer it is about.
-  const head = about ? `re: "${about}"\n` : "";
-  const body = wrap(head + text, "", Math.max(24, Math.min(56, width - 10)));
+  const body = wrap(text, "", Math.max(24, Math.min(56, width - 10)));
   return [
     `   ${bar} ${c.amber("🧙")} ${c.dim(body[0] ?? "")}`,
     ...body.slice(1).map((l) => `   ${bar}    ${c.dim(l)}`),
@@ -220,13 +192,13 @@ const FILL_SHOWN = 12;
 
 function toolLine(name: string, detail: string, outcome: Outcome, why?: string): string {
   // A hole isn't a refusal of anything.
-  if (name === "hole") return `${c.amber("▌")} ${c.bold("hole")}${c.dim("  " + detail)}${c.amber("  (yours to type)")}`;
+  if (name === "hole") return `${c.amber("▌")} ${c.bold("hole")}${c.dim("  " + detail)}${c.amber("  (locked - yours)")}`;
   const mark = outcome === "ran" ? c.dim("·") : outcome === "held" ? c.amber("⊘") : c.red("✗");
   const label = outcome === "ran" ? c.dim(name) : c.bold(name);
   const note = why
     ? (outcome === "held" ? c.amber : c.red)(`  (${outcome} - ${why})`)
     : outcome === "held"
-      ? c.amber("  (held - no spec yet)")
+      ? c.amber("  (held - no plan yet)")
       : outcome === "refused"
         ? c.red("  (refused - outside the repo)")
         : "";
@@ -245,10 +217,15 @@ export function format(e: Entry, width: number): string[] {
       return [...markdown(e.text, width), ""];
     case "note":
       return [c.dim(e.text), ""];
-    case "lesson":
-      return ["", ...lessonLines(e.lesson, width), ""];
+    case "course":
+      return [
+        "",
+        ...box(c.amber, `course: ${e.card.lang ? `${e.card.skill} (${e.card.lang})` : e.card.skill}`, courseLines(e.card, width - 4), width),
+        ...(e.passed === null ? [] : [e.passed ? c.green("  unlocked") : c.dim("  left - still locked")]),
+        "",
+      ];
     case "quip":
-      return quipLines(e.text, e.about, width);
+      return quipLines(e.text, width);
     case "tool":
       return [toolLine(e.name, e.detail, e.outcome, e.why)];
     case "fill": {
@@ -262,22 +239,11 @@ export function format(e: Entry, width: number): string[] {
         ...(more > 0 ? [c.dim(`  │ … ${more} more in ${e.path}`)] : []),
       ];
     }
-    case "answer":
-      // Unattributed on purpose: nobody said this.
-      return [c.dim(`? ${e.question}`), ...wrap(e.body, "", width), ""];
-    case "review":
-      return [
-        `${c.amber("⚖")} ${c.amber("wizard")} ${c.dim("on what was just built")}`,
-        ...wrap(e.text, "  ", width - 2),
-        "",
-      ];
-    case "spec":
+    case "plan":
       return [
         "",
-        ...box(c.green, "spec", markdown(e.spec, width - 4), width),
-        ...(e.approved === null
-          ? []
-          : [e.approved ? c.green("  approved") : c.dim("  declined")]),
+        ...box(c.green, "plan", markdown(e.plan, width - 4), width),
+        ...(e.paused ? [c.dim("  on hold - course first")] : e.approved === null ? [] : [e.approved ? c.green("  approved") : c.dim("  not built")]),
         "",
       ];
     case "question": {

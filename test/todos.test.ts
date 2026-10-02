@@ -2,19 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { fill, hole, load, save, span, spans, untouched, wantsToType, type Todo } from "../src/todos.ts";
-
-test("type it, in the ways people say it", () => {
-  for (const s of ["type it", "Type it.", "i'll type it", "let me type it myself", "type", "I want to type this"]) {
-    assert.ok(wantsToType(s), s);
-  }
-});
-
-test("an answer that mentions typing is still an answer", () => {
-  for (const s of ["type it as a string", "the type is u32", "typed", "idk", ""]) {
-    assert.ok(!wantsToType(s), s);
-  }
-});
+import { fill, hole, load, save, span, spans, untouched, type Todo } from "../src/todos.ts";
 
 test("finds the hole for the concept, else any hole", () => {
   const src = ["a", "// TODO(dum): retries with backoff", "b", "# TODO(dum): http status codes"].join("\n");
@@ -28,7 +16,6 @@ const todo = (path: string, before: string): Todo => ({
   concept: path,
   path,
   what: "w",
-  breadth: "general",
   requires: [],
   before,
 });
@@ -90,7 +77,7 @@ test("only holes and comments pass: #include is code, not a comment", async () =
   ].join("\n");
   assert.deepEqual(loose(skeleton, "cpp/vector_lab.cpp"), []);
   const written = "#include <iostream>\n#include <vector>\n\nint main() {\n  std::vector<int> v;\n}\n";
-  assert.deepEqual(loose(written, "vector_lab.cpp"), ["#include <iostream>", "#include <vector>", "int main() {", "  std::vector<int> v;", "}"]);
+  assert.deepEqual(loose(written, "vector_lab.cpp"), ["#include <iostream>", "#include <vector>", "int main() {", "  std::vector<int> v;"]);
   // Python: a comment is a comment, an import is code.
   assert.deepEqual(loose("# a comment\nimport re\n", "a.py"), ["import re"]);
   assert.deepEqual(loose("# TODO(dum): regex search\n# find the ip\nraise NotImplementedError\n", "a.py"), []);
@@ -115,4 +102,10 @@ test("comment runs over three lines are too long, a hole's heading starts a new 
   assert.deepEqual(wordy(hole, "a.cpp"), []);
   assert.deepEqual(wordy("# a\n# b\n# c\n# d\n", "a.py"), ["# a"]);
   assert.deepEqual(wordy(essay, "notes.md"), []);
+});
+
+test("a lone closing brace may sit outside a hole; anything else is code", async () => {
+  const { loose } = await import("../src/todos.ts");
+  const src = ["// TODO(dum): printing", "// the skeleton and hello", "int main() {", "}", "  );", "return 0;"].join("\n");
+  assert.deepEqual(loose(src, "a.c"), ["return 0;"]);
 });

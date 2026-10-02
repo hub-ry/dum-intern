@@ -28,42 +28,6 @@ test("an early stop names why", () => {
   assert.match(failure({ subtype: "error_max_turns", is_error: true })!, /error_max_turns/);
 });
 
-import { onboarding } from "../src/session.ts";
-
-const tree = (n: number) => ({
-  skills: Array.from({ length: n }, (_, i) => ({
-    name: `skill ${i}`, solid: true, breadth: "general" as const, requires: [], why: "", repos: [], at: "",
-  })),
-});
-
-test("an empty tree gets the first-session guidance", () => {
-  const text = onboarding(tree(0));
-  assert.match(text, /first session/);
-  assert.match(text, /idk is a fine answer/);
-});
-
-test("a small tree still gets it, and says how small", () => {
-  assert.match(onboarding(tree(3)), /3 skills/);
-  assert.match(onboarding(tree(1)), /1 skill\)/);
-});
-
-test("a tree with five skills is past onboarding", () => {
-  assert.equal(onboarding(tree(5)), "");
-});
-
-import { notAnAnswer } from "../src/session.ts";
-
-test("idk and friends are not answers the wizard can comment on", () => {
-  for (const r of ["idk", "IDK", "i dont know", "I don't know.", "no idea", "?", "??", "what do you mean?", "not sure"]) {
-    assert.equal(notAnAnswer(r), true, r);
-  }
-});
-
-test("a real answer that mentions not knowing still goes to the wizard", () => {
-  assert.equal(notAnAnswer("not sure, maybe a lock file?"), false);
-  assert.equal(notAnAnswer("index 1"), false);
-});
-
 test("the gate refuses rewriting a hole, and allows adding one", async () => {
   const { erasesHole } = await import("../src/session.ts");
   const { mkdtempSync, writeFileSync } = await import("node:fs");
@@ -121,57 +85,12 @@ test("shift-tab flips the middle between file and shell; a long reply opens the 
   assert.equal(s.getSnapshot().stage.kind, "code", "back to what the middle had");
 });
 
-test("holes a write would add are counted, not the ones already there", async () => {
-  const { newHoles } = await import("../src/session.ts");
-  const { mkdtempSync, writeFileSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const root = mkdtempSync(`${tmpdir()}/dum-holes-`);
-  const hole = (n: string) => `// TODO(dum): ${n}\n// does ${n}\n\n`;
-  assert.equal(newHoles(root, "Write", { file_path: "a.cpp", content: hole("a") + hole("b") + hole("c") }), 3);
-  writeFileSync(`${root}/a.cpp`, hole("a"));
-  assert.equal(newHoles(root, "Write", { file_path: "a.cpp", content: hole("a") + hole("b") }), 1);
-  assert.equal(newHoles(root, "Edit", { old_string: "x", new_string: hole("z") }), 1);
-  assert.equal(newHoles(root, "Read", {}), 0);
-});
-
 test("a hole handed to them can't be rewritten; one still being shaped can", async () => {
   const { erasesHole } = await import("../src/session.ts");
   const edit = { old_string: "// TODO(dum): vector growth\n// grow it", new_string: "grow();" };
   assert.ok(erasesHole("/", "Edit", edit, ["vector growth"]));
   assert.ok(!erasesHole("/", "Edit", edit, ["something else"]));
   assert.ok(erasesHole("/", "Edit", edit), "no list: every hole is protected");
-});
-
-test("the spec is laid out by dum from one-line fields", async () => {
-  const { specCard } = await import("../src/session.ts");
-  const { markdown, printable } = await import("../src/lines.ts");
-  const card = specCard({
-    summary: "a tiny\nvector that prints when it grows",
-    you_type: ["vec.cpp: grow the buffer | keep the elements"],
-    decisions: ["copying is blocked"],
-    not_doing: [],
-    run: "c++ vec.cpp && ./vec",
-  });
-  assert.equal(card, "**a tiny vector that prints when it grows**\n\n## you type\n- vec.cpp: grow the buffer / keep the elements\n\n## you decided\n- copying is blocked\n\n## run\n- `c++ vec.cpp && ./vec`");
-  const shown = markdown(card, 60).map(printable);
-  assert.ok(shown.every((l) => !/[#*|`]/.test(l)), "nothing raw reaches the screen");
-});
-
-test("gaps per request grow with the level: one the first time in a language", async () => {
-  const { holesAllowed } = await import("../src/session.ts");
-  assert.equal(holesAllowed({ name: "novice", count: 0, gap: 3, scaffold: true }), 1);
-  assert.equal(holesAllowed({ name: "novice", count: 2, gap: 3, scaffold: true }), 2);
-  assert.equal(holesAllowed({ name: "developing", count: 5, gap: 8, scaffold: true }), 3);
-  assert.equal(holesAllowed({ name: "fluent", count: 12, gap: Infinity, scaffold: false }), 4);
-});
-
-test("a question put back after a side question counts as a re-ask", async () => {
-  const { reasks } = await import("../src/session.ts");
-  const q = "what should mode([1, 1, 2, 2, 3]) return?";
-  assert.ok(reasks(q, "right now it's just mean. so for a tie like mode([1, 1, 2, 2, 3]), what should come back? return one?"));
-  assert.ok(reasks(q, q));
-  assert.ok(!reasks(q, "should an empty list raise, or return None?"));
-  assert.ok(!reasks("", q));
 });
 
 test("live comments pin to lines, replace per line, and clear together", async () => {
@@ -196,11 +115,79 @@ test("the thread keeps everything said, and ends on whose turn it is", async () 
   s.submit("done");
   await done;
   s.say('secret 50, you type 30, and it says "too high". is 30 bigger than 50?', true);
-  s.setTodos([{ concept: "if/else", path: "guess.cpp" }]);
+  s.setTodos([{ concept: "conditionals", path: "guess.cpp" }]);
   void s.askNext();
   const text = thread(s.getSnapshot(), 40).map((l) => printable(l.text));
   assert.ok(text.some((l) => l.includes("g++")), "earlier messages stay");
   assert.ok(text.some((l) => l === "› done"), "your reply shows");
   assert.ok(text.some((l) => l.includes("is 30 bigger than 50?")));
-  assert.match(text[text.length - 2]!, /your turn: if\/else in guess\.cpp/);
+  const tail = text.slice(-4).join(" ");
+  assert.match(tail, /your turn: conditionals in guess\.cpp/);
+  assert.match(tail, /course conditionals$/, "the way out of a hole is always the last thing on screen");
+});
+
+test("the plan is laid out by dum, and whether a piece is locked is the tree's call", async () => {
+  const { planCard, classify } = await import("../src/session.ts");
+  const { markdown, printable } = await import("../src/lines.ts");
+  const { unlock } = await import("../src/skills.ts");
+  process.env.DUM_HOME = (await import("node:fs")).mkdtempSync(`${(await import("node:os")).tmpdir()}/dum-plan-`);
+  let t = { skills: [] as import("../src/skills.ts").Skill[] };
+  for (const name of ["printing", "variables", "conditionals", "functions"]) t = unlock(t, { name, lang: "python", how: "added", why: "" });
+  const pieces = classify(t, [
+    { skill: "Printing", lang: "py", what: "print the answer" },
+    { skill: "return values", lang: "python", what: "fib returns the nth number" },
+    { skill: "recursion", lang: "python", what: "fib calls itself" },
+  ]);
+  assert.deepEqual(pieces.map((p) => [p.skill, p.lang, p.status.state]), [
+    ["printing", "python", "unlocked"],
+    ["return values", "python", "open"],
+    ["recursion", "python", "locked"],
+  ]);
+  const card = planCard("a recursive | fibonacci", pieces, "understand", "python fib.py");
+  assert.equal(
+    card,
+    "**a recursive / fibonacci**\n\n## dum writes\n- printing (python)\n\n## you type, or take the course\n- return values (python): fib returns the nth number · `course return values`\n\n## locked deeper\n- recursion (python): needs return values · start with `course return values`\n\n## run\n- `python fib.py`",
+  );
+  assert.match(planCard("x", pieces, "anti-vibe"), /## you explain, or take the course/);
+  const shown = markdown(card, 60).map(printable);
+  assert.ok(shown.every((l) => !/[#*|`]/.test(l)), "nothing raw reaches the screen");
+});
+
+test("a skill taken back with not yet reads as locked in the plan, whatever the tree says", async () => {
+  const { classify } = await import("../src/session.ts");
+  const { unlock, id } = await import("../src/skills.ts");
+  const t = unlock({ skills: [] }, { name: "printing", lang: "rust", how: "typed", why: "" });
+  assert.equal(classify(t, [{ skill: "printing", lang: "rust", what: "" }])[0]!.status.state, "unlocked");
+  assert.equal(classify(t, [{ skill: "printing", lang: "rust", what: "" }], new Set([id("printing", "rust")]))[0]!.status.state, "open");
+});
+
+test("the language a repo is written in is the one most of its files are", async () => {
+  const { mainLang } = await import("../src/session.ts");
+  assert.equal(mainLang({ files: ["a.py", "b.py", "c.rs", "README.md"] }), "python");
+  assert.equal(mainLang({ files: ["README.md"] }), "");
+});
+
+test("a plan and a course each take the board, and a course ends back on the code", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand", process.cwd());
+  s.openFile("package.json");
+  const reply = s.proposePlan("**x**");
+  assert.equal(s.getSnapshot().stage.kind, "plan");
+  assert.equal(s.getSnapshot().prompt?.type, "plan");
+  s.submit("course recursion");
+  assert.equal(await reply, "course recursion", "a course command comes back to whoever asked for the plan");
+  assert.ok(s.getSnapshot().transcript.some((e) => e.kind === "plan" && e.paused && e.approved === null), "a course pauses the plan, it doesn't decline it");
+  const card = { skill: "recursion", lang: "python", lesson: "l", example: "", wizard: "that's recursion.", task: "t", path: ".dum/courses/recursion.py", run: "" };
+  s.course(card);
+  assert.equal(s.getSnapshot().stage.kind, "course");
+  s.openFile("package.json", 0);
+  assert.equal(s.getSnapshot().stage.kind, "course", "opening the scratch file keeps the lesson up");
+  assert.ok(s.getSnapshot().transcript.some((e) => e.kind === "quip" && e.text === "that's recursion."), "the wizard's line is in the thread");
+  const done = s.askCourse(card);
+  assert.equal(s.getSnapshot().prompt?.type, "course");
+  s.submit("done");
+  assert.equal(await done, "done");
+  s.endCourse(card, true);
+  assert.equal(s.getSnapshot().stage.kind, "code");
+  assert.ok(s.getSnapshot().transcript.some((e) => e.kind === "course" && e.passed === true));
 });

@@ -1,0 +1,27 @@
+# C, roughly in the order people meet it. Each skill names only what it builds on directly.
+# printing includes the skeleton every C program needs: the include and main.
+lang: c
+skills:
+  - printing
+  - variables: [printing]
+  - arithmetic: [variables]
+  - input: [variables]
+  - conditionals: [variables]
+  - while loops: [conditionals]
+  - for loops: [conditionals]
+  - functions: [variables]
+  - return values: [functions]
+  - arrays: [for loops]
+  - strings: [arrays]
+  - pointers: [variables, functions]
+  - pointer arithmetic: [pointers, arrays]
+  - structs: [variables]
+  - malloc and free: [pointers]
+  - linked lists: [structs, malloc and free]
+  - header files: [functions]
+  - recursion: [return values, conditionals]
+  - file io: [pointers, strings]
+  - bit operations: [arithmetic]
+  - function pointers: [pointers, functions]
+  - macros: [header files]
+  - makefiles: [header files]

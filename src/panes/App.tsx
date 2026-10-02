@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
-import { Chat } from "./Chat.tsx";
 import { Stage } from "./Stage.tsx";
 import { Tree } from "./Tree.tsx";
 import { Cast } from "./Cast.tsx";
@@ -13,7 +12,6 @@ import { allocate, type Box as Rect, type Node, type Pane } from "../layout.ts";
 import { mouse, scrolls, type Wheel } from "../mouse.ts";
 import { debug } from "../debug.ts";
 import type { Prompt, Store } from "../store.ts";
-import { bar } from "../lines.ts";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -49,8 +47,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
     }
     // PageUp/PageDown scroll the right side (the thread or a board) from the keyboard.
     if (key.pageUp || key.pageDown) return void scrolls.emit("cast", key.pageUp ? -10 : 10);
-    // esc from the input closes a board (help, a lesson, the log).
-    if (key.escape && focus === "input" && board && state.stage.kind !== "spec") return store.closeBoard();
+    // esc from the input closes a board (help, a course, the log). A plan is answered instead.
+    if (key.escape && focus === "input" && board && state.stage.kind !== "plan") return store.closeBoard();
   });
 
   useEffect(() => {
@@ -148,8 +146,6 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             onOpen={openFile}
           />
         );
-      case "chat":
-        return <Chat transcript={state.transcript} width={at.width} height={at.height} />;
       case "code":
         return (
           <Stage
@@ -198,16 +194,8 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
             <Text bold>dum-intern</Text>
             <Text dimColor>{"  " + state.repo + "  "}</Text>
             <Text color="#87afd7">{state.mode}</Text>
-            <Text color="#87af87">{`  ${state.skills.known} known`}</Text>
-            {state.skills.claimed ? <Text color="#87afd7">{`  ${state.skills.claimed} claimed`}</Text> : null}
-            {state.skills.shaky ? <Text dimColor>{`  ${state.skills.shaky} shaky`}</Text> : null}
-            {state.todos.length ? <Text color="#d7a55f">{`  ${state.todos.length} to type`}</Text> : null}
-            {state.progress ? (
-              <>
-                <Text dimColor>{`  ${state.progress.unit} ${Math.min(state.progress.done + 1, state.progress.total)}/${state.progress.total} `}</Text>
-                <Text color="#87af87">{bar(state.progress.done, state.progress.total)}</Text>
-              </>
-            ) : null}
+            <Text color="#87af87">{`  ${state.unlocked} unlocked`}</Text>
+            {state.todos.length ? <Text color="#d7a55f">{`  ${state.todos.length} to ${state.mode === "anti-vibe" ? "explain" : "type"}`}</Text> : null}
           </Text>
         </Box>
         <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" marginLeft={2}>
@@ -231,7 +219,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
           <Field
             prompt={state.running ? `${state.running} › ` : store.inShell() ? "$ " : promptFor(state.prompt)}
             placeholder={placeholderFor(state, store.inShell())}
-            color={state.prompt?.type === "spec" ? "#87af87" : undefined}
+            color={state.prompt?.type === "plan" ? "#87af87" : state.prompt?.type === "course" ? "#d7a55f" : undefined}
             active={focus === "input"}
             onSubmit={(v) => store.submit(v.trim())}
             width={cols - 2}
@@ -248,21 +236,25 @@ function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
   if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return "tab: move · ? ask · :help";
+  return "tab: move · :skills · :help";
 }
 
 /** What typing does right now, shown grey in the empty input. */
 function placeholderFor(s: ReturnType<Store["getSnapshot"]>, shell: boolean): string {
   if (s.running) return `input for ${s.running} · ctrl-c stops it`;
   if (shell) return "a command, like g++ guess.cpp -o guess · ⇧tab: back to dum";
-  if (s.prompt?.type === "spec") return "y to build it, or say what to change";
-  if (s.prompt?.type === "question" && s.prompt.choices) return "answer dum · idk · type it · ?ask";
-  if (s.todos.length) return "done when it's typed · or explain it · ⇧tab: shell";
-  return "ask dum for something · ⇧tab: shell to run code";
+  if (s.prompt?.type === "plan") return "y to build it · course <skill> first · or say what to change";
+  if (s.prompt?.type === "course") return "done when the gap's typed · ask about it · quit leaves";
+  if (s.prompt?.type === "question") return "answer dum";
+  if (s.todos.length) {
+    return s.mode === "anti-vibe" ? "explain it here · or course <skill> · ⇧tab: shell" : "done when it's typed · or course <skill> · ⇧tab: shell";
+  }
+  return "ask dum for something · course <skill> · ⇧tab: shell";
 }
 
 function promptFor(p: Prompt): string {
-  if (p?.type === "spec") return "build this? [y/N] ";
+  if (p?.type === "plan") return "build this? [y/N] ";
+  if (p?.type === "course") return "course › ";
   if (p?.type === "next") return "› ";
   return "> ";
 }

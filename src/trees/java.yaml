@@ -1,0 +1,28 @@
+# Java, roughly in the order people meet it. Each skill names only what it builds on directly.
+# printing includes the class and public static void main around it.
+lang: java
+skills:
+  - printing
+  - variables: [printing]
+  - arithmetic: [variables]
+  - strings: [variables]
+  - input: [strings]
+  - conditionals: [variables]
+  - while loops: [conditionals]
+  - for loops: [conditionals]
+  - methods: [variables]
+  - return values: [methods]
+  - arrays: [for loops]
+  - recursion: [return values, conditionals]
+  - classes: [methods]
+  - constructors: [classes]
+  - static: [classes]
+  - arraylists: [arrays, classes]
+  - hashmaps: [arraylists]
+  - exceptions: [methods]
+  - interfaces: [classes]
+  - inheritance: [classes]
+  - enums: [classes]
+  - generics: [arraylists]
+  - lambdas: [interfaces]
+  - streams: [lambdas, arraylists]
