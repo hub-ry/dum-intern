@@ -1,5 +1,7 @@
 # dum-intern
 
+[![ci](https://github.com/hub-ry/dum-intern/actions/workflows/ci.yml/badge.svg)](https://github.com/hub-ry/dum-intern/actions/workflows/ci.yml)
+
 My custom agentic environment with a tighter development leash: it only writes code on skills I've unlocked.
 
 ![dum-intern: the file tree on the left, a C++ guessing game with one TODO(dum) gap in the middle, and the wizard and dum on the right above the conversation](docs/screenshot.png)
@@ -8,10 +10,12 @@ Everything I ask for rests on a handful of skills. dum checks each one against m
 
 The bet: a coding agent makes it easy to ship code I couldn't write myself, and I only find out when something breaks. So the agent's reach is capped by mine. Courses go in order, too. If I can't print hello world, I can't take the recursion course, and I can't prompt my way past it either.
 
+**It needs Claude Code.** dum runs on the Claude Code bundled with the Agent SDK, which signs in with your `claude` CLI login, so the CLI has to be installed and logged in before `dum` does anything. Every plan, course and check runs on that account. There's no API key to paste and no offline mode.
+
 
 ### Quickstart
 
-Node 22.6+ and the `claude` CLI logged in. No build step, no API key.
+Node 22.6+ and the `claude` CLI, installed and logged in: `claude auth login`, and `claude auth status` to check. No build step.
 
 ```sh
 npm install
@@ -225,4 +229,4 @@ Plain files, no database. Notes are written through a temp file and a rename and
 
 ### Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md): the rules that are the product, and how to check a change.
+[CONTRIBUTING.md](CONTRIBUTING.md): the rules that are the product, and how to check a change. CI runs the typecheck and tests on Node 22.6 and 24, on Linux and macOS, for every push and pull request. None of it calls a model.

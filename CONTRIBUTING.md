@@ -34,6 +34,8 @@ npm run typecheck
 npm run preview 150 34 2500 plan    # draw a frame: cols rows ms scene
 ```
 
+CI (`.github/workflows/ci.yml`) runs the first two on every push and pull request, on Node 22.6 and 24, Linux and macOS. Keep the tests free of model calls and network so it stays fast and deterministic.
+
 `preview` draws the panes against a made-up session with no model involved. Scenes live at the bottom of `tools/preview.tsx`. Use it for anything visual: a box one column short is a bug here.
 
 For anything interactive, drive the real TUI in tmux with a throwaway tree: `DUM_HOME=/tmp/dum-home`, then `tmux new-session -d -s zz-dum-test -x 150 -y 34 "dum"`, `send-keys` and `capture-pane -t zz-dum-test:`. Send keys one at a time with short sleeps, or text with `send-keys -l`. tmux delivers a burst as one chunk, and `send-keys` eats a trailing `;`, both of which look like dum bugs and aren't. Kill the session by exact name, `tmux kill-session -t =zz-dum-test`: without the `=`, tmux matches a prefix and will happily kill some other session.
