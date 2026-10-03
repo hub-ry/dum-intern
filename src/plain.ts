@@ -10,7 +10,7 @@ const WIDTH = 74;
 export function banner(repo: string, mode: string) {
   console.log();
   console.log(`  ${c.amber("▛▚▘")} ${c.bold("dum-intern")}  ${c.dim(repo)}  ${c.blue(mode)}`);
-  console.log(`  ${c.dim("it only writes what you've unlocked.")}`);
+  console.log(`  ${c.dim("AI at the edge of what you can do.")}`);
   console.log();
 }
 

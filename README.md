@@ -133,6 +133,22 @@ $ dum --boundary
 dum reads the repo's languages from its files and its dependencies from `package.json`, `requirements.txt`, `pyproject.toml`, `Cargo.toml`, `go.mod` and `CMakeLists.txt`, then holds them against my tree. It's all code, so there's no model call and no guessing. The same summary is the first screen of a session, `:boundary` inside one, and part of what the intern reads before it plans anything.
 
 
+### Your tree on the web
+
+```sh
+dum --web https://trees.example.com     # once: puts your tree there, prints its private link
+dum --web                               # sync now, and print the link
+dum --web rotate                        # a new link; the old one stops working
+dum --web off                           # take the web copy down
+```
+
+The page draws every track as a tree, its steps in columns by depth, each skill marked built, recognized, open or locked. Clicking an open skill adds it and clicking one I hold takes it off, under the same rules as `:skill`: a skill only goes on above its prerequisites, with the same warning about adding only what I can write without AI. Courses stay in the terminal, where the judge is.
+
+The link is the key. Anyone who has it can see and edit that tree, and nothing on the server lists or searches them, so it's a private link the way an unlisted doc is, not an account. The server sends `no-referrer`, `noindex` and `no-store`, loads nothing from anywhere else, and `dum --web rotate` replaces a link that got out.
+
+Both copies change, so they merge skill by skill and the newest word wins. A removal is remembered in `~/.dum/removed.json`, so a skill I took off doesn't come back from the other copy. dum syncs when a session starts and a moment after every unlock. The server only takes a write from someone who saw its latest version, so an edit on the page is never overwritten from the terminal. A server that doesn't answer costs nothing: dum works offline and syncs next time.
+
+
 ### Courses
 
 `course recursion`, `course two pointers in c++`, or `:course x`. They work at the plan, between requests, or as the first thing: `dum "course printing in python"`.
@@ -233,6 +249,7 @@ Every rule that only lived in a prompt got skipped eventually.
 | `not yet` [name] | take back the skill just unlocked | anywhere |
 | `:skills` | the tracks and the tree | input |
 | `:boundary` | what AI may do in this repo | input |
+| `:web` | the private link to my tree on the web | input |
 | `:skill` x, y [in lang] | add skills I can write without AI (`:skill -x` takes one off) | input |
 | `cd`, `gcc`, `echo`, `./a.out` ... | run in the shell, as typed | input |
 | `!` + command | anything else in the shell (`!` alone opens it) | input, file's `:` line |
@@ -259,6 +276,7 @@ Every rule that only lived in a prompt got skipped eventually.
 | `-n`, `--new` | a fresh intern in this repo: its memory and open holes moved aside |
 | `-s`, `--skills` | print the tracks and the tree |
 | `-b`, `--boundary` | what AI may do in this repo |
+| `-w`, `--web [server \| rotate \| off]` | my tree at a private link I can edit: link it, sync it, rotate it, take it down |
 | `--add "<skill>, <skill>" [--in <lang>]` | add skills I can write without AI, lowest first |
 | `--forget "<skill>" [--in <lang>]` | take one off |
 | `--reset` | start the tree over, the old one moved aside |
@@ -273,6 +291,8 @@ The tree flags work from anywhere. A session needs a git repo, since the intern 
 ~/.dum/
   skills/          the skill tree, one note per skill (DUM_HOME moves it)
   prereqs.json     prerequisites the model mapped for skills off the tracks
+  removed.json     when each skill was taken off, so a sync doesn't bring it back
+  web.json         the web copy's server and id, once linked
 
 <repo>/.dum/
   session          so the next `dum` resumes the same intern
@@ -283,6 +303,15 @@ The tree flags work from anywhere. A session needs a git repo, since the intern 
 ```
 
 Plain files, no database. Notes are written through a temp file and a rename and re-read before every change, so two sessions in two repos don't erase each other's skills.
+
+
+### Hosting the web copy
+
+```sh
+PORT=8787 DUM_WEB_DATA=/srv/dum-trees npm run web
+```
+
+One Node process and one JSON file per tree in `DUM_WEB_DATA`. It listens on `127.0.0.1` unless `HOST` says otherwise, so it's meant to sit behind a reverse proxy or a tunnel that adds TLS. Behind Cloudflare, set `TRUST_PROXY=1` so the limit of 20 new trees an hour counts per visitor rather than per tunnel. Bodies over 1 MB, malformed trees and ids that aren't UUIDs are refused before anything touches the disk.
 
 
 ### Not done

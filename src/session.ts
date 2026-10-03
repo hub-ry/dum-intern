@@ -15,6 +15,7 @@ import type { Store } from "./store.ts";
 import { debugTo } from "./debug.ts";
 import * as guard from "./guard.ts";
 import * as boundary from "./boundary.ts";
+import * as web from "./web.ts";
 
 /** What a locked skill costs you: typing it, or explaining it. Either way a course unlocks it. */
 export type Mode = "understand" | "anti-vibe";
@@ -360,6 +361,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     const next = skills.unlock(t, { ...u, lang });
     skills.write(next);
     store.setUnlocked(next.skills.length);
+    web.soon();
     if (before) return;
     const name = skills.find(next, u.name, lang)?.name ?? u.name;
     checked.push({ name, lang });
@@ -407,9 +409,11 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     const i = checked.findIndex((c) => skills.id(c.name, c.lang) === k);
     if (i >= 0) checked.splice(i, 1);
     const prev = was.get(k);
-    if (prev) skills.write({ skills: [prev] });
+    // Stamped now, so a sync treats the step back as the newest word on it.
+    if (prev) skills.write({ skills: [{ ...prev, at: new Date().toISOString() }] });
     else skills.remove(target.name, target.lang);
     store.setUnlocked(skills.read().skills.length);
+    web.soon();
     const label = skills.label(target);
     store.note(`not yet: ${label} stays locked this session.`);
     aside.push(`(They said not to count "${label}" as unlocked yet. Treat it as locked: a hole for it stays theirs.)`);

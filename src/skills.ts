@@ -151,12 +151,37 @@ export function write(t: Tree, dir = home()) {
   }
 }
 
+/**
+ * When each skill was taken off, by id. Kept so a sync with the web copy knows the skill went
+ * away on purpose, instead of bringing it back.
+ */
+export function removed(dir = home()): Record<string, string> {
+  try {
+    const raw = JSON.parse(readFileSync(`${dir}/removed.json`, "utf8"));
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeRemoved(all: Record<string, string>, dir = home()) {
+  try {
+    mkdirSync(dir, { recursive: true });
+    const tmp = `${dir}/removed.json.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(all, null, 2) + "\n");
+    renameSync(tmp, `${dir}/removed.json`);
+  } catch {
+    /* a sync may bring it back; taking it off again is one command */
+  }
+}
+
 /** Delete a skill's note. How you take one back. */
 export function remove(name: string, lang: string, dir = home()): boolean {
   const n = noteFor(dir, name, lang);
   if (!n) return false;
   try {
     unlinkSync(`${folder(dir)}/${n}`);
+    writeRemoved({ ...removed(dir), [id(name, lang)]: new Date().toISOString() }, dir);
     return true;
   } catch {
     return false;
@@ -165,7 +190,10 @@ export function remove(name: string, lang: string, dir = home()): boolean {
 
 /** Start over, with the old notes moved aside rather than deleted. */
 export function reset(dir = home()): string | null {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  // Every skill counts as taken off, or the web copy would hand them all straight back.
+  const now = new Date().toISOString();
+  writeRemoved({ ...removed(dir), ...Object.fromEntries(read(dir).skills.map((s) => [idOf(s), now])) }, dir);
+  const stamp = now.replace(/[:.]/g, "-");
   const aside = `${folder(dir)}.before-reset-${stamp}`;
   let moved = false;
   if (existsSync(folder(dir))) {

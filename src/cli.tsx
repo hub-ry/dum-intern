@@ -9,6 +9,7 @@ import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
 import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
 import * as boundary from "./boundary.ts";
+import * as web from "./web.ts";
 import * as todos from "./todos.ts";
 import * as shell from "./shell.ts";
 import { debugTo } from "./debug.ts";
@@ -26,6 +27,7 @@ type Args = {
   request: string;
   show: boolean;
   bounds: boolean;
+  web: string[] | null;
   forget: string[] | null;
   reset: boolean;
   add: string[] | null;
@@ -37,6 +39,7 @@ function parse(args: string[]): Args {
   let plain = false;
   let show = false;
   let bounds = false;
+  let webArgs: string[] | null = null;
   let forget: string[] | null = null;
   let reset = false;
   let addArgs: string[] | null = null;
@@ -49,14 +52,15 @@ function parse(args: string[]): Args {
     else if (a === "--plain" || a === "-p") plain = true;
     else if (a === "--skills" || a === "-s") show = true;
     else if (a === "--boundary" || a === "-b") bounds = true;
+    else if (a === "--web" || a === "-w") webArgs = args.slice(i + 1);
     else if (a === "--forget") forget = args.slice(i + 1);
     else if (a === "--reset") reset = true;
     else if (a === "--add") addArgs = args.slice(i + 1);
     else if (a === "--new" || a === "-n") fresh = true;
     else rest.push(a);
-    if (forget !== null || addArgs !== null) break;
+    if (forget !== null || addArgs !== null || webArgs !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, bounds, forget, reset, add: addArgs, fresh };
+  return { mode, plain, request: rest.join(" ").trim(), show, bounds, web: webArgs, forget, reset, add: addArgs, fresh };
 }
 
 /** `"recursion" --in python` into a name and a language. */
@@ -96,6 +100,41 @@ function printSkills(root: string) {
   console.log(`  ${c.green("●")} ${c.dim("built - AI writes it")}   ${c.blue("◐")} ${c.dim("recognized - AI may use it as a tool")}   ${c.blue("○")} ${c.dim("course open")}   ${c.dim("· locked")}`);
   console.log(`  ${c.dim(`one note per skill in ${where} - open the folder in Obsidian if you like.`)}`);
   console.log();
+}
+
+/** `dum --web [server | rotate | off]`: the private web link to your tree. */
+async function webCommand(args: string[]) {
+  const [arg] = args;
+  try {
+    if (arg === "off") {
+      await web.unlink();
+      console.log(`\n  ${c.dim("the web copy is gone, and the link with it. your tree here is untouched.")}\n`);
+      return;
+    }
+    if (arg === "rotate") {
+      const url = await web.rotate();
+      console.log(`\n  ${c.green("✓")} new link: ${c.bold(url)}\n  ${c.dim("the old one stopped working.")}\n`);
+      return;
+    }
+    if (arg && !web.config()) {
+      const url = await web.link(arg);
+      console.log(`\n  ${c.green("✓")} your tree: ${c.bold(url)}`);
+      console.log(`  ${c.dim("anyone with this link can see and edit it - keep it to yourself.")}`);
+      console.log(`  ${c.dim("edits there land here on the next dum, and yours go up as you unlock things.")}\n`);
+      return;
+    }
+    const conf = web.config();
+    if (!conf) {
+      console.error(`\n  usage: dum --web <server>   (puts your tree on that server, at a private link)\n`);
+      exit(1);
+    }
+    const r = await web.syncNow();
+    console.log(`\n  ${c.bold(web.pageUrl(conf))}`);
+    console.log(`  ${r.ok ? c.dim(r.pulled ? "synced - edits from the web are on your tree now." : "in sync.") : c.amber(`not synced: ${r.why}`)}\n`);
+  } catch (err) {
+    console.error(`\n  ${c.red("✗")} ${(err as Error).message}\n`);
+    exit(1);
+  }
 }
 
 /** What AI may do in the repo you're standing in. */
@@ -205,6 +244,7 @@ function printHelp() {
   ${d("your skill tree")}
   dum --skills              what's unlocked, open, and locked
   dum --boundary            what AI may do in this repo
+  dum --web <server>        your tree at a private link you can edit ${d("(rotate, off)")}
   dum --add "x, y" --in c   add skills you can write without AI, lowest first
   dum --forget "x" --in c   lock one again ${d("(--reset: start over)")}
 
@@ -223,9 +263,13 @@ function repoRoot(): string {
 
 async function main() {
   if (argv.slice(2).some((a) => a === "--help" || a === "-h")) return printHelp();
-  const { mode, plain, request: fromArgs, show, bounds, forget, reset, add: addArgs, fresh } = parse(argv.slice(2));
+  const { mode, plain, request: fromArgs, show, bounds, web: webArgs, forget, reset, add: addArgs, fresh } = parse(argv.slice(2));
 
   // The tree is yours, not the repo's, so looking at it or editing it works from anywhere.
+  if (webArgs !== null) return webCommand(webArgs);
+  // Whatever was changed on the web shows up before anything is read. A server that doesn't
+  // answer costs a few seconds, once.
+  if (show || addArgs !== null || forget !== null) await web.syncNow();
   if (show) return printSkills(repoRoot());
   if (bounds) return printBoundary();
   if (reset) return resetSkills();
@@ -236,6 +280,7 @@ async function main() {
       exit(1);
     }
     console.log(`\n  ${addSkills(name, lang).split("\n").join("\n  ")}\n`);
+    await web.syncNow();
     return;
   }
   if (forget !== null) {
@@ -245,6 +290,7 @@ async function main() {
       exit(1);
     }
     console.log(`\n  ${forgetSkill(name, lang)}\n`);
+    await web.syncNow();
     return;
   }
 
@@ -269,6 +315,7 @@ async function main() {
     const l = skills.langName(lang);
     const msg = action === "add" ? addSkills(name, l || mainLang(repo)) : forgetSkill(name, l);
     store.setUnlocked(skills.read().skills.length);
+    web.soon();
     store.show(action === "add" ? "added" : "forgot", msg);
   };
   store.onSkills = () => {
@@ -276,6 +323,12 @@ async function main() {
     const lines = curriculum.view(t, langsToShow(t, repo.root));
     return [...(lines.length ? lines : ["nothing unlocked yet."]), "● built   ◐ recognized   ○ course open   · locked", "course <skill> takes one."].join("\n");
   };
+  store.onWeb = () => {
+    const c = web.config();
+    return c ? `${web.pageUrl(c)}\n\nanyone with this link can see and edit your tree.\ndum --web rotate gives you a new one.` : "not on the web yet.\n\ndum --web <server> puts your tree there, at a private link.";
+  };
+  // The web copy's edits come down in the background; the header catches up when they land.
+  void web.syncNow().then((r) => r.ok && r.pulled && store.setUnlocked(skills.read().skills.length));
   store.onBoundary = () => boundary.lines(boundary.boundary(skills.read(), repo.root, repo.files)).join("\n");
   // An empty tree is where people go wrong: say how it works, once, up front. Otherwise, in a
   // repo with something in it, the first thing is what AI may do here.

@@ -14,7 +14,7 @@ These are the product. A change that breaks one is a bug, however nice it feels.
 - **Nothing quietly feeds the intern's context.** Opening a file, running the shell, editing in the pane: none of it reaches the intern. It knows what the person tells it.
 - **Code never just appears.** A fill types itself in, and the transcript keeps the code.
 - **The agent never renders.** `session.ts` publishes to `store.ts` and waits. Ink and the plain line-printer are both subscribers. Keep React out of `session.ts` and `wizard.ts`.
-- **Personal data stays local.** The skill tree and mapped prerequisites live in `~/.dum`, never in the repo.
+- **Personal data stays local.** The skill tree and mapped prerequisites live in `~/.dum`, never in the repo. The web copy is opt-in (`dum --web`), and every edit there goes through `sync.edit`, the same rules as `:skill`.
 
 ## Setup
 
@@ -58,6 +58,8 @@ Reproduce it in the real TUI first, the way a person would hit it. Then add a te
 | `src/curriculum.ts`, `src/trees/` | the curated tracks (basics per language, interview, builder) and the prerequisite gate |
 | `src/boundary.ts` | what AI may do in a repo, from its files and manifests |
 | `src/guard.ts` | putting back what a shell command does to source files |
+| `src/sync.ts`, `src/web.ts` | the tree as a snapshot: merging two copies, page edits, and the terminal's client |
+| `src/web/` | the web copy: `server.ts`, the page (`page.html`, `page.js`, `page.css`, no build step), `view.ts` |
 | `src/course.ts` | courses: designing one, the scratch file, the judge |
 | `src/todos.ts` | holes: finding, filling, the code-only-through-holes check |
 | `src/wizard.ts` | the wizard's half of a course |

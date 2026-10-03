@@ -137,6 +137,9 @@ export class Store {
   /** Set by the runner: what `:skills` shows. */
   onSkills: (() => string) | null = null;
 
+  /** Set by the runner: what `:web` shows. */
+  onWeb: (() => string) | null = null;
+
   /** Set by the runner: what `:boundary` shows. */
   onBoundary: (() => string) | null = null;
 
@@ -176,7 +179,7 @@ export class Store {
   /** A person submitted a line. */
   submit(text: string) {
     // `:run`, `:log`, `:help`, `:skills`, `:boundary` - dum's commands, vim's ex line.
-    const ex = /^:\s*(run|log|help|skills|boundary)\s*$/i.exec(text.trim());
+    const ex = /^:\s*(run|log|help|skills|boundary|web)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
       return;
@@ -354,6 +357,7 @@ export class Store {
     if (name === "log") return this.toggleTranscript();
     if (name === "skills") return this.show("your skill tree", this.onSkills?.() ?? "");
     if (name === "boundary") return this.show(`what AI may do in ${this.state.repo}`, this.onBoundary?.() ?? "");
+    if (name === "web") return this.show("your tree on the web", this.onWeb?.() ?? "");
     if (name === "help") {
       return this.show(
         "dum",
@@ -362,6 +366,7 @@ export class Store {
           "            (course x in rust, for another language)",
           ":skills     what's unlocked, what's open, what's locked",
           ":boundary   what AI may do in this repo",
+          ":web        the link to your tree on the web",
           "cd, gcc, echo, git, ./a.out ...   run in the shell as typed",
           "!command    anything else in the shell  (! alone opens it)",
           ":run        run the file you're looking at",
