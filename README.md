@@ -307,6 +307,15 @@ Plain files, no database. Notes are written through a temp file and a rename and
 
 ### Hosting the web copy
 
+Mine is [skill-tree.ryhub.dev](https://skill-tree.ryhub.dev), on `hub` behind the same Cloudflare Tunnel as my other sites:
+
+```sh
+bash deploy/setup-hub.sh    # once: the skill-tree user, the systemd unit, the tunnel route and DNS
+bash deploy/deploy.sh       # every time: test, sync to /opt/skill-tree, restart, health check
+```
+
+Node 24 runs the server's TypeScript directly, so production has no build step and installs two packages, `zod` and `yaml`, from `deploy/server-package.json`. A test checks that `deploy.sh` copies every file the server imports and that those versions match the lockfile. Anywhere else:
+
 ```sh
 PORT=8787 DUM_WEB_DATA=/srv/dum-trees npm run web
 ```

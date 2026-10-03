@@ -118,6 +118,7 @@ export function createServer(o: Options): Server {
     const m = req.method ?? "GET";
 
     if (m === "GET" && parts.length === 0) return send(res, 200, LANDING, "text/html");
+    if (m === "GET" && url.pathname === "/api/health") return send(res, 200, { ok: true });
     if (m === "GET" && parts[0] === "static" && parts[1] && STATIC[parts[1]]) return send(res, 200, statics[parts[1]]!, STATIC[parts[1]]);
     if (m === "GET" && parts.length === 1 && ID.test(parts[0]!)) return send(res, 200, page, "text/html");
     if (parts[0] !== "api" || parts[1] !== "trees") return send(res, 404, { error: "not found" });

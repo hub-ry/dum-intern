@@ -1,0 +1,32 @@
+# /etc/systemd/system/skill-tree.service on hub. Installed once by
+# deploy/setup-hub.sh; deploy/deploy.sh only syncs code and restarts it.
+[Unit]
+Description=dum skill trees (private links to edit a tree, behind cloudflared)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=skill-tree
+WorkingDirectory=/opt/skill-tree
+# Node 24 runs the TypeScript directly: no build step, no tsx in production.
+ExecStart=/usr/local/bin/node src/web/server.ts
+Environment=NODE_ENV=production
+Environment=PORT=8070
+Environment=HOST=127.0.0.1
+# One JSON file per tree. systemd creates it, owned by the service user, and
+# it is the one place ProtectSystem=strict lets the service write.
+StateDirectory=skill-tree
+Environment=DUM_WEB_DATA=/var/lib/skill-tree
+# Behind cloudflared every request comes from 127.0.0.1; the visitor's address
+# is in CF-Connecting-IP, which is what the new-tree limit counts.
+Environment=TRUST_PROXY=1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
