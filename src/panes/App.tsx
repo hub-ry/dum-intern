@@ -1,6 +1,6 @@
 // The screen.
 
-import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { Stage } from "./Stage.tsx";
 import { Tree } from "./Tree.tsx";
@@ -8,7 +8,7 @@ import { Cast } from "./Cast.tsx";
 import { Board, isBoard } from "./Board.tsx";
 import { Panes } from "./Panes.tsx";
 import { Field } from "./Field.tsx";
-import { allocate, type Box as Rect, type Node, type Pane } from "../layout.ts";
+import { allocate, responsive, type Box as Rect, type Node, type Pane } from "../layout.ts";
 import { mouse, scrolls, type Wheel } from "../mouse.ts";
 import { debug } from "../debug.ts";
 import type { Prompt, Store } from "../store.ts";
@@ -17,7 +17,7 @@ const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "�
 
 type Focus = "input" | "tree" | "stage";
 
-export function App({ store, layout }: { store: Store; layout: Node }) {
+export function App({ store, layout: configuredLayout }: { store: Store; layout: Node }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { stdout } = useStdout();
   const [tick, setTick] = useState(0);
@@ -65,6 +65,7 @@ export function App({ store, layout }: { store: Store; layout: Node }) {
   // The wheel scrolls whatever is under the pointer, not whatever has focus.
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
+  const layout = useMemo(() => responsive(configuredLayout, cols), [configuredLayout, cols]);
   // The field grows with a long answer; the panes give it the room.
   const [fieldRows, setFieldRows] = useState(1);
   const body = Math.max(3, rows - 2 - fieldRows);

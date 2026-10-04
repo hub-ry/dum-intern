@@ -6,7 +6,7 @@ import * as curriculum from "../curriculum.ts";
 
 export type State = "built" | "recognized" | "open" | "locked";
 
-export type NodeView = { name: string; state: State; level: skills.Level | null; needs: string[]; requires: string[]; depth: number };
+export type NodeView = { name: string; state: State; level: skills.Level | null; needs: string[]; requires: string[]; next: string; depth: number };
 export type TrackView = { name: string; lang: string; done: number; total: number; nodes: NodeView[] };
 export type View = {
   tracks: TrackView[];
@@ -43,7 +43,10 @@ function depths(track: curriculum.Track): Map<string, number> {
 export function view(t: skills.Tree): View {
   const tracks = curriculum.tracks().map((tr) => {
     const d = depths(tr);
-    const nodes = tr.skills.map((n) => ({ name: n.name, requires: n.requires, depth: d.get(n.name) ?? 0, ...stateOf(t, n.name, tr.lang) }));
+    const nodes = tr.skills.map((n) => {
+      const st = curriculum.status(t, n.name, tr.lang);
+      return { name: n.name, requires: n.requires, next: st.state === "locked" ? st.next : "", depth: d.get(n.name) ?? 0, ...stateOf(t, n.name, tr.lang) };
+    });
     return { name: tr.name, lang: tr.lang, done: nodes.filter((n) => n.state === "built").length, total: nodes.length, nodes };
   });
   const off = t.skills

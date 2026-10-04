@@ -47,6 +47,7 @@ test("the page's view lays tracks out by depth and marks each skill", () => {
   assert.deepEqual([node("printing").state, node("printing").depth], ["built", 0]);
   assert.deepEqual([node("variables").state, node("variables").depth], ["recognized", 1]);
   assert.equal(node("recursion").state, "locked");
+  assert.equal(node("recursion").next, "variables");
   assert.ok(node("recursion").depth > node("functions").depth);
   assert.equal(py.done, 1);
   const iv = v.tracks.find((t) => t.name === "interview")!;

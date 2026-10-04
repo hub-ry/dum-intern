@@ -27,10 +27,31 @@ dum
 In a repo with code in it, the first screen is what AI may do there. An empty tree says how to fill it. `dum --help` lists the commands, and `:help` inside dum lists the rest.
 
 
+### Try changes with a separate practice tree
+
+Run this checkout in a fresh Git repo with a separate skill tree:
+
+```sh
+npm run practice
+```
+
+It prints the workspace and skill-note paths. They stay on disk after you exit, so you can inspect what happened. It starts with an empty tree and no web link. Your real projects and `~/.dum` stay untouched. Inside dum, add only skills you can already write yourself, or start with `course printing in c++`.
+
+For tree commands without a model call:
+
+```sh
+export DUM_HOME="$(mktemp -d)"
+node --import tsx src/cli.tsx --add "printing, variables, arithmetic, functions" --in c++
+node --import tsx src/cli.tsx --skills
+```
+
+`unset DUM_HOME` returns those commands to your normal tree.
+
+
 ### The loop
 
 1. **Ask.** "a python cli that watches a folder and backs up files that changed".
-2. **One decision.** "When a file event fires, how would you decide whether that file actually needs a fresh backup copy?" A real answer, the gist in plain words, puts that core on the tree at the apply level.
+2. **One decision.** "When a file event fires, how would you decide whether that file actually needs a fresh backup copy?" A real answer records recognition. If I have already built that skill, it records apply. Explaining an approach never proves I can implement it.
 3. **The plan.** The intern names the skills the code rests on. dum sorts them, in code:
 
 ```
@@ -66,7 +87,7 @@ Every skill on the tree has a level:
 | :--- | :--- | :--- |
 | recognize | I can say what it is and what it's for | a one-line answer |
 | build | I can write it myself | typing a hole, or passing its course |
-| apply | I decided when and why to reach for it, here | the core question before a plan |
+| apply | I have built it and decided when and why to reach for it, here | the core question after demonstrating build |
 
 And every piece of a plan is one of two kinds. A **concept** is something to know how to write: a language feature, a data structure, an algorithm, anything on a curated track. A **tool** is technology breadth: one library, framework, API or command. Postings list Postgres, Redis and Docker, but nobody needs those memorized before AI touches them. Knowing HTTP, SQL and processes is what makes them quick to pick up.
 
@@ -89,6 +110,8 @@ The difference is what an explanation buys. In understand-everything, concepts n
 
 - **basics** for Python, JavaScript, TypeScript, C, C++, Rust, Go and Java, from printing to the things people put off: decorators, move semantics, lifetimes.
 - **interview**: data structures and algorithms in C++, in the order interviews lean on them. Arrays and strings, hashing, two pointers, sliding window, stacks, binary search, trees, heaps, graphs, BFS and DFS, backtracking, DP. It sits on top of C++ basics, so two pointers with no vectors on the tree points at the vectors course first.
+- **systems** in C++: compilation, debugging, memory layout, undefined behavior, sanitizers, ownership, threads, profiling, sockets and message framing. Each course builds on C++ basics or earlier systems skills.
+- **graphics** in C++: coordinates, vector and matrix math, transformations, projections, rasterization, depth buffers, textures, lighting, meshes, scene graphs and ray intersections. The first exercises build the mathematics before using a rendering library.
 - **builder**: what turns a language into software. Command-line programs, files, JSON, Git, testing, HTTP, REST APIs, databases, SQL, processes, concurrency, networking, the shell, Docker, caching. No language owns these, so they count in any language I've written something in. A course for one is written in whatever language I'm working in, or in the shell for Git and Docker.
 
 A skill off every track, like websockets, gets its prerequisites from the model once. They're saved to `~/.dum/prereqs.json`, so the gate gives the same answer every time it's asked, not whatever the model says that day.
@@ -111,7 +134,7 @@ $ dum --skills
     ◐ hashlib  recognized
 ```
 
-Each bar is the edge: AI writes up to there. `●` built, `◐` recognized, `○` every prerequisite is mine so the course is open, `·` locked behind something I don't have yet.
+Locked skills also show the first course I can take now, even when the missing prerequisite is several rungs away. Each bar is the edge: AI writes up to there. `●` built, `◐` recognized, `○` every prerequisite is mine so the course is open, `·` locked behind something I don't have yet.
 
 
 ### What AI may do in a repo it's never seen
@@ -169,7 +192,7 @@ Working code with a part missing is what the research calls a [completion proble
 Every skill is a markdown note in `~/.dum/skills/` with its level and `[[links]]` to what it builds on, so the folder opens as an Obsidian vault. It follows me across repos and never goes in one.
 
 - **Per language.** "printing" in Python and "printing" in C++ are two skills. An idea with no language only counts in a language I've written something in: knowing recursion doesn't write Rust, and recognizing a Rust library isn't writing Rust.
-- **Levels only go up.** Showing a skill again at a lower level never lowers it.
+- **Levels only go up.** Showing a skill again at a lower level never lowers it. Reasoning alone records recognition; apply requires a previous build. Existing notes retain their recorded levels.
 - **Mine to edit.** `:skill printing, variables in python` adds skills at the build level, lowest first, and refuses one whose prerequisites aren't there. The rule, shown every time: only add what I can write from a blank file, completely without AI. `:skill -x` or `dum --forget` takes one off.
 - **Honest about mistakes.** Every unlock shows as `+ skill: <name>`, and `not yet` right after takes it back for the session.
 
@@ -199,6 +222,8 @@ Three places, one rule each.
 - **The input**, at the bottom, is where I type, always. Its grey placeholder says what typing does right now. With the file showing, the prompt is `>` and I'm talking to dum, though `cd`, `gcc` or `./guess` still go to the shell. With the shell showing, the prompt is `$` and everything runs there. dum's own words (`done`, `y`, `quit`, `course x`) still reach dum. A program waiting for input turns the prompt into `guess ›`, and `ctrl-c` stops it. It only quits dum when nothing's running.
 - **The middle** is code: the file, or the shell. `shift-tab` flips between them, and so does clicking the `file` / `shell` tabs. The shell is my own `$SHELL` in a pty, kept for the session, so `cd` and history stick.
 - **The right** is the characters: faces side by side, and the whole conversation under them, newest at the bottom. Something too big for the thread, like the plan, a course, the boundary or help, takes over as a board. A course board stays up beside its scratch file while I type the gap.
+
+At 80-119 columns, the default sidebars shrink so the code stays readable. Custom layouts keep their chosen sizes.
 
 `tab` moves between the input, the file and the tree, and clicking a pane does the same. The trackpad scrolls whatever's under the pointer. That needs the terminal's mouse reporting, so plain drag-to-select becomes Option-drag (iTerm, Terminal.app) or shift-drag elsewhere.
 

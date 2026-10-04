@@ -18,11 +18,19 @@ const idOf = (s: { name: string; lang: string }) => skills.id(s.name, s.lang);
  * removal and the other way round. A tie keeps the higher level.
  */
 export function merge(a: Snapshot, b: Snapshot): Snapshot {
-  const ids = new Set([...a.skills.map(idOf), ...b.skills.map(idOf), ...Object.keys(a.removed), ...Object.keys(b.removed)]);
+  const byId = new Map<string, skills.Skill>();
+  for (const s of [...a.skills, ...b.skills]) {
+    const k = idOf(s);
+    const previous = byId.get(k);
+    if (!previous || s.at > previous.at || (s.at === previous.at && (
+      skills.rank(s.level) > skills.rank(previous.level) ||
+      (s.level === previous.level && skillValue(s) > skillValue(previous))
+    ))) byId.set(k, s);
+  }
+  const ids = new Set([...byId.keys(), ...Object.keys(a.removed), ...Object.keys(b.removed)]);
   const out: Snapshot = { skills: [], removed: {} };
   for (const k of ids) {
-    const kept = [a.skills.find((s) => idOf(s) === k), b.skills.find((s) => idOf(s) === k)].filter((s): s is skills.Skill => !!s);
-    const best = kept.sort((x, y) => (y.at > x.at ? 1 : y.at < x.at ? -1 : skills.rank(y.level) - skills.rank(x.level)))[0];
+    const best = byId.get(k);
     const gone = [a.removed[k], b.removed[k]].filter((t): t is string => !!t).sort().pop();
     if (best && (!gone || best.at > gone)) out.skills.push(best);
     else if (gone) out.removed[k] = gone;
@@ -35,19 +43,21 @@ export function apply(snap: Snapshot, dir = skills.home()) {
   const here = skills.read(dir);
   const changed = snap.skills.filter((s) => {
     const mine = skills.find(here, s.name, s.lang);
-    return !mine || mine.at !== s.at || mine.level !== s.level || mine.how !== s.how;
+    return !mine || skillValue(mine) !== skillValue(s);
   });
   if (changed.length) skills.write({ skills: changed }, dir);
   for (const s of here.skills) {
-    if (snap.removed[idOf(s)]) skills.remove(s.name, s.lang, dir);
+    if (snap.removed[idOf(s)]) skills.remove(s.name, s.lang, dir, snap.removed[idOf(s)]);
   }
-  skills.writeRemoved({ ...skills.removed(dir), ...snap.removed }, dir);
+  skills.writeRemoved(snap.removed, dir);
 }
+
+const skillValue = (s: skills.Skill) => JSON.stringify([idOf(s), s.name, s.lang, s.how, s.level, s.requires, s.why, s.at]);
 
 /** Whether two snapshots say the same thing, for skipping a write that changes nothing. */
 export function same(a: Snapshot, b: Snapshot): boolean {
   const key = (x: Snapshot) =>
-    JSON.stringify([x.skills.map((s) => [idOf(s), s.at, s.level]).sort(), Object.entries(x.removed).sort()]);
+    JSON.stringify([x.skills.map(skillValue).sort(), Object.entries(x.removed).sort()]);
   return key(a) === key(b);
 }
 

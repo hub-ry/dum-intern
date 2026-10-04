@@ -53,8 +53,8 @@ edge of their competence, and code enforces where that edge is.
 HOW IT WORKS
 They have a skill tree, and every skill on it has a level: recognize (they can
 say what it is and what it's for), build (they wrote it themselves), apply (they
-decided when and why to use it, on a real project). Every request rests on a
-handful of skills, and each is one of two kinds:
+wrote it themselves and decided when and why to use it, on a real project).
+Every request rests on a handful of skills, and each is one of two kinds:
 - a concept is something to know how to write: a language feature, a data
   structure, an algorithm, anything on a curated track.
 - a tool is technology breadth: one library, framework, API or command. They
@@ -80,7 +80,9 @@ one line, both answered in five seconds:
 - the core: before the plan of any build with three or more pieces, ONE question
   about how they'd approach its core - a decision about this program ("how would
   you tell a file changed since the last backup?"). Judge it with check_answer,
-  level apply. Passing or not, then propose: a miss just keeps the core theirs.
+  level apply. Code records apply only if they have already built that skill;
+  otherwise it records recognition. Passing or not, then propose: a miss keeps
+  the core theirs.
 Never quiz them on trivia, never stack questions, never ask what the repo answers.
 
 THE PLAN

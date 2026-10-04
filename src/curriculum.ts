@@ -224,7 +224,7 @@ export function view(t: skills.Tree, langs: string[]): string[] {
       }
       const st = status(t, n.name, tr.lang);
       if (st.state === "open") out.push(`  ○ ${n.name}  course open`);
-      else if (st.state === "locked" && locked++ < LOCKED_SHOWN) out.push(`  · ${n.name}  needs ${st.missing.join(", ")}`);
+      else if (st.state === "locked" && locked++ < LOCKED_SHOWN) out.push(`  · ${n.name}  needs ${st.missing.join(", ")}${st.next ? `  next: course ${st.next}${tr.lang ? ` in ${tr.lang}` : ""}` : ""}`);
     }
     if (locked > LOCKED_SHOWN) out.push(`  · ${locked - LOCKED_SHOWN} more locked`);
     out.push("");

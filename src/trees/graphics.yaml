@@ -1,0 +1,19 @@
+# Build the mathematics in C++ before relying on a graphics API.
+lang: c++
+track: graphics
+skills:
+  - coordinate systems: [arithmetic, functions]
+  - vector math: [coordinate systems, classes]
+  - dot products: [vector math]
+  - cross products: [vector math]
+  - matrix math: [vector math, for loops]
+  - transformations: [matrix math]
+  - camera projections: [transformations]
+  - rasterization: [coordinate systems, vectors]
+  - barycentric coordinates: [rasterization, vector math]
+  - depth buffers: [rasterization, camera projections]
+  - texture sampling: [barycentric coordinates, vectors]
+  - lighting: [dot products, cross products]
+  - meshes: [vectors, classes]
+  - scene graphs: [meshes, transformations, recursion]
+  - ray intersections: [dot products, coordinate systems]

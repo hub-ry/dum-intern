@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { unlock, find, named, holds, spoken, levelIn, key, id, read, write, remove, reset, folder, describe, label, langOf, extFor, type Tree } from "../src/skills.ts";
 
@@ -41,6 +41,7 @@ test("a level only goes up, and holds asks for one", () => {
   assert.equal(find(t, "hash maps", "python")?.level, "recognize");
   assert.ok(holds(t, "hash maps", "python", "recognize"));
   assert.ok(!holds(t, "hash maps", "python"), "recognizing isn't building");
+  t = unlock(t, { name: "hash maps", lang: "python", how: "typed", why: "implemented lookup" });
   t = unlock(t, { name: "hash maps", lang: "python", how: "reasoned", why: "picked it for lookup by id" });
   t = unlock(t, { name: "hash maps", lang: "python", how: "explained", why: "again" });
   assert.equal(find(t, "hash maps", "python")?.level, "apply");
@@ -132,4 +133,24 @@ test("file extensions map to languages and back", () => {
   assert.equal(extFor("python"), "py");
   assert.equal(extFor("c++"), "cc");
   assert.equal(extFor("brainfuck"), "txt");
+});
+
+
+test("reasoning about an unfamiliar skill does not prove they can implement it", () => {
+  const t = unlock(empty, { name: "recursion", lang: "python", how: "reasoned", why: "chose a recursive traversal" });
+  assert.equal(find(t, "recursion", "python")?.level, "recognize");
+  assert.ok(!holds(t, "recursion", "python"));
+  assert.ok(!spoken(t, "python"));
+  const built = unlock(empty, { name: "recursion", lang: "python", how: "typed", why: "wrote it" });
+  const applied = unlock(built, { name: "recursion", lang: "python", how: "reasoned", why: "chose it" });
+  assert.equal(find(applied, "recursion", "python")?.level, "apply");
+});
+
+test("forgetting a skill removes every duplicate note, including hand-named copies", () => {
+  const dir = home();
+  write(unlock(empty, { name: "printing", lang: "python", how: "typed", why: "" }), dir);
+  writeFileSync(`${folder(dir)}/copy.md`, readFileSync(`${folder(dir)}/printing (python).md`, "utf8"));
+  assert.ok(remove("printing", "python", dir));
+  assert.equal(read(dir).skills.length, 0);
+  assert.equal(readdirSync(folder(dir)).length, 0);
 });

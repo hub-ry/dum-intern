@@ -9,7 +9,7 @@ export type How = "typed" | "explained" | "course" | "added" | "reasoned";
 
 /**
  * How far they've shown it. Recognize: they can say what it is and what it's for. Build: they
- * wrote it themselves. Apply: they decided when and why to reach for it, on a real project.
+ * wrote it themselves. Apply: they have built it and decided when and why to use it.
  */
 export type Level = "recognize" | "build" | "apply";
 
@@ -21,7 +21,7 @@ export function rank(l: Level): number {
 
 /** The level a way of unlocking shows. */
 export function levelOf(how: How): Level {
-  return how === "explained" ? "recognize" : how === "reasoned" ? "apply" : "build";
+  return how === "explained" || how === "reasoned" ? "recognize" : "build";
 }
 
 export type Skill = {
@@ -104,22 +104,24 @@ export function read(dir = home()): Tree {
   return { skills: [...byId.values()] };
 }
 
-/** The file a skill's note is in, if it has one already - it may have been named by hand. */
-function noteFor(dir: string, name: string, lang: string): string | undefined {
+/** All notes for one skill, newest first, including hand-named copies. */
+function notesFor(dir: string, name: string, lang: string): string[] {
   const want = id(name, lang);
   try {
     return readdirSync(folder(dir))
-      .filter((n) => n.endsWith(".md"))
-      .find((n) => {
+      .filter((n) => n.endsWith(".md") && !n.startsWith("."))
+      .flatMap((n) => {
         try {
           const s = fromNote(readFileSync(`${folder(dir)}/${n}`, "utf8"), n);
-          return !!s && idOf(s) === want;
+          return s && idOf(s) === want ? [{ name: n, at: s.at }] : [];
         } catch {
-          return false;
+          return [];
         }
-      });
+      })
+      .sort((a, b) => a.at === b.at ? a.name.localeCompare(b.name) : a.at > b.at ? -1 : 1)
+      .map((n) => n.name);
   } catch {
-    return undefined;
+    return [];
   }
 }
 
@@ -133,7 +135,7 @@ export function write(t: Tree, dir = home()) {
   try {
     mkdirSync(folder(dir), { recursive: true });
     for (const s of t.skills) {
-      const path = `${folder(dir)}/${noteFor(dir, s.name, s.lang) ?? noteName(s)}`;
+      const path = `${folder(dir)}/${notesFor(dir, s.name, s.lang)[0] ?? noteName(s)}`;
       const text = toNote(s);
       let was: string | null = null;
       try {
@@ -176,12 +178,12 @@ export function writeRemoved(all: Record<string, string>, dir = home()) {
 }
 
 /** Delete a skill's note. How you take one back. */
-export function remove(name: string, lang: string, dir = home()): boolean {
-  const n = noteFor(dir, name, lang);
-  if (!n) return false;
+export function remove(name: string, lang: string, dir = home(), at = new Date().toISOString()): boolean {
+  const notes = notesFor(dir, name, lang);
+  if (!notes.length) return false;
   try {
-    unlinkSync(`${folder(dir)}/${n}`);
-    writeRemoved({ ...removed(dir), [id(name, lang)]: new Date().toISOString() }, dir);
+    for (const n of notes) unlinkSync(`${folder(dir)}/${n}`);
+    writeRemoved({ ...removed(dir), [id(name, lang)]: at }, dir);
     return true;
   } catch {
     return false;
@@ -218,7 +220,10 @@ export function unlock(t: Tree, u: Unlock): Tree {
     if (name && key(name) !== key(u.name) && !requires.some((x) => key(x) === key(name))) requires.push(name);
   }
   // A level never goes down by being shown again at a lower one.
-  const level = u.level ?? levelOf(u.how);
+  // Choosing an approach proves judgment, not implementation. Apply requires a prior build.
+  const level = u.how === "reasoned"
+    ? prev && rank(prev.level) >= rank("build") ? "apply" : "recognize"
+    : u.level ?? levelOf(u.how);
   const raised = !prev || rank(level) >= rank(prev.level);
   const next: Skill = {
     name: prev?.name ?? u.name.trim(),
@@ -313,7 +318,7 @@ export function describe(t: Tree): string {
   const out = [
     "THEIR SKILL TREE - what they've unlocked, and how far: recognize (can say what",
     "it is and what it's for), build (wrote it themselves), apply (decided when and",
-    "why to use it on a real project). Anything not here is locked.",
+    "why to use it after building it themselves). Anything not here is locked.",
     "A skill under a language counts only in that language. An idea with no",
     "language counts in any language they've unlocked something in.",
   ];

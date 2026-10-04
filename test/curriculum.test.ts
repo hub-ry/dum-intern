@@ -122,3 +122,15 @@ test("the view draws each track as a bar, and marks built, recognized, open and 
   assert.ok(lines.includes("go · off the tracks") && lines.includes("  ◐ cobra  recognized"));
   assert.equal(bar(1, 4, 8), "██░░░░░░");
 });
+
+
+test("systems and graphics tracks lead from fundamentals to independent C++ projects", () => {
+  const systems = trackOf("systems", "c++");
+  const graphics = trackOf("graphics", "c++");
+  assert.ok(systems && graphics);
+  assert.deepEqual(frontier(empty, systems), []);
+  assert.deepEqual(frontier(empty, graphics), []);
+  assert.equal(status(empty, "sockets", "c++").state, "locked");
+  assert.deepEqual(locate("rasterization", "cpp"), { lang: "c++", exercise: "c++" });
+  assert.equal(status(has("c++", ["arithmetic", "functions"]), "coordinate systems", "c++").state, "open");
+});

@@ -55,7 +55,7 @@ async function send(op, name, lang) {
 
 async function onSkill(node, track) {
   const label = track.lang ? `${node.name} (${track.lang})` : node.name;
-  if (node.state === "locked") return toast(`${label} needs ${node.needs.join(", ")} first`);
+  if (node.state === "locked") return toast(`${label} needs ${node.needs.join(", ")} first${node.next ? `. Start with course ${node.next}${track.lang ? ` in ${track.lang}` : ""}` : ""}`);
   if (node.state === "open") {
     const ok = await confirmDialog(`Add ${label}?`, "Only add what you can write from a blank file, completely without AI. Otherwise take its course in dum: it's three minutes.", "Add it");
     if (ok) send("add", node.name, track.lang);
@@ -94,6 +94,7 @@ function renderTrack(t) {
               n.name,
               n.state === "locked" && n.needs.length ? el("span", { class: "needs" }, `needs ${n.needs.join(", ")}`) : null,
               n.state === "recognized" ? el("span", { class: "needs" }, "recognized") : null,
+              n.next ? el("span", { class: "needs" }, `next: course ${n.next}${t.lang ? ` in ${t.lang}` : ""}`) : null,
             ),
           ),
         ),

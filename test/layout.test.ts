@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { allocate, read, DEFAULT, type Node } from "../src/layout.ts";
+import { allocate, read, responsive, DEFAULT, type Node } from "../src/layout.ts";
 
 const box = { x: 0, y: 0, width: 100, height: 30 };
 
 test("fixed sizes are honoured and the rest is shared", () => {
   const l: Node = {
     direction: "row",
-    children: [{ pane: "tree", size: 20 }, { pane: "chat", flex: 1 }, { pane: "code", flex: 1 }],
+    children: [{ pane: "tree", size: 20 }, { pane: "cast", flex: 1 }, { pane: "code", flex: 1 }],
   };
   const p = allocate(l, box);
   assert.deepEqual(p.map((x) => x.width), [20, 39, 39]);
@@ -18,7 +18,7 @@ test("fixed sizes are honoured and the rest is shared", () => {
 test("uneven shares still fill the row exactly", () => {
   const l: Node = {
     direction: "row",
-    children: [{ pane: "chat", flex: 1 }, { pane: "code", flex: 1 }, { pane: "cast", flex: 1 }],
+    children: [{ pane: "cast", flex: 1 }, { pane: "code", flex: 1 }, { pane: "cast", flex: 1 }],
   };
   const p = allocate(l, { ...box, width: 50 });
   assert.equal(p.reduce((a, x) => a + x.width, 0) + 2, 50);
@@ -52,19 +52,19 @@ test("nested splits work", () => {
   const l: Node = {
     direction: "row",
     children: [
-      { pane: "chat", flex: 1 },
+      { pane: "cast", flex: 1 },
       { direction: "column", children: [{ pane: "code", flex: 1 }, { pane: "cast", size: 9 }] },
     ],
   };
   const p = allocate(l, box);
-  assert.deepEqual(p.map((x) => x.pane), ["chat", "code", "cast"]);
+  assert.deepEqual(p.map((x) => x.pane), ["cast", "code", "cast"]);
   assert.equal(p[1]!.height + p[2]!.height + 1, 30);
 });
 
 test("a fixed size wider than the row does not go negative", () => {
   const l: Node = {
     direction: "row",
-    children: [{ pane: "tree", size: 500 }, { pane: "chat", flex: 1 }],
+    children: [{ pane: "tree", size: 500 }, { pane: "cast", flex: 1 }],
   };
   const p = allocate(l, box);
   assert.ok(p.every((x) => x.width >= 0));
@@ -72,4 +72,16 @@ test("a fixed size wider than the row does not go negative", () => {
 
 test("a missing or broken config falls back instead of throwing", () => {
   assert.deepEqual(read("/nope/not/a/dir"), DEFAULT);
+});
+
+
+test("the default keeps code readable at ordinary terminal widths", () => {
+  for (const width of [80, 100, 119, 150]) {
+    const p = allocate(responsive(DEFAULT, width), { ...box, width });
+    assert.ok(p.find((x) => x.pane === "code")!.width >= 32);
+    assert.equal(p.reduce((n, x) => n + x.width, 0) + 2, width);
+  }
+  assert.equal(responsive(DEFAULT, 150), DEFAULT);
+  const custom: Node = { pane: "code", flex: 1 };
+  assert.equal(responsive(custom, 80), custom);
 });

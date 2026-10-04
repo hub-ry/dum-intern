@@ -51,7 +51,7 @@ test("a rename puts both ends back", () => {
   const root = repo();
   const before = snapshot(root);
   renameSync(`${root}/util.py`, `${root}/helpers.py`);
-  execFileSync("git", ["add", "-A"], { cwd: root });
+  execFileSync("git", ["add", "-A"], { cwd: root, stdio: "ignore" });
   assert.deepEqual(restore(root, before), ["helpers.py", "util.py"]);
   assert.equal(read(root, "helpers.py"), null);
   assert.equal(read(root, "util.py"), "def f():\n    return 1\n");

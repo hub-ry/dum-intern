@@ -40,6 +40,19 @@ export const DEFAULT: Node = {
   ],
 };
 
+/** Shrink the default sidebars before they squeeze code out of an ordinary terminal. */
+export function responsive(layout: Node, columns: number): Node {
+  if (layout !== DEFAULT || columns >= 120) return layout;
+  return {
+    direction: "row",
+    children: [
+      { pane: "tree", size: columns < 100 ? 14 : 18 },
+      { pane: "code", flex: 1 },
+      { pane: "cast", size: columns < 100 ? 32 : 38 },
+    ],
+  };
+}
+
 export function read(root: string): Node {
   let raw: unknown;
   try {
