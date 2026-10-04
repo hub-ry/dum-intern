@@ -92,7 +92,13 @@ store.streaming(
 
 // Which screen to draw.
 const scene = process.argv[5] ?? "ask";
-if (scene === "plan") {
+if (scene === "startup-reply") {
+  store.show("nothing's unlocked yet", "Ask dum for something.");
+  void store.askQuestion("what do you want?", "", false);
+  store.submit("hello");
+  store.say("Hello. What would you like to build?");
+  void store.askNext();
+} else if (scene === "plan") {
   void store.proposePlan(
     planCard(
       "a guessing game that says higher or lower",

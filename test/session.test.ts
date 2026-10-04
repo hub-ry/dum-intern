@@ -246,3 +246,27 @@ test("a hole offers the course you can take now: its own, the rung under it, or 
   assert.equal(courseFor(t, { concept: "input", path: "a.py" }), "strings", "input needs strings first");
   assert.equal(courseFor(t, { concept: "change detection", path: "a.py", core: true }), "");
 });
+
+test("submitting a request dismisses welcome panels so replies are visible", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  s.show("nothing's unlocked yet", "Ask for something.");
+  const request = s.askQuestion("what do you want?", "", false);
+  s.submit("hello");
+  assert.equal(await request, "hello");
+  s.say("Hello. What would you like to build?");
+  assert.equal(s.getSnapshot().stage.kind, "code");
+  assert.ok(s.getSnapshot().transcript.some((e) => e.kind === "say" && e.text.startsWith("Hello.")));
+});
+
+test("execution failures show the SDK's errors instead of a generic subtype", () => {
+  assert.match(failure({ subtype: "error_during_execution", is_error: true, errors: ["Authentication failed"] })!, /Authentication failed/);
+});
+
+
+test("API retries name connection failures and service errors instead of thinking", async () => {
+  const { retryStatus } = await import("../src/session.ts");
+  assert.equal(retryStatus({ type: "system", subtype: "api_retry", error_status: null, retry_delay_ms: 2500 }), "Claude connection failed - retrying in 3s");
+  assert.equal(retryStatus({ type: "system", subtype: "api_retry", error_status: 529, error: "overloaded", retry_delay_ms: 1000 }), "Claude API 529 (overloaded) - retrying in 1s");
+  assert.equal(retryStatus({ type: "system", subtype: "init" }), null);
+});

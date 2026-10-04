@@ -858,6 +858,7 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
     store.streaming(block.name, path ? rel(repo.root, path) : "", body);
   }
 
+  store.working("starting Claude");
   const session = query({
     prompt: turns(),
     options: {
@@ -924,7 +925,14 @@ export async function run(request: string, repo: Repo, mode: Mode, store: Store)
   });
 
   for await (const msg of session as AsyncIterable<any>) {
+    const waiting = retryStatus(msg);
+    if (waiting) {
+      store.working(waiting);
+      store.note(waiting);
+      continue;
+    }
     if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
+      store.working("waiting for Claude's reply");
       remember(repo, msg.session_id);
       // Read off the session rather than assumed: the intern inherits the default model from
       // their settings, and its effort from their /effort.
@@ -1086,10 +1094,19 @@ export function erasesHole(root: string, name: string, args: Record<string, unkn
 /** Where dum-intern itself is installed, for telling someone what to update. */
 const HOME = resolve(new URL("..", import.meta.url).pathname);
 
+/** API retries are progress too: a connection failure must not look like thinking. */
+export function retryStatus(msg: { type?: string; subtype?: string; error_status?: number | null; error?: string; retry_delay_ms?: number }): string | null {
+  if (msg.type !== "system" || msg.subtype !== "api_retry") return null;
+  const why = msg.error_status == null ? "connection failed" : `API ${msg.error_status}${msg.error ? ` (${msg.error})` : ""}`;
+  const seconds = Math.ceil(Math.max(0, msg.retry_delay_ms ?? 0) / 1000);
+  return `Claude ${why} - retrying${seconds ? ` in ${seconds}s` : ""}`;
+}
+
 /** What to tell them when a turn ended on an error, or null if it did not. */
-export function failure(msg: { is_error?: boolean; subtype?: string; result?: unknown }): string | null {
+export function failure(msg: { is_error?: boolean; subtype?: string; result?: unknown; errors?: unknown }): string | null {
   if (!msg.is_error && (!msg.subtype || msg.subtype === "success")) return null;
-  const text = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : `the turn stopped (${msg.subtype})`;
+  const errors = Array.isArray(msg.errors) ? msg.errors.filter((e): e is string => typeof e === "string" && !!e.trim()).join("; ") : "";
+  const text = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : errors || `the turn stopped (${msg.subtype})`;
   if (/does not support this model|or newer is required/i.test(text)) {
     return `your default model is newer than the Claude Code dum runs on. update it with: cd ${HOME} && npm update @anthropic-ai/claude-agent-sdk`;
   }

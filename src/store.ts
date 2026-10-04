@@ -234,7 +234,14 @@ export class Store {
     this.waiting = null;
     this.answer(w.entryId, text);
     // They answered, so the intern is working again.
-    this.patch({ prompt: null, busy: true, status: "thinking" });
+    this.patch({
+      prompt: null,
+      busy: true,
+      status: "thinking",
+      ...(this.state.stage.kind === "info" || this.state.stage.kind === "reply"
+        ? { stage: this.state.middle === "shell" ? { kind: "shell" as const } : { kind: "code" as const } }
+        : {}),
+    });
     w.resolve(text);
   }
 
@@ -244,6 +251,7 @@ export class Store {
   say(text: string, lead = false) {
     this.append({ kind: "say", text, ...(lead ? { lead } : {}) });
     if (text.length > LONG_SAY || text.split("\n").length > 10) this.patch({ stage: { kind: "reply", text } });
+    else if (this.state.stage.kind === "info") this.closeBoard();
   }
 
   note(text: string) {
