@@ -165,6 +165,8 @@ dum --web rotate                        # a new link; the old one stops working
 dum --web off                           # take the web copy down
 ```
 
+Inside dum, `:web <server>` connects the tree you're using without ending the session. `:web` syncs edits from the page and shows its private link. In a practice session, it connects the separate practice tree. Edit on the page, then type `:web` again to bring those changes into dum.
+
 The page draws every track as a tree, its steps in columns by depth, each skill marked built, recognized, open or locked. Clicking an open skill adds it and clicking one I hold takes it off, under the same rules as `:skill`: a skill only goes on above its prerequisites, with the same warning about adding only what I can write without AI. Courses stay in the terminal, where the judge is.
 
 The link is the key. Anyone who has it can see and edit that tree, and nothing on the server lists or searches them, so it's a private link the way an unlisted doc is, not an account. The server sends `no-referrer`, `noindex` and `no-store`, loads nothing from anywhere else, and `dum --web rotate` replaces a link that got out.
@@ -274,7 +276,7 @@ Every rule that only lived in a prompt got skipped eventually.
 | `not yet` [name] | take back the skill just unlocked | anywhere |
 | `:skills` | the tracks and the tree | input |
 | `:boundary` | what AI may do in this repo | input |
-| `:web` | the private link to my tree on the web | input |
+| `:web` [server] | connect the tree, or sync page edits and show its private link | input |
 | `:skill` x, y [in lang] | add skills I can write without AI (`:skill -x` takes one off) | input |
 | `cd`, `gcc`, `echo`, `./a.out` ... | run in the shell, as typed | input |
 | `!` + command | anything else in the shell (`!` alone opens it) | input, file's `:` line |

@@ -270,3 +270,36 @@ test("API retries name connection failures and service errors instead of thinkin
   assert.equal(retryStatus({ type: "system", subtype: "api_retry", error_status: 529, error: "overloaded", retry_delay_ms: 1000 }), "Claude API 529 (overloaded) - retrying in 1s");
   assert.equal(retryStatus({ type: "system", subtype: "init" }), null);
 });
+
+test(":web connects from inside dum without consuming the pending answer", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  const servers: (string | undefined)[] = [];
+  s.onWeb = async (server) => { servers.push(server); return "https://trees.example.com/private"; };
+  const question = s.askQuestion("what do you want?", "", false);
+  s.submit(":web https://trees.example.com");
+  await Promise.resolve();
+  assert.deepEqual(servers, ["https://trees.example.com"]);
+  assert.equal(s.getSnapshot().prompt?.type, "question");
+  const panel = s.getSnapshot().stage;
+  assert.ok(panel.kind === "info" && panel.body.includes("/private"));
+  s.submit("a guessing game");
+  assert.equal(await question, "a guessing game");
+});
+
+test("a late web sync cannot cover a new conversation or leave a rejected promise", async () => {
+  const { Store } = await import("../src/store.ts");
+  const s = new Store("r", "understand");
+  let finish!: (link: string) => void;
+  s.onWeb = () => new Promise<string>((resolve) => { finish = resolve; });
+  s.command("web");
+  s.closeBoard();
+  finish("private link");
+  await Promise.resolve();
+  assert.equal(s.getSnapshot().stage.kind, "code");
+  s.onWeb = async () => { throw new Error("server unavailable"); };
+  s.command("web");
+  await Promise.resolve();
+  const panel = s.getSnapshot().stage;
+  assert.ok(panel.kind === "info" && panel.body.includes("server unavailable"));
+});

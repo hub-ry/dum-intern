@@ -321,11 +321,20 @@ async function main() {
   store.onSkills = () => {
     const t = skills.read();
     const lines = curriculum.view(t, langsToShow(t, repo.root));
-    return [...(lines.length ? lines : ["nothing unlocked yet."]), "● built   ◐ recognized   ○ course open   · locked", "course <skill> takes one."].join("\n");
+    return [...(lines.length ? lines : ["nothing unlocked yet."]), "● built   ◐ recognized   ○ course open   · locked", "course <skill> takes one.", "edit your tree on the webpage: :web"].join("\n");
   };
-  store.onWeb = () => {
-    const c = web.config();
-    return c ? `${web.pageUrl(c)}\n\nanyone with this link can see and edit your tree.\ndum --web rotate gives you a new one.` : "not on the web yet.\n\ndum --web <server> puts your tree there, at a private link.";
+  store.onWeb = async (server) => {
+    let conf = web.config();
+    if (server) {
+      if (conf) return `already linked: ${web.pageUrl(conf)}\n\nUse :web without a server to sync this tree. dum --web off disconnects it before choosing another server.`;
+      await web.link(server);
+      conf = web.config();
+    }
+    if (!conf) return "not on the web yet.\n\n:web <server> connects this tree and gives you its private edit link. The practice tree is separate from your usual tree.";
+    const result = await web.syncNow();
+    if (result.ok && result.pulled) store.setUnlocked(skills.read().skills.length);
+    const status = result.ok ? "synced - edits on the webpage are on this tree now." : `not synced: ${result.why}`;
+    return `${web.pageUrl(conf)}\n\n${status}\n\nEdit skills on the page, then type :web again to use those changes here.\nAnyone with this link can see and edit your tree. dum --web rotate gives you a new one.`;
   };
   // The web copy's edits come down in the background; the header catches up when they land.
   void web.syncNow().then((r) => r.ok && r.pulled && store.setUnlocked(skills.read().skills.length));

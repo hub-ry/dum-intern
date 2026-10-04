@@ -138,7 +138,7 @@ export class Store {
   onSkills: (() => string) | null = null;
 
   /** Set by the runner: what `:web` shows. */
-  onWeb: (() => string) | null = null;
+  onWeb: ((server?: string) => string | Promise<string>) | null = null;
 
   /** Set by the runner: what `:boundary` shows. */
   onBoundary: (() => string) | null = null;
@@ -179,6 +179,11 @@ export class Store {
   /** A person submitted a line. */
   submit(text: string) {
     // `:run`, `:log`, `:help`, `:skills`, `:boundary` - dum's commands, vim's ex line.
+    const web = /^:\s*web(?:\s+(\S+))?\s*$/i.exec(text.trim());
+    if (web) {
+      this.command("web", web[1]);
+      return;
+    }
     const ex = /^:\s*(run|log|help|skills|boundary|web)\s*$/i.exec(text.trim());
     if (ex) {
       this.command(ex[1]!.toLowerCase());
@@ -358,14 +363,14 @@ export class Store {
   }
 
   /** One of dum's `:` commands, from the input or the file's `:` line. */
-  command(name: string) {
+  command(name: string, argument?: string) {
 
     if (name === "run") return this.runFile();
 
     if (name === "log") return this.toggleTranscript();
     if (name === "skills") return this.show("your skill tree", this.onSkills?.() ?? "");
     if (name === "boundary") return this.show(`what AI may do in ${this.state.repo}`, this.onBoundary?.() ?? "");
-    if (name === "web") return this.show("your tree on the web", this.onWeb?.() ?? "");
+    if (name === "web") return void this.showWeb(argument);
     if (name === "help") {
       return this.show(
         "dum",
@@ -374,7 +379,8 @@ export class Store {
           "            (course x in rust, for another language)",
           ":skills     what's unlocked, what's open, what's locked",
           ":boundary   what AI may do in this repo",
-          ":web        the link to your tree on the web",
+          ":web        sync edits from the webpage and show its link",
+          "            (:web <server> connects this tree first)",
           "cd, gcc, echo, git, ./a.out ...   run in the shell as typed",
           "!command    anything else in the shell  (! alone opens it)",
           ":run        run the file you're looking at",
@@ -387,6 +393,18 @@ export class Store {
           "tab · ⇧tab      move around · file ⇄ shell",
         ].join("\n"),
       );
+    }
+  }
+
+  private async showWeb(server?: string) {
+    this.show("your tree on the web", server ? "connecting your tree…" : "syncing your tree…");
+    const panel = this.state.stage;
+    try {
+      const text = await this.onWeb?.(server) ?? "not linked yet. :web <server> connects your tree.";
+      // A late network response must not cover a conversation they've returned to.
+      if (this.state.stage === panel) this.show("your tree on the web", text);
+    } catch (err) {
+      if (this.state.stage === panel) this.show("your tree on the web", `couldn't connect: ${(err as Error).message}\n\nYour local tree is unchanged. Try :web again.`);
     }
   }
 

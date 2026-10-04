@@ -237,7 +237,7 @@ function hint(focus: Focus, typing: boolean, hasCode: boolean): string {
   if (focus === "stage" && hasCode) {
     return typing ? "esc: done typing   ctrl-s: save" : "tab: files   j/k   i: edit   :w   :run   / find   esc: back";
   }
-  return "tab: move · :skills · :help";
+  return "tab: move · :web · :skills · :help";
 }
 
 /** What typing does right now, shown grey in the empty input. */
