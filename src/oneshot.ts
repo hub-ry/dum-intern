@@ -1,49 +1,52 @@
-// One prompt, one reply, no conversation.
+// One prompt, one reply, no conversation, no tools.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
+import { assertSubscription, closed, start } from "./runtime.ts";
 
 export type Opts = {
+  /** One of runtime.MODELS; anything else is refused rather than tried. */
   model: string;
-  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  effort: EffortLevel;
   cwd?: string;
-  tools?: string[];
-  /** Called with a short line whenever a tool is used, for a progress line. */
-  onStatus?: (s: string) => void;
 };
 
-/** The final text, or "" on any failure - none of these jobs is worth a crash. */
-export async function oneShot(prompt: string, o: Opts): Promise<string> {
+export type Query = typeof query;
+
+const SYSTEM = "Answer the prompt you're given directly. You have no tools, files or web access in this conversation.";
+
+/**
+ * The final text. Route, login and model failures throw with a readable reason - a caller that
+ * would rather stay quiet catches them; nothing here falls back to another model.
+ */
+export async function oneShot(prompt: string, o: Opts, runQuery: Query = query): Promise<string> {
+  const session = await start(prompt, {
+      ...closed({ cwd: o.cwd ?? process.cwd(), systemPrompt: SYSTEM, model: o.model, effort: o.effort, maxTurns: 1 }),
+      persistSession: false,
+  }, runQuery);
   let out = "";
+  let started = false;
   try {
-    const session = query({
-      prompt,
-      options: {
-        model: o.model,
-        effort: o.effort,
-        ...(o.cwd ? { cwd: o.cwd } : {}),
-        tools: o.tools ?? [],
-        allowedTools: o.tools ?? [],
-        // Its whole job is this prompt. Their CLAUDE.md has no business here.
-        settingSources: [],
-        thinking: { type: "disabled" },
-      },
-    });
-    for await (const msg of session as AsyncIterable<any>) {
-      if (msg.type === "assistant") {
-        for (const b of msg.message?.content ?? []) {
-          if (b.type === "text" && b.text) out = b.text;
-          if (b.type === "tool_use") {
-            const p = b.input?.file_path ?? b.input?.pattern ?? b.input?.query ?? "";
-            if (p) o.onStatus?.(`${String(b.name).toLowerCase()} ${String(p).replace((o.cwd ?? "") + "/", "")}`);
-          }
-        }
+    for await (const msg of session) {
+      if (msg.type === "system" && msg.subtype === "init") {
+        assertSubscription(msg, []);
+        started = true;
       }
-      if (msg.type === "result" && typeof msg.result === "string" && msg.result) out = msg.result;
+      if (msg.type === "assistant") {
+        for (const block of msg.message.content) if (block.type === "text" && block.text) out = block.text;
+      }
+      if (msg.type === "result") {
+        if (!started) throw new Error("Claude answered without reporting its session setup");
+        if (msg.subtype !== "success") throw new Error(msg.errors.join("\n") || msg.subtype);
+        if (msg.is_error) throw new Error(msg.result || "Claude reported an error");
+        return msg.result || out;
+      }
     }
-  } catch {
-    return "";
+  } catch (err) {
+    throw new Error(`${o.model} couldn't answer: ${(err as Error).message}`);
+  } finally {
+    session.close();
   }
-  return out;
+  throw new Error(`${o.model} ended without an answer`);
 }
 
 /**

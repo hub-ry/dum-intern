@@ -5,6 +5,7 @@
   "type": "module",
   "bin": {
     "dum": "./bin/dum",
+    "dum-dev": "./bin/dum-dev",
     "dum-intern": "./bin/dum"
   },
   "engines": {
@@ -12,24 +13,19 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "preview": "tsx tools/preview.tsx",
     "practice": "bash tools/practice.sh",
+    "replay": "tsx tools/replay.ts",
     "web": "tsx src/web/server.ts",
-    "test": "tsx --test test/*.test.ts",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^22.0.0",
-    "@types/react": "^19.3.0",
     "typescript": "^5.6.0"
   },
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.280",
-    "@xterm/headless": "^6.0.0",
-    "ink": "^7.1.1",
-    "node-pty": "^1.1.0",
-    "react": "^19.3.0",
     "tsx": "^4.23.13",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { languages, tracks, parseTrack, status, frontier, progress, map, mapped, prereqs, canonical, curated, locate, view, bar } from "../src/curriculum.ts";
+import { languages, tracks, parseTrack, status, current, frontier, progress, map, mapped, prereqs, canonical, curated, locate } from "../src/curriculum.ts";
 import { unlock, key, type Tree, type Level } from "../src/skills.ts";
 
 process.env.DUM_HOME = mkdtempSync(`${tmpdir()}/dum-curriculum-`);
@@ -108,19 +108,16 @@ test("a broken track is no track, and the long form carries a course language", 
   });
 });
 
-test("the view draws each track as a bar, and marks built, recognized, open and locked", () => {
-  let t = has("go", ["printing"]);
-  t = unlock(t, { name: "variables", lang: "go", how: "explained", why: "" });
-  t = unlock(t, { name: "cobra", lang: "go", how: "explained", why: "" });
-  const lines = view(t, ["go"]);
-  assert.match(lines.find((l) => l.startsWith("go · basics"))!, /^go · basics  █░+  1\/\d+$/);
-  assert.ok(lines.includes("  ● printing"));
-  assert.ok(lines.includes("  ◐ variables  recognized"));
-  assert.ok(lines.some((l) => l.startsWith("  · ") && l.includes("needs")));
-  assert.ok(lines.some((l) => /^  · \d+ more locked$/.test(l)), "a long track doesn't list every locked skill");
-  assert.ok(lines.some((l) => l.startsWith("builder  ")), "the builder track always shows");
-  assert.ok(lines.includes("go · off the tracks") && lines.includes("  ◐ cobra  recognized"));
-  assert.equal(bar(1, 4, 8), "██░░░░░░");
+
+
+test("current status rechecks prerequisites under a skill already on the tree", () => {
+  const t = has("python", ["printing", "variables", "functions", "conditionals", "recursion"]);
+  assert.equal(status(t, "recursion", "python").state, "unlocked", "the note stands as written");
+  const st = current(t, "recursion", "python");
+  assert.ok(st.state === "locked");
+  assert.deepEqual(st.missing, ["return values"]);
+  assert.equal(current(has("python", ["printing", "variables"]), "variables", "python").state, "unlocked");
+  assert.equal(status(empty, "websockets", "python", "build", ["functions"]).state, "locked", "named prerequisites can stand in for an unmapped skill");
 });
 
 

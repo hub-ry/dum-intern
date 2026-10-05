@@ -1,6 +1,6 @@
-// Holes: where code you haven't unlocked goes, for you to type or explain.
+// Pending user implementation from older sessions. Markers are optional, not a write gate.
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { readState, writeState } from "./workspace.ts";
 
 export const MARKER = "TODO(dum)";
 
@@ -35,114 +35,16 @@ export function hole(text: string, concept = ""): number {
   return lines.findIndex((l) => l.includes(MARKER));
 }
 
-/**
- * The lines a hole spans: the marker, the comment lines under it, and the one stub line after
- * those.
- */
-export function span(lines: string[], at: number): [number, number] | null {
-  const line = lines[at];
-  if (line === undefined || !line.includes(MARKER)) return null;
-  const prefix = line.slice(0, line.indexOf(MARKER)).trim().replace(/\s+$/, "");
-  const lead = prefix.replace(/^\/\*+$/, "*") || "#";
-  let to = at;
-  while (to + 1 < lines.length && lines[to + 1]!.trim() && lines[to + 1]!.trimStart().startsWith(lead)) to++;
-  // The stub, unless the block runs into a blank line or the end.
-  if (to + 1 < lines.length && lines[to + 1]!.trim()) to++;
-  return [at, to];
-}
-
-/** Every hole in a file, as spans. For the pane, which paints them. */
-export function spans(text: string): [number, number][] {
-  const lines = text.split("\n");
-  const out: [number, number][] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const s = span(lines, i);
-    if (s) {
-      out.push(s);
-      i = s[1];
-    }
-  }
-  return out;
-}
-
-/** The file with a hole replaced by code, or null if there is no such hole. */
-export function fill(text: string, concept: string, code: string): string | null {
-  const lines = text.split("\n");
-  const at = hole(text, concept);
-  const s = at < 0 ? null : span(lines, at);
-  if (!s) return null;
-  const body = code.replace(/\n+$/, "").split("\n");
-  return [...lines.slice(0, s[0]), ...body, ...lines.slice(s[1] + 1)].join("\n");
-}
-
-/** How a language writes a line comment, by file extension. */
-const COMMENTS: Record<string, RegExp> = {};
-for (const ext of ["c", "h", "cc", "cpp", "cxx", "hpp", "hh", "js", "mjs", "cjs", "ts", "tsx", "jsx", "java", "go", "rs", "swift", "kt", "cs", "php", "scala", "zig", "dart"])
-  COMMENTS[ext] = /^(\/\/|\/\*|\*\/?)/;
-for (const ext of ["py", "sh", "bash", "zsh", "rb", "pl", "r", "makefile", "mk", "cmake"]) COMMENTS[ext] = /^#(?!include|define|if|else|endif|pragma|import)/;
-for (const ext of ["lua", "sql", "hs"]) COMMENTS[ext] = /^--/;
-
-function lang(path: string): string {
-  const base = path.split("/").pop()!.toLowerCase();
-  if (base === "makefile" || base === "gnumakefile") return "makefile";
-  return base.includes(".") ? base.split(".").pop()! : "";
-}
-
-/** Whether this is a source file the hole rule applies to. */
-export function gated(path: string): boolean {
-  return lang(path) in COMMENTS;
-}
-
-const CLOSER = /^[\s})\];,]+$/;
-
-/** Lines in `text` that are code outside any hole - what "code just appearing" looks like. */
-export function loose(text: string, path: string): string[] {
-  const comment = COMMENTS[lang(path)];
-  if (!comment) return [];
-  const lines = text.split("\n");
-  const inHole = new Set<number>();
-  for (const [a, b] of spans(text)) for (let i = a; i <= b; i++) inHole.add(i);
-  // A lone closer - the brace that ends main - isn't anybody's skill.
-  return lines.filter((l, i) => l.trim() && !inHole.has(i) && !comment.test(l.trim()) && !CLOSER.test(l));
-}
-
-/** The most comment lines in a row: a hole's description, a file header, anything. */
-export const MAX_COMMENT_RUN = 3;
-
-/** Runs of comment lines longer than MAX_COMMENT_RUN, by their first line. */
-export function wordy(text: string, path: string): string[] {
-  const comment = COMMENTS[lang(path)];
-  if (!comment) return [];
-  const out: string[] = [];
-  let run: string[] = [];
-  const end = () => {
-    if (run.length > MAX_COMMENT_RUN) out.push(run[0]!.trim());
-    run = [];
-  };
-  for (const l of text.split("\n")) {
-    // A TODO(dum) marker starts its own run: it's a heading, not prose.
-    if (l.includes(MARKER)) {
-      end();
-      continue;
-    }
-    if (l.trim() && comment.test(l.trim())) run.push(l);
-    else end();
-  }
-  end();
-  return out;
-}
-
 /** Holes whose file is exactly as the intern left it, or gone. */
 export function untouched(todos: Todo[], read: (path: string) => string | null): Todo[] {
   return todos.filter((t) => read(t.path) === t.before);
 }
 
-const file = (root: string) => `${root}/.dum/todos.json`;
 
-/** Open holes survive quitting, since typing them is usually the next session's work. */
+/** Read old handoffs without changing their files or claiming implementation evidence. */
 export function load(root: string): Todo[] {
   try {
-    const raw = JSON.parse(readFileSync(file(root), "utf8")) as { todos?: unknown };
+    const raw = JSON.parse(readState(root, "todos.json", 1024 * 1024) ?? "null") as { todos?: unknown };
     if (!Array.isArray(raw?.todos)) return [];
     return raw.todos.filter(
       (t): t is Todo =>
@@ -158,26 +60,5 @@ export function load(root: string): Todo[] {
 }
 
 export function save(root: string, todos: Todo[]) {
-  try {
-    mkdirSync(`${root}/.dum`, { recursive: true });
-    const tmp = `${file(root)}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ todos }, null, 2) + "\n");
-    renameSync(tmp, file(root));
-  } catch {
-    /* losing the list is bad, crashing over it is worse */
-  }
-}
-
-/** The turn that asks the intern to look at what you typed. */
-export function reviewTurn(todos: Todo[]): string {
-  return [
-    "They say they've typed their TODO(dum) holes. Read each file and judge the code they wrote there.",
-    "",
-    ...todos.map((t) => `- "${t.concept}" in ${t.path}: ${t.what}`),
-    "",
-    "For EACH one call check_todo. passed=true only if their code does what the hole said and would",
-    "actually work - style doesn't matter, and a leftover marker comment doesn't matter.",
-    "If it fails, feedback is a question that makes them run the failing case in their head, never",
-    "the fix. Do NOT edit their code and do not write the answer anywhere.",
-  ].join("\n");
+  writeState(root, "todos.json", JSON.stringify({ todos }, null, 2) + "\n");
 }

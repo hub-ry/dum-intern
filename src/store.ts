@@ -1,9 +1,6 @@
-// The seam between the agent and whatever is drawing it.
+// The seam between the agent and whatever is drawing it: one conversation, in order.
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, normalize } from "node:path";
-import type { Mode } from "./session.ts";
-import { runnerFor, isShellLine } from "./shell.ts";
+import type { Mode } from "./gate.ts";
 
 export type Outcome = "ran" | "held" | "refused";
 
@@ -24,7 +21,10 @@ export type CourseCard = {
   run: string;
 };
 
-/** One thing that happened, in order. The transcript is append-only. */
+/**
+ * One thing that happened, in order. The transcript is append-only. `fill` and empty `question`
+ * entries come from older sessions and stay readable history.
+ */
 export type Entry =
   | { kind: "say"; id: number; text: string; lead?: boolean }
   | { kind: "question"; id: number; question: string; why: string; answer: string | null }
@@ -34,46 +34,27 @@ export type Entry =
   | { kind: "course"; id: number; card: CourseCard; passed: boolean | null }
   | { kind: "tool"; id: number; name: string; detail: string; outcome: Outcome; why?: string }
   | { kind: "fill"; id: number; path: string; concept: string; code: string }
-  | { kind: "note"; id: number; text: string };
+  | { kind: "note"; id: number; text: string }
+  /** A focused, numbered piece of a file: shared by you, or read by dum. `from` is 1-based. */
+  | { kind: "excerpt"; id: number; path: string; from: number; text: string; by: "you" | "dum"; note?: string }
+  /** A change dum proposed or created. Proposals are artifacts for your editor, never applied. */
+  | { kind: "diff"; id: number; path: string; diff: string; outcome: "proposed" | "created" | "refused"; artifact?: string }
+  /** Something you said that wasn't the answer to a question. */
+  | { kind: "user"; id: number; text: string }
+  /** A read-only command dum ran, and what it printed. */
+  | { kind: "result"; id: number; label: string; output: string; code: number };
 
 /** What the agent is currently blocked on, if anything. */
 export type Prompt =
-  /** `intern`: the intern asking, which takes the right side back from a help-type board. */
+  /** `intern`: dum asking, rather than the app asking for a request or a permission. */
   | { type: "question"; question: string; why: string; intern?: boolean }
   | { type: "plan"; plan: string }
   | { type: "course"; card: CourseCard }
   | { type: "next" }
   | null;
 
-/** The file currently under the intern's hands. */
-export type CodeView = {
-  tool: string;
-  path: string;
-  body: string;
-  live: boolean;
-  outcome: Outcome | null;
-  /** What refused or held it, when it wasn't the usual reason. */
-  why?: string;
-  /** True once `body` is the file as it is on disk, which is the only thing worth editing. */
-  onDisk: boolean;
-  /** The line to land on when the editor first shows this. */
-  at?: number;
-  /**
-   * Set when something asks to land on `at` even if the buffer already exists - handing you a
-   * hole in a file the intern just wrote.
-   */
-  jump?: number;
-};
-
-/** What the wide pane is showing. */
-export type Stage =
-  | { kind: "code" }
-  | { kind: "plan"; plan: string }
-  | { kind: "course"; card: CourseCard }
-  | { kind: "info"; title: string; body: string }
-  | { kind: "reply"; text: string }
-  | { kind: "shell" }
-  | { kind: "transcript" };
+/** What is up besides the conversation: a panel to read, or nothing. */
+export type Stage = { kind: "info"; title: string; body: string } | { kind: "conversation" };
 
 export type State = {
   repo: string;
@@ -82,69 +63,68 @@ export type State = {
   mode: Mode;
   transcript: Entry[];
   prompt: Prompt;
-  /** True while the intern is working rather than waiting on a person. */
+  /** True while dum is working rather than waiting on a person. */
   busy: boolean;
   status: string;
-  code: CodeView | null;
   stage: Stage;
-  /** How many skills are unlocked. */
+  /** How many skills are on the tree. */
   unlocked: number;
-  /** Holes left for you, each one a skill to unlock. */
-  /** `course`: the course worth offering for it right now, "" for none. */
-  todos: { concept: string; path: string; course: string }[];
-  /** Live comments on lines of files, by path: shown beside the code, never saved. */
-  pins: Record<string, { line: number; text: string }[]>;
-  /** A program running in the shell that your input goes to, by name. "" when none. */
-  running: string;
-  /** What the middle shows: code only - the file or the shell. */
-  middle: "file" | "shell";
-  /** The model behind each voice and the effort it runs at, as the SDK reported them. */
+  /** The model behind each voice and the effort it runs at. */
   models: { intern: Voice; wizard: Voice };
 };
 
-/** Past this, what dum says also opens as a board. The thread scrolls, so only a real wall. */
-const LONG_SAY = 600;
+/** A command whose work happens elsewhere and may take a while. */
+type Async = (arg: string) => Promise<string | void>;
 
-const isBoardKind = (s: Stage) => s.kind !== "code" && s.kind !== "shell";
-
-/** Words that are always for dum, even typed while the shell is showing. */
-const DUM_WORDS = /^(done|y|yes|quit|skip|not yet.*|:?course .*|exit)[.!]*$/i;
+const CONVERSATION: Stage = { kind: "conversation" };
 
 export class Store {
   private state: State;
   private listeners = new Set<() => void>();
   private nextId = 1;
-  private jumps = 0;
 
-  /** The promise the agent is parked on, and the entry to write the reply into. */
-  private waiting: { resolve: (v: any) => void; entryId: number } | null = null;
+  /**
+   * Prompts parked on a person, innermost last. A command can ask for permission while dum's own
+   * question is open; answering it gives the outer prompt back.
+   */
+  private waits: { resolve: (v: string) => void; entryId: number | null; prompt: Prompt }[] = [];
 
-  /** Anything typed before the agent got around to asking. */
+  /** Lines typed while dum was working. Only a "what next" takes them: never an approval. */
   private typedAhead: string[] = [];
 
-  /** Set by the runner: `!cmd` - run it in a real shell. "" for an interactive shell. */
-  onShell: ((cmd: string) => void) | null = null;
+  /** Lines typed during a self change, for the prompt that was showing before it. */
+  private queued: string[] = [];
+  private selfChanging = false;
+  /** The slow command running, if any. One at a time, so a permission question is unambiguous. */
+  private running = "";
+  private runningPrompt: Prompt = null;
 
-  /** Set by the runner: add a skill they can write without AI, or take one off. */
   onSkillEdit: ((action: "add" | "forget", name: string, lang: string) => void) | null = null;
-
-  /** Set by the renderer: run a `:` command on the open file. */
-  onEditorCommand: ((cmd: string) => void) | null = null;
-
-  /** Set by the runner: told about every file they save. */
-  onSaved: ((path: string) => void) | null = null;
-
-  /** Set by the runner: what `:skills` shows. */
-  onSkills: (() => string) | null = null;
-
-  /** Set by the runner: what `:web` shows. */
+  /** What `:tree [language|all]` and `:skills` show. */
+  onSkills: ((arg: string) => string) | null = null;
+  onContext: (() => string) | null = null;
+  onMemory: (() => string) | null = null;
+  onRemember: ((note: string) => void) | null = null;
+  onSelfChange: ((request: string) => Promise<string>) | null = null;
+  onRestart: (() => void) | null = null;
   onWeb: ((server?: string) => string | Promise<string>) | null = null;
-
-  /** Set by the runner: what `:boundary` shows. */
   onBoundary: (() => string) | null = null;
-
-  /** Set by the runner: "not yet", with the skill named or "" for the last one checked off. */
+  /** What `:evidence` shows: the project's ledger of what each skill on the tree rests on. */
+  onEvidence: (() => string) | null = null;
+  /** "not yet", with the skill named or "" for the last one recorded. True if it took one back. */
   onNotYet: ((name: string) => boolean) | null = null;
+  /** `:inspect path[:a-b]` and `:share path`: you hand dum a saved file. */
+  onInspect: Async | null = null;
+  /** `:changes [path]`: you hand dum what changed in the working tree. */
+  onChanges: Async | null = null;
+  onPractice: Async | null = null;
+  onSubmit: Async | null = null;
+  /** `:run status|diff|log`: dum's read-only git catalog. Never a shell. */
+  onRun: Async | null = null;
+  /** Set while a Claude turn is in flight: ctrl-c stops that turn. */
+  onInterrupt: (() => void) | null = null;
+  /** Set by a renderer that can reprint the whole conversation itself. */
+  onLog: (() => void) | null = null;
 
   constructor(repo: string, mode: Mode, root = "", files: string[] = []) {
     this.state = {
@@ -156,13 +136,8 @@ export class Store {
       prompt: null,
       busy: false,
       status: "",
-      code: null,
-      stage: { kind: "code" },
+      stage: CONVERSATION,
       unlocked: 0,
-      todos: [],
-      middle: "file",
-      running: "",
-      pins: {},
       models: { intern: { model: "", effort: "" }, wizard: { model: "", effort: "" } },
     };
   }
@@ -171,83 +146,153 @@ export class Store {
 
   getSnapshot = (): State => this.state;
 
+  /** A local command suspends its original input; a nested permission remains answerable. */
+  get inputReady(): boolean {
+    return !!this.state.prompt && (!this.running || this.state.prompt !== this.runningPrompt);
+  }
+
   subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn);
     return () => void this.listeners.delete(fn);
   };
 
-  /** A person submitted a line. */
+  /** Old entries are history only. Pending questions and plans aren't revived as approval. */
+  restoreTranscript(entries: Entry[]) {
+    this.nextId = Math.max(0, ...entries.map((e) => e.id)) + 1;
+    this.patch({ transcript: [...entries] });
+  }
+
+  /** Keep the pending learning question intact while the developer works on dum. */
+  async changeSelf(request: string): Promise<string> {
+    if (!this.onSelfChange) return "self changes are available in dum-dev. Start it with dum-dev or dum --dev.";
+    if (this.selfChanging) return "a self change is already running";
+    if (!request.trim()) return ":self <request> changes dum itself";
+    this.append({ kind: "question", question: "change dum itself", why: "", answer: request });
+    const { prompt, busy, status, stage } = this.state;
+    this.selfChanging = true;
+    this.patch({ prompt: null, busy: true, status: "self: starting" });
+    let reply: string;
+    try {
+      reply = await this.onSelfChange(request);
+    } catch (err) {
+      reply = `self change stopped: ${(err as Error).message}`;
+    } finally {
+      this.selfChanging = false;
+      this.patch({ prompt, busy, status, stage });
+    }
+    this.say(reply);
+    // What was typed during maintenance answers the prompt that was showing before it.
+    for (const line of this.queued.splice(0)) this.submit(line);
+    return reply;
+  }
+
+  /** A person submitted a line. Commands are handled here and never reach dum as an answer. */
   submit(text: string) {
-    // `:run`, `:log`, `:help`, `:skills`, `:boundary` - dum's commands, vim's ex line.
-    const web = /^:\s*web(?:\s+(\S+))?\s*$/i.exec(text.trim());
-    if (web) {
-      this.command("web", web[1]);
+    const line = text.trim();
+    const self = /^:\s*self(?:\s+([\s\S]*))?$/i.exec(line);
+    if (self) {
+      if (this.state.busy && !this.selfChanging) {
+        this.note("dum is working - use :self when it asks for your next input");
+        return;
+      }
+      void this.changeSelf(self[1] ?? "").then((reply) => {
+        if (!this.onSelfChange || !self[1] || reply === "a self change is already running") this.note(reply);
+      });
       return;
     }
-    const ex = /^:\s*(run|log|help|skills|boundary|web)\s*$/i.exec(text.trim());
-    if (ex) {
-      this.command(ex[1]!.toLowerCase());
+    if (/^:\s*restart\s*$/i.test(line)) {
+      if (!this.onRestart) this.note(":restart is available in dum-dev");
+      else if (this.state.busy || this.selfChanging || this.running) this.note("wait for dum to finish before restarting");
+      else this.onRestart();
       return;
     }
-    // `:skill <name> [in <lang>]` and `:forget <name>`: their tree, edited by them.
-    // `:skill x [in lang]` adds; `:skill -x` takes it off.
-    const off = /^:\s*skill\s+-\s*(.+)$/i.exec(text.trim());
-    if (off) {
-      this.onSkillEdit?.("forget", off[1]!.trim(), "");
+    const cmd = parseCommand(line);
+    if (cmd) {
+      this.command(cmd.name, cmd.arg);
       return;
     }
-    const sk = /^:\s*skill\s+(.+?)(?:\s+in\s+([\w+#.]+))?\s*$/i.exec(text.trim());
-    if (sk) {
-      this.onSkillEdit?.("add", sk[1]!.trim(), sk[2] ?? "");
+    if (line.startsWith("!")) {
+      this.note("dum doesn't run shell commands. Run builds and programs in your own terminal; :run status, :run diff or :run log shows git state.");
       return;
     }
-    // Editor commands meant for the open file: never a message to the intern.
-    const ed = /^:\s*(w|wq|x|q!?|e!?|\d+|\$)\s*$/.exec(text.trim());
-    if (ed && this.state.code?.onDisk && this.state.stage.kind === "code") {
-      this.onEditorCommand?.(ed[1]!);
+    if (this.selfChanging) {
+      this.queued.push(text);
       return;
     }
-    // A program running in the shell (./guess waiting for a number) takes the line.
-    if (this.onProgram?.(text)) return;
-    // Looking at the shell is being in the terminal: the line runs there - except
-    // dum's own words, which reach dum from anywhere.
-    if (this.inShell() && this.onShell && !DUM_WORDS.test(text.trim())) {
-      this.onShell(text.trim());
-      return;
-    }
-    // cd, gcc, echo and friends run in the shell without a `!`.
-    if (this.onShell && isShellLine(text)) {
-      this.onShell(text.trim());
-      return;
-    }
-    // `!` is a shell, same as vim and Claude Code. Never an answer either.
-    if (text.startsWith("!") && this.onShell) {
-      this.onShell(text.slice(1).trim());
-      return;
-    }
-    // Same rule as `?`: taking a skill back is not an answer to anything, and must never cost
-    // the turn or reach the intern as one.
-    const nope = /^not yet\b[\s:,-]*(.*)$/i.exec(text.trim());
-    // Returns false when there is nothing to take back, and then it was just an answer: "have
-    // you added tests?" "not yet".
+    // Taking a skill back is not an answer to anything - unless there is nothing to take back,
+    // and then it was just an answer: "have you added tests?" "not yet".
+    const nope = /^not yet\b[\s:,-]*(.*)$/i.exec(line);
     if (nope && this.onNotYet?.(nope[1]!.trim())) return;
-    const w = this.waiting;
+    if (this.running && this.state.prompt === this.runningPrompt) {
+      this.note(`wait for :${this.running} to finish - your answer wasn't used`);
+      return;
+    }
+    const w = this.waits.pop();
     if (!w) {
+      // Recorded now, in the order it was said; the next "what next" takes it without a copy.
+      this.append({ kind: "user", text });
       this.typedAhead.push(text);
       return;
     }
-    this.waiting = null;
-    this.answer(w.entryId, text);
-    // They answered, so the intern is working again.
-    this.patch({
-      prompt: null,
-      busy: true,
-      status: "thinking",
-      ...(this.state.stage.kind === "info" || this.state.stage.kind === "reply"
-        ? { stage: this.state.middle === "shell" ? { kind: "shell" as const } : { kind: "code" as const } }
-        : {}),
-    });
+    this.record(w.entryId, text);
+    const outer = this.waits[this.waits.length - 1];
+    this.patch(
+      outer
+        ? { prompt: outer.prompt, busy: false, status: "" }
+        : { prompt: null, busy: true, status: "thinking", ...(this.state.stage.kind === "info" ? { stage: CONVERSATION } : {}) },
+    );
     w.resolve(text);
+  }
+
+  /** One of dum's `:` commands, from the input or from the runner at startup. */
+  command(name: string, argument = "") {
+    const arg = argument.trim();
+    switch (name) {
+      case "tree":
+      case "skills":
+        return this.show("your skill tree", this.onSkills?.(arg) ?? "");
+      case "log":
+        if (this.onLog) return this.onLog();
+        return this.show("conversation so far", this.logText());
+      case "context":
+        return this.show("personal context", this.onContext?.() ?? "no personal context loaded.");
+      case "memory":
+        try { return this.show("session memory", this.onMemory?.() ?? "no session memory loaded."); }
+        catch (err) { return this.show("session memory", (err as Error).message); }
+      case "boundary":
+        return this.show(`what AI may do in ${this.state.repo}`, this.onBoundary?.() ?? "");
+      case "evidence":
+        return this.show("what your tree rests on", this.onEvidence?.() ?? "no evidence recorded here yet.");
+      case "web":
+        return void this.showWeb(arg || undefined);
+      case "help":
+        return this.show("dum", this.help());
+      case "remember":
+        if (!arg) return this.note(":remember <note> saves a note for the next session");
+        try { this.onRemember?.(arg); } catch (err) { this.note((err as Error).message); }
+        return;
+      case "skill": {
+        // `:skill x [in lang]` adds to their tree; `:skill -x` takes it off. Their tree, their edit.
+        const off = /^-\s*(.+)$/.exec(arg);
+        if (off) return this.onSkillEdit?.("forget", off[1]!.trim(), "");
+        const add = /^(.+?)(?:\s+in\s+([\w+#.]+))?$/i.exec(arg);
+        if (add) return this.onSkillEdit?.("add", add[1]!.trim(), add[2] ?? "");
+        return this.note(":skill <name> [in <language>] adds a skill; :skill -<name> takes it off");
+      }
+      case "inspect":
+      case "share":
+        if (!arg) return this.note(`:${name} <path>[:start-end] shows dum a saved file`);
+        return void this.slow(name, this.onInspect, arg);
+      case "changes":
+        return void this.slow(name, this.onChanges, arg);
+      case "practice":
+        return void this.slow(name, this.onPractice, arg);
+      case "submit":
+        if (!arg) return this.note(":submit <skill> [in <language>] <path> --unaided hands in your own implementation");
+        return void this.slow(name, this.onSubmit, arg);
+      case "run":
+        return void this.slow(name, this.onRun, arg || "status");
+    }
   }
 
   // -- agent side ---------------------------------------------------------
@@ -255,144 +300,172 @@ export class Store {
   /** `lead` marks the line that matters this turn - a verdict - over any chatter after it. */
   say(text: string, lead = false) {
     this.append({ kind: "say", text, ...(lead ? { lead } : {}) });
-    if (text.length > LONG_SAY || text.split("\n").length > 10) this.patch({ stage: { kind: "reply", text } });
-    else if (this.state.stage.kind === "info") this.closeBoard();
+    this.closeBoard();
   }
 
   note(text: string) {
     this.append({ kind: "note", text });
   }
 
+  /** The wizard's line. */
   quip(text: string) {
     this.append({ kind: "quip", text });
   }
 
-  /** Busy on something that isn't the intern: putting a course together, checking a gap. */
+  /** Busy on something that isn't a person. A prompt someone is answering stays up. */
   working(status: string) {
-    this.patch({ prompt: null, busy: true, status });
+    if (this.waits.length) this.patch({ status });
+    else this.patch({ prompt: null, busy: true, status });
   }
 
   /** `why` says what refused it, when it wasn't the usual reason for that outcome. */
   toolEvent(name: string, detail: string, outcome: Outcome, why?: string) {
     this.append({ kind: "tool", name, detail, outcome, ...(why ? { why } : {}) });
-    // The gate has now ruled on the file the pane has been watching arrive.
-    const code = this.state.code;
-    if (code && code.path === detail) {
-      this.patch({ code: { ...code, live: false, outcome, ...(why ? { why } : {}) } });
-    }
   }
 
-  /** More of a tool call's file body has arrived. */
-  streaming(tool: string, path: string, body: string) {
-    const code = this.state.code;
-    if (code?.live && code.tool === tool && code.body === body && code.path === path) return;
-    // Writing pulls the stage back to the code: whatever you were reading, the intern putting a
-    // file on screen is the more urgent thing.
-    this.patch({ code: { tool, path, body, live: true, outcome: null, onDisk: false }, stage: { kind: "code" } });
+  excerpt(path: string, from: number, text: string, by: "you" | "dum" = "you", note?: string) {
+    this.append({ kind: "excerpt", path, from, text, by, ...(note ? { note } : {}) });
   }
 
-  /** A write the gate allowed has finished. */
-  landed(path: string) {
-    const code = this.state.code;
-    if (!code || code.path !== path || code.outcome !== "ran" || code.onDisk) return;
-    let file: string;
-    try {
-      file = readFileSync(`${this.state.root}/${path}`, "utf8");
-    } catch {
-      return;
-    }
-    const hit = code.body ? file.indexOf(code.body) : -1;
-    const at = hit >= 0 ? file.slice(0, hit).split("\n").length - 1 : 0;
-    this.patch({ code: { ...code, body: file, onDisk: true, at } });
+  diff(path: string, diff: string, outcome: "proposed" | "created" | "refused", artifact?: string) {
+    this.append({ kind: "diff", path, diff, outcome, ...(artifact ? { artifact } : {}) });
   }
 
-  /** Write a file you edited in the pane. */
-  saveFile(path: string, text: string): string | null {
-    if (!this.state.root) return "no repo to write into";
-    if (isAbsolute(path) || normalize(path).startsWith("..")) return `${path} is outside ${this.state.repo}`;
-    try {
-      writeFileSync(`${this.state.root}/${path}`, text);
-    } catch (err) {
-      return (err as Error).message;
-    }
-    this.note(`you wrote ${path}`);
-    this.onSaved?.(path);
-    const code = this.state.code;
-    if (code && code.path === path) this.patch({ code: { ...code, body: text, onDisk: true } });
-    return null;
+  result(label: string, output: string, code: number) {
+    this.append({ kind: "result", label, output, code });
   }
 
-  /** Show a file that is not being written. */
-  openFile(path: string, at?: number) {
-    let body: string;
-    let onDisk = true;
-    try {
-      body = readFileSync(`${this.state.root}/${path}`, "utf8");
-    } catch (err) {
-      body = `could not read ${path}\n${(err as Error).message}`;
-      onDisk = false;
-    }
-    // A course's lesson stays up beside its scratch file: that's what you type the gap against.
-    const keep = this.state.stage.kind === "course";
-    this.patch({
-      code: { tool: "open", path, body, live: false, outcome: null, onDisk, ...(at !== undefined ? { at, jump: ++this.jumps } : {}) },
-      ...(keep ? { middle: "file" as const } : { stage: { kind: "code" as const } }),
-    });
-  }
-
-  /** Swap the stage to the transcript and back. */
-  toggleTranscript() {
-    this.patch({
-      stage: this.state.stage.kind === "transcript" ? { kind: "code" } : { kind: "transcript" },
-    });
-  }
-
-  /** Something for you to read that isn't anyone speaking - help, a hint. */
+  /** Something for you to read that isn't anyone speaking - help, the tree. */
   show(title: string, body: string) {
     this.patch({ stage: { kind: "info", title, body } });
   }
 
-  /** The skill tree changed. */
+  closeBoard() {
+    if (this.state.stage.kind !== "conversation") this.patch({ stage: CONVERSATION });
+  }
+
   setUnlocked(unlocked: number) {
     if (this.state.unlocked !== unlocked) this.patch({ unlocked });
   }
 
-  /** The shell page. Renderers that have one set `onShell` to type into it. */
-  openShell() {
-    if (this.state.stage.kind !== "shell") this.patch({ stage: { kind: "shell" } });
+  /** Which model is behind a voice. */
+  setModel(who: "intern" | "wizard", model: string, effort = "") {
+    const was = this.state.models[who];
+    // An init with no effort must not wipe one already read back.
+    const next = { model, effort: effort || (was.model === model ? was.effort : "") };
+    if (was.model === next.model && was.effort === next.effort) return;
+    this.patch({ models: { ...this.state.models, [who]: next } });
   }
 
-  /** One of dum's `:` commands, from the input or the file's `:` line. */
-  command(name: string, argument?: string) {
+  /**
+   * Ask one question and park until it is answered. Only a line typed after it shows answers
+   * it: a permission is never granted by something said before the question existed.
+   */
+  askQuestion(question: string, why = "", intern = true): Promise<string> {
+    const id = this.append({ kind: "question", question, why, answer: null });
+    return this.park({ type: "question", question, why, intern }, id, false);
+  }
 
-    if (name === "run") return this.runFile();
+  /** The `what next` prompt between turns. Takes a line typed while dum was working. */
+  askNext(): Promise<string> {
+    return this.park({ type: "next" }, null, true);
+  }
 
-    if (name === "log") return this.toggleTranscript();
-    if (name === "skills") return this.show("your skill tree", this.onSkills?.() ?? "");
-    if (name === "boundary") return this.show(`what AI may do in ${this.state.repo}`, this.onBoundary?.() ?? "");
-    if (name === "web") return void this.showWeb(argument);
-    if (name === "help") {
-      return this.show(
-        "dum",
-        [
-          "course x    unlock a skill: a short course with dum and the wizard",
-          "            (course x in rust, for another language)",
-          ":skills     what's unlocked, what's open, what's locked",
-          ":boundary   what AI may do in this repo",
-          ":web        sync edits from the webpage and show its link",
-          "            (:web <server> connects this tree first)",
-          "cd, gcc, echo, git, ./a.out ...   run in the shell as typed",
-          "!command    anything else in the shell  (! alone opens it)",
-          ":run        run the file you're looking at",
-          ":skill x    add a skill you can write without AI",
-          "            (:skill -x takes it off)",
-          ":log        everything said so far",
-          "",
-          this.state.mode === "anti-vibe" ? "your turn       explain it here" : "your turn       type it, :w, then done",
-          "not yet         undo the skill just unlocked",
-          "tab · ⇧tab      move around · file ⇄ shell",
-        ].join("\n"),
-      );
+  /** Show the plan and park for the reply: y approves; anything else doesn't. */
+  async proposePlan(plan: string): Promise<string> {
+    const id = this.append({ kind: "plan", plan, approved: null });
+    const reply = (await this.park({ type: "plan", plan }, null, false)).trim();
+    const approved = /^(y|yes)$/i.test(reply);
+    const paused = /^:?\s*(course|learn|unlock)\s+\S/i.test(reply);
+    this.patch({
+      transcript: this.state.transcript.map((e) =>
+        e.id === id && e.kind === "plan" ? { ...e, ...(paused ? { paused } : { approved }) } : e,
+      ),
+    });
+    return reply;
+  }
+
+  /** An optional course starts: its card goes in the record. */
+  course(card: CourseCard) {
+    this.append({ kind: "course", card, passed: null });
+    if (card.wizard) this.quip(card.wizard);
+  }
+
+  /** Park inside a course: done, a question, or quit. */
+  askCourse(card: CourseCard): Promise<string> {
+    return this.park({ type: "course", card }, null, false);
+  }
+
+  endCourse(card: CourseCard, passed: boolean) {
+    this.patch({
+      transcript: this.state.transcript.map((e) => (e.kind === "course" && e.card === card ? { ...e, passed } : e)),
+    });
+  }
+
+  /** The conversation as plain text, for `:log` when the renderer can't reprint it. */
+  logText(): string {
+    const out: string[] = [];
+    for (const e of this.state.transcript) {
+      if (e.kind === "say") out.push(`dum: ${e.text}`);
+      else if (e.kind === "question") {
+        if (e.question) out.push(`dum asks: ${e.question}`);
+        if (e.answer !== null) out.push(`you: ${e.answer}`);
+      } else if (e.kind === "user") out.push(`you: ${e.text}`);
+      else if (e.kind === "quip") out.push(`wizard: ${e.text}`);
+      else if (e.kind === "plan") out.push(`plan (${e.paused ? "paused" : e.approved === null ? "pending" : e.approved ? "approved" : "not approved"}):\n${e.plan}`);
+      else if (e.kind === "course") out.push(`course: ${e.card.skill}${e.card.lang ? ` (${e.card.lang})` : ""}${e.passed === null ? "" : e.passed ? " - passed" : " - left"}`);
+      else if (e.kind === "tool") out.push(`· ${e.name} ${e.detail} - ${e.outcome}${e.why ? `: ${e.why}` : ""}`);
+      else if (e.kind === "fill") out.push(`· filled ${e.concept} in ${e.path}`);
+      else if (e.kind === "note") out.push(`· ${e.text}`);
+      else if (e.kind === "excerpt") out.push(`${e.by === "you" ? "you shared" : "dum read"} ${e.path}:${e.from}${e.note ? ` (${e.note})` : ""}\n${e.text}`);
+      else if (e.kind === "diff") out.push(`${e.outcome} ${e.path}${e.artifact ? ` -> ${e.artifact}` : ""}\n${e.diff}`);
+      else if (e.kind === "result") out.push(`$ ${e.label}  (exit ${e.code})\n${e.output}`);
+    }
+    return out.join("\n") || "nothing said yet.";
+  }
+
+  // -- internals ----------------------------------------------------------
+
+  private help(): string {
+    return [
+      "talk to dum     ask for something, explain a decision, answer its questions",
+      ":tree           your skill tree: tracks, levels, what's open next (:skills too)",
+      ":inspect f[:a-b] show dum a file you saved in your editor",
+      ":share f        show dum one file outside this project (asks first)",
+      ":changes [f]    show dum what changed in the working tree",
+      ":practice [x]   practice ideas for what you could learn next",
+      ":submit x f --unaided   hand in your own implementation of skill x",
+      ":run status|diff|log    read-only git, shown to dum too",
+      "course x        an optional short course (course x in rust)",
+      "not yet         undo the skill just recorded",
+      ":skill x        add a skill you have (:skill -x takes it off)",
+      ":context        the local background used for suggestions",
+      ":memory         notes remembered for this project (:remember x adds one)",
+      ...(this.onSelfChange ? [":self x         change dum's own checkout", ":restart        load saved changes and restore this session"] : []),
+      ":evidence       what each skill recorded here rests on",
+      ":boundary       what AI may do in this repo",
+      ":web            sync the tree with its webpage (:web <server> links it)",
+      ":log            everything said so far",
+      "",
+      "dum proposes changes as diffs you apply in your editor; it never overwrites your files.",
+    ].join("\n");
+  }
+
+  private async slow(name: string, fn: Async | null, arg: string) {
+    if (!fn) return this.note(`:${name} works once dum has started in this repo`);
+    if (this.running) return this.note(`wait for :${this.running} to finish`);
+    this.running = name;
+    this.runningPrompt = this.state.prompt;
+    this.patch({ status: `:${name}` });
+    try {
+      await fn(arg);
+    } catch (err) {
+      this.note(`:${name} didn't work: ${(err as Error).message}`);
+    } finally {
+      this.running = "";
+      this.runningPrompt = null;
+      // Back at the prompt it was typed at: whatever the command was busy with is over.
+      this.patch({ status: "" });
     }
   }
 
@@ -408,126 +481,27 @@ export class Store {
     }
   }
 
-  /** :run - run the file on screen. */
-  runFile() {
-    const path = this.state.code?.onDisk ? this.state.code.path : "";
-    if (!path) return this.show(":run", "open a file first - :run runs the one on screen.");
-    const how = runnerFor(path);
-    if (!how) return this.show(":run", `no runner for ${path}. !<command> runs anything.`);
-    if ("hint" in how) return this.show(":run", how.hint);
-    this.onShell?.(how.cmd);
-  }
-
-  /** Pin a live comment to a line (1-based) and bring that line into view. */
-  pin(path: string, line: number, text: string) {
-    const here = (this.state.pins[path] ?? []).filter((p) => p.line !== line);
-    this.patch({ pins: { ...this.state.pins, [path]: [...here, { line, text }] } });
-    if (this.state.code?.path !== path || this.state.stage.kind !== "code") this.openFile(path, line - 1);
-  }
-
-  /** Clear every live comment: a new turn starts clean. */
-  unpin() {
-    if (Object.keys(this.state.pins).length) this.patch({ pins: {} });
-  }
-
-  /** A hole being filled, one frame of it. */
-  typing(path: string, body: string, at: number) {
-    const was = this.state.code;
-    const same = was?.tool === "fill" && was.path === path;
-    this.patch({
-      code: { tool: "fill", path, body, live: false, outcome: null, onDisk: false, at, jump: same ? was.jump : ++this.jumps },
-      stage: { kind: "code" },
-    });
-  }
-
-  /** A hole was filled from a skill they hold. The code goes in the record too. */
-  filled(path: string, concept: string, code: string) {
-    this.append({ kind: "fill", path, concept, code });
-  }
-
-  /** Which model is behind a voice. */
-  setModel(who: "intern" | "wizard", model: string, effort = "") {
-    const was = this.state.models[who];
-    // An init with no effort must not wipe one already read back.
-    const next = { model, effort: effort || (was.model === model ? was.effort : "") };
-    if (was.model === next.model && was.effort === next.effort) return;
-    this.patch({ models: { ...this.state.models, [who]: next } });
-  }
-
-  /** The holes left for you to type changed. */
-  setTodos(todos: { concept: string; path: string; course: string }[]) {
-    this.patch({ todos });
-  }
-
-  /** Ask one question and park until it is answered. */
-  askQuestion(question: string, why: string, intern = true): Promise<string> {
-    const id = this.append({ kind: "question", question, why, answer: null });
-    return this.park({ type: "question", question, why, intern }, id);
-  }
-
-  /** The `what next` prompt between turns. Same channel, no question text. */
-  askNext(): Promise<string> {
-    const id = this.append({ kind: "question", question: "", why: "", answer: null });
-    return this.park({ type: "next" }, id);
-  }
-
-  /** Show the plan and park for the reply: y, a course to take first, or what to change. */
-  async proposePlan(plan: string): Promise<string> {
-    const id = this.append({ kind: "plan", plan, approved: null });
-    this.patch({ stage: { kind: "plan", plan } });
-    const reply = (await this.park<string>({ type: "plan", plan }, id)).trim();
-    const approved = /^(y|yes)$/i.test(reply);
-    const paused = /^:?\s*(course|learn|unlock)\s+\S/i.test(reply);
-    this.patch({
-      stage: this.state.stage.kind === "plan" ? { kind: "code" } : this.state.stage,
-      transcript: this.state.transcript.map((e) =>
-        e.id === id && e.kind === "plan" ? { ...e, ...(paused ? { paused } : { approved }) } : e,
-      ),
-    });
-    return reply;
-  }
-
-  /** A course starts: its card goes on the board and in the record. */
-  course(card: CourseCard) {
-    this.append({ kind: "course", card, passed: null });
-    this.patch({ stage: { kind: "course", card } });
-    if (card.wizard) this.quip(card.wizard);
-  }
-
-  /** Park inside a course: done, a question, or quit. */
-  askCourse(card: CourseCard): Promise<string> {
-    const id = this.append({ kind: "question", question: "", why: "", answer: null });
-    return this.park({ type: "course", card }, id);
-  }
-
-  endCourse(card: CourseCard, passed: boolean) {
-    this.patch({
-      transcript: this.state.transcript.map((e) => (e.kind === "course" && e.card === card ? { ...e, passed } : e)),
-      ...(this.state.stage.kind === "course" ? { stage: this.state.middle === "shell" ? { kind: "shell" as const } : { kind: "code" as const } } : {}),
-    });
-  }
-
-  // -- internals ----------------------------------------------------------
-
-  private park<T = string>(prompt: Prompt, entryId: number): Promise<T> {
-    // dum asking something takes the characters' side back from help-type
-    // boards. A course or reply stays up, with the question at its foot.
-    if (prompt?.type === "question" && prompt.intern && this.state.stage.kind === "info") {
-      this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
-    }
-    const early = this.typedAhead.shift();
-    if (early !== undefined) {
-      this.answer(entryId, early);
+  private park(prompt: Prompt, entryId: number | null, ahead: boolean): Promise<string> {
+    // dum asking something takes the conversation back from a help panel.
+    if (prompt?.type === "question" && prompt.intern) this.closeBoard();
+    if (ahead && this.typedAhead.length) {
+      // Already in the transcript as a `user` entry from when it was typed.
+      const early = this.typedAhead.shift()!;
       this.patch({ busy: false, status: "" });
-      return Promise.resolve(early as T);
+      return Promise.resolve(early);
     }
-    return new Promise<T>((resolve) => {
-      this.waiting = { resolve, entryId };
-      this.patch({ prompt, busy: false, status: "" });
+    return new Promise<string>((resolve) => {
+      this.waits.push({ resolve, entryId, prompt });
+      this.patch(this.selfChanging ? {} : { prompt, busy: false, status: "" });
     });
   }
 
-  private answer(entryId: number, text: string) {
+  /** An answer lands on its question; anything else said is its own entry. */
+  private record(entryId: number | null, text: string) {
+    if (entryId === null) {
+      this.append({ kind: "user", text });
+      return;
+    }
     this.patch({
       transcript: this.state.transcript.map((e) =>
         e.id === entryId && e.kind === "question" ? { ...e, answer: text } : e,
@@ -541,45 +515,28 @@ export class Store {
     return id;
   }
 
-  /** Set by the runner: ctrl-c. Stops a program in the shell, or quits. */
-  onInterrupt: (() => void) | null = null;
-
-  /** Set by the runner: a program in the shell wants this line. True if it took it. */
-  onProgram: ((line: string) => boolean) | null = null;
-
-  /** The middle: file or shell. */
-  showMiddle(which: "file" | "shell") {
-    if (which === "shell") return this.openShell();
-    this.patch({ stage: { kind: "code" } });
-  }
-
-  /** Whether the input is talking to the shell: the middle shows it and no board is up. */
-  inShell(): boolean {
-    return this.state.middle === "shell" && this.state.stage.kind === "shell";
-  }
-
-  setRunning(running: string) {
-    if (this.state.running !== running) this.patch({ running });
-  }
-
-  toggleMiddle() {
-    this.showMiddle(this.state.middle === "shell" ? "file" : "shell");
-  }
-
-  /** Put the characters back. The middle keeps what it had. */
-  closeBoard() {
-    if (!isBoardKind(this.state.stage)) return;
-    this.patch({ stage: this.state.middle === "shell" ? { kind: "shell" } : { kind: "code" } });
-  }
-
   /** Every mutation goes through here, so the snapshot identity is the signal. */
   private patch(p: Partial<State>) {
-    const next = p.stage;
-    if (next && next !== this.state.stage) {
-      if (next.kind === "code") p = { ...p, middle: "file" };
-      if (next.kind === "shell") p = { ...p, middle: "shell" };
-    }
     this.state = { ...this.state, ...p };
     for (const fn of this.listeners) fn();
   }
+}
+
+/** dum's commands. `bare`: takes nothing after it, so `:help me` is a sentence, not a command. */
+const COMMANDS: Record<string, { bare: boolean }> = {
+  tree: { bare: false }, skills: { bare: false }, log: { bare: true }, context: { bare: true },
+  memory: { bare: true }, boundary: { bare: true }, help: { bare: true }, evidence: { bare: true }, web: { bare: false },
+  remember: { bare: false }, skill: { bare: false }, inspect: { bare: false }, share: { bare: false },
+  changes: { bare: false }, practice: { bare: false }, submit: { bare: false }, run: { bare: false },
+};
+
+/** A `:name [arg]` line that is one of dum's commands, or null for anything else - `:yes` included. */
+export function parseCommand(line: string): { name: string; arg: string } | null {
+  const m = /^:\s*([a-z]+)(?:\s+([\s\S]*))?$/i.exec(line.trim());
+  if (!m) return null;
+  const name = m[1]!.toLowerCase();
+  const arg = (m[2] ?? "").trim();
+  const known = Object.hasOwn(COMMANDS, name) ? COMMANDS[name]! : null;
+  if (!known || (known.bare && arg)) return null;
+  return { name, arg };
 }

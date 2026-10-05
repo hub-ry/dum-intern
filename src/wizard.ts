@@ -1,85 +1,270 @@
-// The wizard: the well-read one beside dum. In a course, dum teaches the mechanics and the
-// wizard says what the thing is called out in the world and where it shows up.
+// The wizard: the experienced voice beside the user while they teach dum. It opens with
+// something it can stand behind - a line from the anchor catalog, each one checked against the
+// page it links - and then connects that to the decision in front of them. The model only picks
+// which anchor and says the connecting sentence; the anchor's words and its link come from
+// anchors.ts, and anything in the connection that reads like an invented date, number, quote,
+// company, war story or claim about what engineers usually do is cut before it reaches the screen.
 
-import { oneShot } from "./oneshot.ts";
+import { oneShot, json } from "./oneshot.ts";
+import { MODELS } from "./runtime.ts";
+import { candidates, type Anchor } from "./anchors.ts";
 
-/** Sonnet, not Haiku: Haiku got the names wrong, and names are the product. */
-export const MODEL = "claude-sonnet-5-5";
-export const EFFORT = "medium";
+/** The bounded helper selector, as verified in a real call. */
+export const MODEL = MODELS.helper.model;
+export const EFFORT = MODELS.helper.effort;
 
-const VOICE = `You are the wizard: a friendly, well-read engineer co-hosting a three-minute
-course with dum, an intern. dum teaches the mechanics. You add the one thing dum
-can't: what this is called out in the world, and where it shows up in real code.
+/** A moment the wizard might speak at. `practice` means the user is on their own task. */
+export type Decision = {
+  request: string;
+  skills?: string[];
+  lang?: string;
+  paths?: string[];
+  practice?: boolean;
+};
 
-YOUR LINE
-One sentence, two at most. Aim for 20 words, never past 35.
-- the name engineers use for it, if it has one beyond the obvious, and one
-  concrete place it shows up: a real library, tool, or kind of program.
-  "recursion's how every json parser walks nested objects - the call stack
-  does the bookkeeping for you."
-  "that's string interpolation - f-strings are what most python codebases
-  reach for now."
-- lowercase, casual, warm. a friend leaning over, not documentation.
-- contractions always. no semicolons. plain dashes only, never an em dash.
-- never tell them what to do. no "you should", "make sure", "remember to".
-- never explain the mechanics - that's dum's half.
+const VOICE = `You are the wizard: an experienced engineer sitting beside someone who is
+teaching dum, an intern, while they build real software together. dum handles the
+mechanics and asks the questions. You speak rarely, and only when you can connect
+something real to the decision in front of them.
 
-ACCURACY OUTRANKS EVERYTHING
-A confidently wrong name or a made-up example is worse than silence - they'll
-repeat it in an interview. Only say what any experienced engineer would nod at.
-If you can't be specific and sure, reply pass.
+WHAT YOU DO
+Pick at most one anchor from the list below - a documented mechanism from a
+primary source. Then say, in one sentence (two at most), how it bears on this
+moment: the tradeoff, the mechanism, what it changes about the choice.
+- the anchor's words and its link are shown by the program; you only give its id.
+- talk about this request and these files: what the anchor's mechanism changes
+  about the choice in front of them, the tradeoff between the options they have.
+- the anchor is your only evidence about the world. no claims about what
+  engineers, teams, companies or the industry usually, typically or commonly
+  do, what's standard, conventional, popular or best practice, or which option
+  is "the usual route". asked how others do it? leave that part unanswered,
+  without announcing it, and speak to the mechanism and their tradeoff.
+- no anchor fits? one short sentence about the tradeoff between options already
+  in the request, with no claims about the world, or stay quiet. quiet is the
+  normal outcome.
+
+NEVER
+- invent or guess dates, years, versions, numbers, percentages, quotations,
+  company or team decisions, product internals, or anything from your own
+  career. you have no career. no "i've seen", "back when", "my team".
+- name a company, product or person the anchor doesn't name, or speak for what
+  engineers, teams or the industry do or prefer.
+- add a link or a citation. the program attaches the anchor's link.
+- tell them what to do. no "you should", "make sure", "remember to".
+- answer for them. they are teaching dum; your line must leave the explanation
+  to them.
+
+VOICE
+lowercase, casual, warm. a friend leaning over, not documentation. contractions.
+no semicolons, plain dashes, never an em dash. aim for 25 words, never past 45.
 
 OUTPUT
-Exactly one of:
-  fact: <line>
-  pass`;
+exactly one json object and nothing else:
+{"anchor": "<an id from the list>" or null, "say": "<your sentence>" or ""}`;
 
-export type Kind = "fact" | "nudge";
+const PRACTICE = `THE MOMENT
+they are working a practice task on their own. do not give the solution, a step
+toward it, a hint at the approach, or any code. if all you have is help with the
+task, stay quiet: {"anchor": null, "say": ""}.`;
 
-/** Strip quotes the model wrapped the whole line in, and nothing else. */
-function clean(s: string): string {
-  const t = s.trim();
-  const m = /^(["'`])([\s\S]*)\1$/.exec(t);
-  return (m && !m[2]!.includes(m[1]!) ? m[2]! : t).trim();
+const DECIDING = `THE MOMENT
+they and dum are at a decision in the project. connect an anchor to it if one
+genuinely bears on it.`;
+
+const COURSE = `THE MOMENT
+dum is about to teach a short course on the skill below. your line is what this
+is called out in the world and where it shows up, not the mechanics and not the
+exercise's answer.`;
+
+/** The whole prompt for a moment, given the anchors it may cite. */
+export function prompt(d: Decision, anchors: readonly Anchor[], moment: "deciding" | "practice" | "course" = d.practice ? "practice" : "deciding"): string {
+  const ctx = [`request: ${d.request.replace(/\s+/g, " ").trim().slice(0, 600)}`];
+  const skills = (d.skills ?? []).filter(Boolean).slice(0, 8);
+  if (skills.length) ctx.push(`skills in play: ${skills.join(", ")}`);
+  if (d.lang) ctx.push(`language: ${d.lang}`);
+  const paths = (d.paths ?? []).filter(Boolean).slice(0, 8);
+  if (paths.length) ctx.push(`files: ${paths.join(", ")}`);
+  const list = anchors.length
+    ? anchors.map((a) => `- ${a.id}: ${a.claim}`).join("\n")
+    : "(none of the catalog is about this moment - only a short tradeoff between options in the request, with no claims about the world, or quiet)";
+  const scene = moment === "practice" ? PRACTICE : moment === "course" ? COURSE : DECIDING;
+  return `${VOICE}\n\n${scene}\n${ctx.join("\n")}\n\nANCHORS (cite by id, nothing outside this list)\n${list}`;
 }
 
-/** Whether the first sentence is a question. */
-export function opensWithQuestion(text: string): boolean {
-  const end = /[.!?](\s|$)/.exec(text);
-  return !!end && end[0][0] === "?";
+/** The model's choice, before any checking of the words. */
+export type Reply = { anchor: string | null; say: string };
+
+/** The json object in a reply, or null when it isn't one of the right shape. */
+export function parseReply(raw: string): Reply | null {
+  const v = json(raw, "{");
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const anchor = typeof o.anchor === "string" ? o.anchor.trim() || null : o.anchor == null ? null : undefined;
+  if (anchor === undefined) return null;
+  const say = typeof o.say === "string" ? o.say : o.say == null ? "" : undefined;
+  if (say === undefined) return null;
+  return { anchor, say };
 }
 
-/** The line to show, or null for a pass. */
-export function parseLine(raw: string): { kind: Kind; text: string } | null {
-  // After a search the model appends a "Sources:" list, because the search tool tells it to.
-  let text = clean(
-    raw
-      .replace(/\n\s*(?:\*\*)?(?:sources?|references?)(?:\*\*)?\s*:[\s\S]*$/i, "")
-      .replace(/\[([^\]]+)\]\((?:https?:)?[^)]*\)/g, "$1"),
-  );
-  if (!text || /^pass\b/i.test(text) || /\bpass\W*$/i.test(text)) return null;
+/** Named external actors require catalog evidence, not merely a mention in the request. */
+const ORGS: Record<string, true> = Object.fromEntries(
+  (
+    "google facebook meta amazon netflix microsoft apple twitter uber airbnb stripe github gitlab bitbucket mozilla oracle " +
+    "postgres postgresql mysql mariadb mongodb redis kafka rabbitmq nginx apache chromium chrome firefox safari aws azure gcp " +
+    "kubernetes docker nasa spacex openai anthropic discord slack shopify dropbox spotify reddit cloudflare intel nvidia amd ibm " +
+    "torvalds dijkstra knuth hettinger guido stroustrup kernighan ritchie jetbrains vscode ios android " +
+    "macos ubuntu debian fedora tesla lyft pinterest linkedin instagram whatsapp youtube paypal coinbase"
+  )
+    .split(" ")
+    .map((w) => [w, true]),
+);
 
-  // A nudge must open with its question, and that is checked here rather than trusted to the
-  // prompt.
-  const tag = /^(fact|nudge)\s*:\s*/i.exec(text);
-  if (!tag) return null;
-  const kind = tag[1]!.toLowerCase() as Kind;
-  text = clean(text.slice(tag[0].length));
-  if (!text) return null;
-  if (kind === "nudge" && !opensWithQuestion(text)) return null;
-  if (/\n\s*\n/.test(text) || text.length > 320) return null;
-  // Em dashes are banned in the prompt too; this catches the ones it misses.
-  return { kind, text: text.replace(/\s*\u2014\s*/g, " - ") };
+/** Sentence patterns that are specifics the catalog can't back. Any hit drops the sentence. */
+const UNSUPPORTED: readonly RegExp[] = [
+  /\b(1[89]|20)\d{2}\b/, // a year
+  /\b(jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)(uary|ruary|ch|il|e|y|ust|tember|ober|ember)?\b\.?\s*\d/i, // a dated month
+  /\b\d+\s*(years?|months?|decades?)\s+(ago|back|old|later|earlier)\b/i,
+  /\b(the|early|late|mid)\s*['’]?\d0s\b/i, // "the 90s"
+  /\d(\.\d+)?\s*(%|percent)/i,
+  /\b\d+(\.\d+)?\s*(x|times)\s+(faster|slower|more|less|fewer|quicker|cheaper)\b/i,
+  /\b(thousand|million|billion|trillion)s?\b/i,
+  /\bversion\s+\d/i,
+  /\bv\d+(\.\d+)+\b/,
+  /\b(python|rust|node|go|java|c|cpp|c\+\+|typescript|javascript|ecmascript|sqlite|git|npm|react|django|flask|linux|gcc|clang|llvm|postgres|mysql)\s*\d+(\.\d+)*\b/i, // a named version
+  /["“”«»]/,
+  /\b(i|i've|i'd|i'm|we|we've|we'd|we're)\s+(worked|built|shipped|saw|seen|used|spent|ran|run|wrote|debugged|remember|once|had|have had|learned|learnt|watched|did|were|was)\b/i,
+  /\b(my|our)\s+(team|teams|job|jobs|company|experience|career|day|days|old|last|first|time at|years)\b/i,
+  /\bback (when|at|in)\b/i,
+  /\bin my (experience|day|time)\b/i,
+  /\b(invented|founded|coined|pioneered|discovered|popularized|popularised|originally|famously|famous|infamous|legendary|introduced|added in|landed in|shipped in|the team at|engineers at|folks at|people at)\b/i,
+  /\b(according to|studies? (show|found|say)|research (shows|found|says)|surveys? (show|found|say)|the data (shows|says)|benchmarks? (show|found|say))\b/i,
+  /\b(created|written|designed|built|made|developed) by\b/i,
+  /https?:\/\/|www\./i,
+  /\[[^\]]+\]\([^)]*\)/, // a markdown link
+  /\b(you should|make sure|remember to|don't forget|you need to|you have to|you must|be sure to)\b/i,
+  /\b(percent|percentage|statistic|statistics)\b/i,
+  /\b[a-z][\w-]*\s+(?:uses?|used|adopted|chose|decided|switched|invented|introduced)\b/i,
+];
+
+/**
+ * Claims about what people at large do, prefer or call correct. The catalog backs a mechanism,
+ * not a census, so these drop the sentence unless the selected anchor's own verified words say
+ * the same thing (go-errors says "conventionally", go-defer says "canonical").
+ */
+const BROAD: readonly RegExp[] = [
+  /\b(usually|typically|commonly|customarily|conventionally|traditionally|historically|normally|widely|routinely|universally|nowadays|these days)\b/gi,
+  /\b(usual|typical|common|commonplace|standard|conventional|customary|traditional|normal|popular|accepted|established|recommended|preferred|classic|canonical|idiomatic|textbook|mainstream|go-to|right|correct|proper|best|safest|safe|smart|wise|sane|sensible|ideal|industry)\s+(?:[\w-]+\s+)?(ways?|routes?|approach(es)?|choices?|patterns?|practices?|answers?|solutions?|moves?|picks?|options?|methods?|idioms?|techniques?|conventions?|advice|wisdom|habits?|bets?|calls?|tools?|fix(es)?|recipes?)\b/gi,
+  /\b(is|are|it's|that's|they're|stays?|remains?|becomes?|became)\s+(?:(?:the|a|an|pretty|very|quite|really|fairly|so|more|most|far|still|basically|kind of|kinda)\s+)*(usual|standard|norm|normal|typical|common|commonplace|conventional|customary|idiomatic|canonical|mainstream|popular|widespread|ubiquitous|go-to|convention|status quo)\b(?!\s+(library|lib|input|output|error|module|stream|deviation))/gi,
+  /\b(popular(ity)?|ubiquitous|widespread|prevalent|pervasive|mainstream|de facto|the norm|best practices?|bad practice|good practice|anti-?patterns?|code smells?|footguns?|considered harmful|bad idea|good idea|rule of thumb|conventional wisdom|the way to go|the way it's done|industry|in the wild|real[- ]world|out there|battle[- ]tested|time[- ]tested|tried[- ]and[- ]true|everyone|everybody|most people|most of us)\b/gi,
+  /\b(engineers|developers|devs|programmers|coders|practitioners|professionals|experts|fintechs|banks|accountants|auditors|regulators|companies|organi[sz]ations)\b/gi,
+  /\b(most|many|lots of|plenty of|a lot of|nearly all|almost all|all|every|few|some|countless|numerous|(the )?majority of|several|serious|experienced|good|real|professional|seasoned|senior|smart|sensible|sane|careful|veteran)\s+(?:[\w-]+\s+)?(teams?|shops?|people|folks|projects?|codebases?|systems?|apps?|applications?|libraries|frameworks|languages|products|services|businesses|startups|enterprises)\b/gi,
+  /\b(teams|people|folks|shops|projects|codebases)\s+(?:[\w-]+\s+){0,2}?(do|tend|prefer|reach|pick|choose|go|like|swear|avoid|stick|lean|favou?r|default|recommend|agree|consider|settle|store|rely|keep|handle|land|end up|learn|get bitten|get burned|run into|hit|standardi[sz]e|switch|adopt)\b/gi,
+  /\b(always|never) (use|store|keep|pick|choose|go with|reach for|prefer|trust|rely on)\b/gi,
+  /\bshould (always|never)\b/gi,
+  /\byou(?:'ll)? (see|find|run into|hit|meet|come across)\b[^.!?]*\b(a lot|all the time|constantly|all over)\b/gi,
+];
+
+/** True when the sentence speaks for the wider world in words the anchor doesn't itself say. */
+function broad(s: string, anchor: Anchor | null): boolean {
+  const claim = anchor?.claim.toLowerCase() ?? "";
+  return BROAD.some((re) => [...s.matchAll(re)].some((m) => !claim.includes(m[0].toLowerCase())));
 }
 
-/** Just the text, for callers that do not care which kind of line it was. */
-export function parse(raw: string): string | null {
-  return parseLine(raw)?.text ?? null;
+/** Only the selected source can establish an external name as supported context. */
+function allowedNames(anchor: Anchor | null): Record<string, true> {
+  const out: Record<string, true> = {};
+  const add = (text: string) => {
+    for (const w of text.toLowerCase().match(/[a-z0-9_+#]+(?:\.[a-z0-9_+#]+)*/g) ?? []) out[w] = true;
+  };
+  if (anchor) {
+    add(anchor.claim);
+    for (const n of anchor.names) add(n);
+  }
+  return out;
 }
 
-/** The wizard's half of a course: one line on what it's called and where it shows up, or null. */
+/**
+ * The connection with every unsupported sentence cut, or "" when nothing survives. A sentence
+ * goes if it carries a date, a number that reads as a statistic, a quotation, a war story, a
+ * link, a company or person nobody brought up, a claim about what engineers or the industry
+ * usually do or call best, or - during practice - the answer. Em dashes become plain dashes.
+ * Two sentences at most.
+ */
+export function screen(say: string, d: Decision, anchor: Anchor | null): string {
+  const text = say.replace(/\s*\u2014\s*/g, " - ").replace(/\s+/g, " ").trim();
+  if (!text || d.practice) return "";
+  // A fenced block is code however it's framed, and never fits in a margin.
+  if (/```/.test(text)) return "";
+  const allowed = allowedNames(anchor);
+  const kept: string[] = [];
+  for (const raw of text.split(/(?<=[.!?])\s+/)) {
+    let s = raw.trim();
+    if (!s) continue;
+    if (UNSUPPORTED.some((re) => re.test(s)) || broad(s, anchor)) continue;
+    // Only the selected primary source supports an external name, however it's cased.
+    let named = (s.toLowerCase().match(/[a-z0-9_+#]+/g) ?? []).some((w) => Object.hasOwn(ORGS, w) && !Object.hasOwn(allowed, w));
+    // The voice is lowercase, so a word the model capitalizes is a name. Acronyms are terms
+    // (HEAD, JSON, C++). An opener is capitalized by habit, so it only counts as a name when
+    // the organization list says so above; otherwise it goes back to the voice.
+    s = s.replace(/\b[A-Z][A-Za-z0-9]*[+#]*/g, (w, at: number) => {
+      if (/^[A-Z][A-Z0-9]*[+#]*$/.test(w)) return w;
+      const lower = w.toLowerCase();
+      if (at === 0) return lower;
+      if (Object.hasOwn(allowed, lower)) return w;
+      named = true;
+      return w;
+    });
+    if (named) continue;
+    kept.push(s);
+    if (kept.length === (anchor ? 1 : 2)) break;
+  }
+  let out = kept.join(" ");
+  if (out.length > 300) out = kept[0]!;
+  return out.length > 300 ? "" : out;
+}
+
+/** What goes on the screen: the anchor's fixed words, the connection, and the link, as one quip. */
+export function render(anchor: Anchor | null, say: string): string | null {
+  if (anchor && say) return `${anchor.claim} ${say}\nsource: ${anchor.url}`;
+  if (anchor) return `${anchor.claim}\nsource: ${anchor.url}`;
+  return say || null;
+}
+
+/**
+ * A raw reply turned into the line to show, or null for quiet. An anchor id outside what was
+ * offered means the model is citing something that isn't there, and the whole line goes with it.
+ */
+export function compose(raw: string, d: Decision, offered: readonly Anchor[]): string | null {
+  const reply = parseReply(raw);
+  if (!reply) return null;
+  let anchor: Anchor | null = null;
+  if (reply.anchor !== null) {
+    anchor = offered.find((a) => a.id === reply.anchor) ?? null;
+    if (!anchor) return null;
+  }
+  return render(anchor, screen(reply.say, d, anchor));
+}
+
+async function ask(d: Decision, moment: "deciding" | "practice" | "course"): Promise<string | null> {
+  if (!d.request.trim()) return null;
+  const offered = candidates(d);
+  let raw: string;
+  try {
+    raw = await oneShot(prompt(d, offered, moment), { model: MODEL, effort: EFFORT });
+  } catch {
+    // A route or auth failure is dum's to report; the wizard just has nothing to say.
+    return null;
+  }
+  return compose(raw, d, offered);
+}
+
+/** The wizard at a decision in the conversation: a sourced line, or null to stay quiet. */
+export async function decision(d: Decision): Promise<string | null> {
+  if (d.practice) return null;
+  return ask(d, "deciding");
+}
+
+/** The wizard's half of a course: what it's called out in the world and where it shows up, or null. */
 export async function aside(skill: string, lang: string): Promise<string | null> {
-  const raw = await oneShot(`${VOICE}\n\nTHE COURSE: ${skill}${lang ? ` in ${lang}` : ""}`, { model: MODEL, effort: EFFORT });
-  const line = parseLine(raw);
-  return line?.kind === "fact" ? line.text : null;
+  return ask({ request: `a short course on ${skill}${lang ? ` in ${lang}` : ""}`, skills: [skill], lang, practice: true }, "course");
 }

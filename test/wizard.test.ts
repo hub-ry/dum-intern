@@ -1,91 +1,100 @@
-// What reaches the margin. A pass that leaks through shows the wizard thinking
-// out loud, and a nudge that opens with the answer does the thinking for you -
-// both are worse than silence.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parse, opensWithQuestion } from "../src/wizard.ts";
+import { byId, candidates } from "../src/anchors.ts";
+import { compose, decision, screen, type Decision } from "../src/wizard.ts";
 
-test("a tagged fact comes through", () => {
-  assert.equal(parse("fact: that's a lease."), "that's a lease.");
-  assert.equal(parse('"fact: that\'s a lease."'), "that's a lease.");
+const sorting = byId("python-sorting")!;
+const git = byId("git-diff")!;
+const moment: Decision = { request: "sort our leaderboard by score", lang: "python" };
+
+function line(anchor: string | null, say: string, d = moment) {
+  return compose(JSON.stringify({ anchor, say }), d, [sorting]);
+}
+
+test("a supported anchor retains its primary-source link and relevant connection", () => {
+  const output = line("python-sorting", "ties retain their previous order here.");
+  assert.match(output!, /ties retain their previous order here/);
+  assert.match(output!, /source: https:\/\/docs\.python\.org\/3\/howto\/sorting\.html$/);
+  assert.match(output!, /stable/);
 });
 
-test("an untagged line is a format break, and dropped", () => {
-  assert.equal(parse("actually backwards - `..=` is the inclusive one."), null);
+test("unknown or unoffered anchors cannot supply a fabricated citation", () => {
+  assert.equal(line("invented-team-history", "a plausible sounding explanation."), null);
+  assert.equal(line("git-diff", "a plausible sounding explanation."), null);
+  assert.equal(compose('{"anchor":7,"say":"a claim"}', moment, [sorting]), null);
 });
 
-test("pass is a pass", () => {
-  assert.equal(parse("pass"), null);
-  assert.equal(parse("  Pass.  "), null);
-  assert.equal(parse(""), null);
-  assert.equal(parse("fact:"), null);
+test("unsupported specifics narrow to the sourced mechanism", () => {
+  for (const claim of [
+    "guido invented this in 2002.",
+    "it made sorting 3x faster.",
+    "ninety percent of teams do this.",
+    "my team used this in production.",
+    'a founder called this "move fast".',
+    "see https://unverified.example.invalid for proof.",
+  ]) {
+    const output = line("python-sorting", claim)!;
+    assert.equal(output, `${sorting.claim}\nsource: ${sorting.url}`);
+  }
 });
 
-test("reasoning followed by pass is a pass", () => {
-  // Verbatim from a real session.
-  const raw =
-    "range in rust needs `..=10` for inclusive, but that's a detail they'll hit immediately when 10 doesn't print - not worth interrupting for.\n\npass";
-  assert.equal(parse(raw), null);
+test("user-mentioned companies are not evidence for their engineering decisions", () => {
+  const d = { request: "how Netflix uses sorting, and what Acme adopted", lang: "python", paths: ["netflix.py"] };
+  assert.equal(screen("netflix sorts all live events this way.", d, sorting), "");
+  assert.equal(screen("acme adopted stable sorting for its architecture.", d, sorting), "");
+  assert.equal(screen("since postgres already orders rows, sorting is cheap.", { ...d, request: "we use postgres" }, sorting), "");
 });
 
-test("two paragraphs is never a quip", () => {
-  assert.equal(parse("fact: that's a lease.\n\nalso a heartbeat."), null);
+test("unsupported sentences are dropped without losing a supported connection", () => {
+  const output = line("python-sorting", "google discovered this in 2008. ties retain their order here.");
+  assert.match(output!, /ties retain their order here/);
+  assert.doesNotMatch(output!, /google|2008/);
 });
 
-test("a word merely containing pass is fine", () => {
-  assert.equal(parse("fact: that's a bypass cache."), "that's a bypass cache.");
-  assert.equal(parse("fact: nginx can passthrough the header."), "nginx can passthrough the header.");
+test("claims about what engineers usually do narrow to the sourced mechanism", () => {
+  const floats = byId("python-floats")!;
+  const money: Decision = { request: "is cents-everywhere how engineers usually handle money?", lang: "python", paths: ["money.py"] };
+  const say = (anchor: string | null, text: string) => compose(JSON.stringify({ anchor, say: text }), money, [floats]);
+  for (const claim of [
+    "yeah, integer cents or decimal are the two usual routes - same reason.",
+    "most teams keep money as integer cents.",
+    "engineers typically reach for decimal here.",
+    "integer cents is the industry standard for money.",
+    "storing cents is best practice.",
+    "cents is pretty much the norm, and it's common for payment code.",
+  ]) {
+    assert.equal(say("python-floats", claim), `${floats.claim}\nsource: ${floats.url}`, claim);
+    assert.equal(say(null, claim), null, claim);
+  }
+  const local = "here '12.50' becomes 1250 at load, so the report's totals add up exactly.";
+  assert.equal(say("python-floats", local), `${floats.claim} ${local}\nsource: ${floats.url}`);
+  assert.equal(say(null, local), local);
 });
 
-test("a line opening with inline code keeps its backtick", () => {
-  assert.equal(parse("fact: `..=` is the inclusive one."), "`..=` is the inclusive one.");
+test("a convention the selected anchor itself verifies is not screened as a broad claim", () => {
+  const errors = byId("go-errors")!;
+  const d: Decision = { request: "should load return an error or panic on a bad row?", lang: "go" };
+  const output = compose(JSON.stringify({ anchor: "go-errors", say: "conventionally returning one here lets load report the bad row." }), d, [errors]);
+  assert.match(output!, /lets load report the bad row/);
+  assert.match(output!, /source: https:\/\//);
 });
 
-test("a line wrapped in quotes loses them", () => {
-  assert.equal(parse("fact: `that's a lease`"), "that's a lease");
+test("language scope excludes unrelated product anchors", () => {
+  const offered = candidates({ request: "sort the leaderboard", skills: ["sorting with keys"], lang: "py" });
+  assert.ok(offered.some((a) => a.id === "python-sorting"));
+  assert.ok(offered.every((a) => a.id !== "js-array-sort"));
+  assert.ok(candidates({ request: "sort the leaderboard", paths: ["scores.rs"] }).every((a) => a.id !== "python-sorting"));
+  assert.deepEqual(candidates({ request: "rename this function" }), []);
 });
 
-test("an em dash becomes a plain dash", () => {
-  assert.equal(
-    parse("fact: that's a lease \u2014 sqs calls it a visibility timeout."),
-    "that's a lease - sqs calls it a visibility timeout.",
-  );
+test("the wizard stays silent during unaided practice rather than supplying a solution", async () => {
+  assert.equal(await decision({ ...moment, practice: true }), null);
+  assert.equal(screen("the answer is a tuple key.", { ...moment, practice: true }, sorting), "");
+  assert.equal(screen("just write `sorted(rows, key=lambda r: (-r.score, r.name))`.", { ...moment, practice: true }, sorting), "");
 });
 
-test("a nudge that opens with its question comes through", () => {
-  assert.equal(
-    parse("nudge: what does 0.1 + 0.2 give you as a float? money usually lives in integer cents."),
-    "what does 0.1 + 0.2 give you as a float? money usually lives in integer cents.",
-  );
-});
-
-test("a nudge that opens with the answer is dropped", () => {
-  // Verbatim shape from an eval run.
-  assert.equal(parse("nudge: wait, `1..=10` is inclusive - `1..10` stops at 9. is that what you meant?"), null);
-});
-
-test("a dot inside a number does not end the first sentence", () => {
-  assert.ok(opensWithQuestion("what's $10.00 split three ways, summed back up? integer cents."));
-  assert.ok(opensWithQuestion("what does 0.1 + 0.2 give you? not 0.3."));
-  assert.ok(!opensWithQuestion("floats drift. what does 0.1 + 0.2 give you?"));
-  assert.ok(!opensWithQuestion("no question here at all"));
-});
-
-test("a sources list after a searched line is stripped, not a reason to drop it", () => {
-  // Verbatim shape from a real run: the search tool asks for sources.
-  const raw =
-    "fact: opus 5.5 came out september 22 - $4/$20 per million tokens, cheaper than opus 5.\n\nSources:\n- [Introducing Claude Opus 5.5](https://www.anthropic.com/claude-opus-5-5)";
-  assert.equal(parse(raw), "opus 5.5 came out september 22 - $4/$20 per million tokens, cheaper than opus 5.");
-});
-
-test("a markdown link inside a line keeps its words", () => {
-  assert.equal(
-    parse("fact: that's a lease - [sqs](https://aws.amazon.com/sqs/) calls it a visibility timeout."),
-    "that's a lease - sqs calls it a visibility timeout.",
-  );
-});
-
-test("a line that mentions sources mid-sentence is left alone", () => {
-  assert.equal(parse("fact: kafka keeps sources of truth in a log."), "kafka keeps sources of truth in a log.");
+test("without an anchor unsupported history is silence, not a confident generic fallback", () => {
+  assert.equal(line(null, "back when i worked at google we shipped this."), null);
+  assert.equal(line(null, "this changed in 2019."), null);
+  assert.equal(compose("not valid json", moment, [git]), null);
 });

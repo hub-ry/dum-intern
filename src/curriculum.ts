@@ -155,21 +155,47 @@ function below(need: skills.Level): skills.Level {
   return need === "apply" ? "build" : need;
 }
 
-/** Whether a skill is theirs at `need`, and if not, whether they can get it from here. */
-export function status(t: skills.Tree, name: string, lang: string, need: skills.Level = "build"): Status {
+/**
+ * Whether a skill is theirs at `need`, and if not, whether they can get it from here. `requires`
+ * overrides what it builds on for a skill nobody mapped yet, without writing the mapping down.
+ */
+export function status(t: skills.Tree, name: string, lang: string, need: skills.Level = "build", requires = prereqs(name, lang)): Status {
   if (skills.holds(t, name, lang, need)) return { state: "unlocked" };
-  const missing = prereqs(name, lang).filter((r) => !skills.holds(t, r, lang, below(need)));
+  const missing = requires.filter((r) => !skills.holds(t, r, lang, below(need)));
   if (!missing.length) return { state: "open" };
+  return { state: "locked", missing, next: firstRung(t, missing, lang, below(need), new Set([skills.key(name)])) };
+}
+
+/** A held prerequisite still needs its own prerequisites; cycles cannot establish ability. */
+function holdsCurrent(t: skills.Tree, name: string, lang: string, need: skills.Level, seen: Set<string>): boolean {
+  if (!skills.holds(t, name, lang, need)) return false;
+  const key = skills.key(name);
+  if (seen.has(key)) return false;
+  seen.add(key);
+  const held = prereqs(name, lang).every((r) => holdsCurrent(t, r, lang, need, seen));
+  seen.delete(key);
+  return held;
+}
+
+/**
+ * Current ability, including the whole prerequisite chain. Revoking an earlier rung locks
+ * dependent skills without changing their historical notes.
+ */
+export function current(t: skills.Tree, name: string, lang: string, need: skills.Level = "build", requires = prereqs(name, lang)): Status {
+  const seen = new Set([skills.key(name)]);
+  const missing = requires.filter((r) => !holdsCurrent(t, r, lang, below(need), seen));
+  if (!missing.length) return skills.holds(t, name, lang, need) ? { state: "unlocked" } : { state: "open" };
   return { state: "locked", missing, next: firstRung(t, missing, lang, below(need), new Set([skills.key(name)])) };
 }
 
 /** Down through what's missing until something is open. "" if every path loops. */
 function firstRung(t: skills.Tree, from: string[], lang: string, need: skills.Level, seen: Set<string>): string {
+  const active = new Set<string>();
   for (const m of from) {
     const k = skills.key(m);
     if (seen.has(k)) continue;
     seen.add(k);
-    const miss = prereqs(m, lang).filter((r) => !skills.holds(t, r, lang, need));
+    const miss = prereqs(m, lang).filter((r) => !holdsCurrent(t, r, lang, need, active));
     if (!miss.length) return canonical(m, lang);
     const deeper = firstRung(t, miss, lang, need, seen);
     if (deeper) return deeper;
@@ -177,9 +203,9 @@ function firstRung(t: skills.Tree, from: string[], lang: string, need: skills.Le
   return "";
 }
 
-/** The courses open right now on a track. */
+/** The skills open right now on a track: every prerequisite built, the skill itself not yet. */
 export function frontier(t: skills.Tree, track: Track): string[] {
-  return track.skills.filter((n) => status(t, n.name, track.lang).state === "open").map((n) => n.name);
+  return track.skills.filter((n) => current(t, n.name, track.lang).state === "open").map((n) => n.name);
 }
 
 /** How far along a track they are, counting what they've built. */
@@ -198,14 +224,21 @@ export function bar(done: number, total: number, cells = 16): string {
 const LOCKED_SHOWN = 3;
 
 /**
- * The tree as plain lines: each track as a bar, then what's built, what's only recognized, what's
- * open and the first of what's locked, plus anything unlocked off the tracks.
+ * The tree as plain lines. Each track is a bar, then what they know (built, then only recognized),
+ * then what they can practice next, then the first of what's locked and where it starts, plus
+ * anything unlocked off the tracks. Language-free tracks always show; a language's tracks show
+ * when it's asked for, when they know something on them, or with `all`. Never empty: with
+ * nothing to show yet it says which languages have tracks.
  */
-export function view(t: skills.Tree, langs: string[]): string[] {
+export function view(t: skills.Tree, langs: string[], all = false): string[] {
   const want = new Set(langs.map(skills.langName).filter(Boolean));
   const mine = new Set(t.skills.map((s) => s.lang));
-  const shown = tracks().filter((tr) => !tr.lang || want.has(tr.lang) || tr.skills.some((n) => skills.levelIn(t, n.name, tr.lang)));
+  const shown = tracks().filter(
+    (tr) => all || !tr.lang || want.has(tr.lang) || tr.skills.some((n) => skills.levelIn(t, n.name, tr.lang)),
+  );
   const out: string[] = [];
+  const hidden = languages().filter((l) => !shown.some((tr) => tr.lang === l));
+  if (hidden.length) out.push(`other tracks: ${hidden.join(", ")}  · :tree <language> or :tree all`, "");
   const mark = (name: string, lang: string) => {
     const level = skills.levelIn(t, name, lang);
     if (level && skills.rank(level) >= skills.rank("build")) return `  ● ${name}${level === "apply" ? "  applied" : ""}`;
@@ -215,18 +248,20 @@ export function view(t: skills.Tree, langs: string[]): string[] {
   for (const tr of shown) {
     const p = progress(t, tr);
     out.push(`${tr.lang && tr.name !== tr.lang ? `${tr.lang} · ${tr.name}` : tr.name}  ${bar(p.done, p.total)}  ${p.done}/${p.total}`);
-    let locked = 0;
+    const known: string[] = [];
+    const next: string[] = [];
+    const locked: string[] = [];
     for (const n of tr.skills) {
       const m = mark(n.name, tr.lang);
-      if (m) {
-        out.push(m);
-        continue;
+      if (m) known.push(m);
+      const st = current(t, n.name, tr.lang);
+      if (st.state === "open") next.push(`  ○ ${n.name}  next · :practice ${n.name}${tr.lang ? ` in ${tr.lang}` : ""}`);
+      else if (st.state === "locked" && !m) {
+        locked.push(`  · ${n.name}  needs ${st.missing.join(", ")}${st.next ? `  starts at ${st.next}` : ""}`);
       }
-      const st = status(t, n.name, tr.lang);
-      if (st.state === "open") out.push(`  ○ ${n.name}  course open`);
-      else if (st.state === "locked" && locked++ < LOCKED_SHOWN) out.push(`  · ${n.name}  needs ${st.missing.join(", ")}${st.next ? `  next: course ${st.next}${tr.lang ? ` in ${tr.lang}` : ""}` : ""}`);
     }
-    if (locked > LOCKED_SHOWN) out.push(`  · ${locked - LOCKED_SHOWN} more locked`);
+    out.push(...known, ...next, ...locked.slice(0, LOCKED_SHOWN));
+    if (locked.length > LOCKED_SHOWN) out.push(`  · ${locked.length - LOCKED_SHOWN} more locked`);
     out.push("");
   }
   // Anything unlocked off the tracks: libraries, tools, one-off ideas.

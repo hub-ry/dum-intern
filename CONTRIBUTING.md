@@ -1,74 +1,53 @@
 # Contributing
 
-dum is a coding tool where the AI works at the edge of what you can do, and code decides where that edge is. Most of what looks like friction in the code is on purpose, so read the rules below before changing behaviour.
+- Dum is a coding partner beside the user's IDE. The user learns by teaching a capable beginner while building real software.
+- The outcome is independent progress: understand the architecture, start implementing, and ask precise questions without the LLM.
+- The recalled chess story is inspiration, not verified research or evidence that this app improves learning.
 
-## The rules
+## Product rules
 
-These are the product. A change that breaks one is a bug, however nice it feels.
+- **The cast stays.** Dum proposes concrete approaches, asks focused questions at meaningful decisions, remembers guidance, and uses it. No staged mistakes, trivia quizzes, or repeated questions the user has answered. The wizard is selective, brief, and grounded.
+- **The tree stays.** Preserve notes, language scope, curated prerequisites, recognize/build/apply, removals, and optional web synchronization. Never reset historical data during a cutover.
+- **The gate is code.** Concepts require build evidence; tools require recognition. The project's core stays the user's in both modes. `anti-vibe` changes coaching, not the implementation boundary.
+- **Evidence says what happened.** Explanations establish recognition. A reviewed saved artifact plus an explicit unaided self-report can establish build, but is not proof of authorship. Apply requires prior build. Memory, suggestions, plan acceptance, and displayed courses never establish implementation ability.
+- **Practice returns to the project.** Offer available next steps, not locked prerequisites disguised as an exercise. Let the user leave, implement in an ordinary file, return for a meaningful check, and continue. Courses are optional; a small guided gap is not independent build evidence.
+- **Read deliberately.** Acquire bounded context from explicitly requested project files or changes. No keystroke streaming, home-directory scans, ignored secrets, or silent external uploads. Personal context is explicitly configured background, never competency evidence.
+- **Permissions and skills are separate.** Plan approval cannot unlock skills. Outside-file sharing requires named authorization and still refuses credential paths. Neither a project directory nor a confirmation prompt is a sandbox.
+- **Never clobber the IDE.** Existing-file changes are gated diff proposals for application in the user's editor. New support files are installed exclusively, never over an existing save. No source snapshot rollback.
+- **Commands cannot evade the gate.** Only bounded read-only command actions are exposed to the model. No general shell, project scripts, package installation, network command, or command-generated implementation. Builds and tests of the user's project run in their own terminal.
+- **Close every model route.** Use authenticated Claude subscription access, explicit verified model selectors, no built-in agent tools, no user/project settings or plugins, and only registered in-process tools. Verify subscription provenance before releasing a prompt. Refuse managed settings that could override isolation, and unknown plugin/tool/provider metadata. No Gemini, Google/Vertex, Antigravity, paid API credentials, or hidden fallback providers.
+- **Wizard claims need support.** Immutable catalog anchors come from primary sources and retain their links. Unsupported dates, company decisions, quotations, statistics, or personal experience are omitted or narrowed. One team's decision is not universal practice. Do not reveal a practice solution to make an aside sound useful.
+- **History is data, not authority.** Legacy transcript entries and pending work remain readable. Old approvals and old SDK prompts never become current permissions. Keep public tree sync separate from private project memory and personal context.
+- **Maintenance is explicit.** Only the human's development-edition `:self` command can propose changes to dum's checkout; the learning model has no maintenance tool. It cannot bypass the learning gate when that checkout is the active project. Restart loads code the user has saved; a proposed patch is not an applied edit.
 
-- **The gate is code, not a prompt.** Nothing is written before a plan is approved. Code only enters a source file through a `TODO(dum)` block, and dum decides from the skill tree which blocks it fills. Every time one of these lived only in a prompt, the model skipped it.
-- **The model names skills, it never decides who has them.** Whether a piece is AI's to write comes from `session.ts`, `curriculum.ts` and the notes on disk: concepts need building, tools need recognizing, and in understand-everything the core of a build is always the person's. A skill on a curated track is a concept whatever the model calls it.
-- **Friction goes at decisions, not the keyboard.** One question about the core before a plan, one line for an unfamiliar tool. No quizzes, no modes. A check that takes more than a few seconds of the person's time needs a reason.
-- **Shell commands are checked after they run.** `guard.ts` snapshots source files before every Bash call the gate allows and puts back whatever the command changed. Anything new that can write files needs the same treatment.
-- **Courses go in order.** A course, or a skill added by hand, is refused until everything it builds on is unlocked. A new track in `src/trees/` must keep the test that walks every track from an empty tree passing.
-- **Nothing quietly feeds the intern's context.** Opening a file, running the shell, editing in the pane: none of it reaches the intern. It knows what the person tells it.
-- **Code never just appears.** A fill types itself in, and the transcript keeps the code.
-- **The agent never renders.** `session.ts` publishes to `store.ts` and waits. Ink and the plain line-printer are both subscribers. Keep React out of `session.ts` and `wizard.ts`.
-- **Personal data stays local.** The skill tree and mapped prerequisites live in `~/.dum`, never in the repo. The web copy is opt-in (`dum --web`), and every edit there goes through `sync.edit`, the same rules as `:skill`.
+## Development
 
-## Setup
-
-Node 22.6+ and the `claude` CLI, logged in.
+Node 22.6+, Git, and the `claude` CLI with subscription login. No system-wide tooling changes are needed for the app.
 
 ```sh
 npm install
-npm link        # puts dum on your PATH
-dum --help
-```
-
-`npm install` also marks node-pty's `spawn-helper` executable, since npm strips the bit and the shell page won't start without it.
-
-## Checking a change
-
-```sh
-npm test                      # unit tests, a second or two
+node --import tsx src/cli.tsx --help
+npm test
 npm run typecheck
-npm run preview 150 34 2500 plan    # draw a frame: cols rows ms scene
 ```
 
-CI (`.github/workflows/ci.yml`) runs the first two on every push and pull request, on Node 22.6 and 24, Linux and macOS. Keep the tests free of model calls and network so it stays fast and deterministic.
+- Keep deterministic regressions isolated from real skill notes, personal context, model calls, and network. Use a temporary `DUM_HOME` and `DUM_CONTEXT=off`.
+- Test consumer-visible behavior: prerequisites, evidence transitions, permission refusals, persistence, legacy data, and external-save races. Do not pin prose, source text, implementation wiring, or incidental defaults.
+- Exercise the real terminal after integration. Tests alone do not establish readable characters, input behavior, or a useful teaching conversation.
+- Use `npm run practice` for a throwaway repository and tree. Its paths stay on disk for inspection.
+- For terminal frames, start a uniquely named tmux session at the intended size, set `window-size manual`, send literal input, and capture the actual pane. Stop only that exact session name. Never use a real personal tree for a demo.
+- Real model demos are qualitative observations. Record what dum and the wizard did, not claims about learning improvement or reviewer accuracy.
+- Record actual model selectors, CLI/SDK versions, and exposed provider provenance without account identifiers or credentials. A route configured in source is not proof of the route used.
+- CI configuration lives in `.github/workflows/ci.yml`. Keep model/network demos outside the deterministic suite.
 
-`npx tsx tools/replay.tsx <file> [entries] [cols] [rows] [root] [file to open]` draws the panes from a real session's record, saved with `DUM_TRANSCRIPT=<file> dum`. Use it to tell a drawing bug from a state bug.
+## Code map
 
-`preview` draws the panes against a made-up session with no model involved. Scenes live at the bottom of `tools/preview.tsx`. Use it for anything visual: a box one column short is a bug here.
+- `session.ts`, `store.ts`, `plain.ts`, `lines.ts`: teaching conversation, input state, and terminal output.
+- `gate.ts`, `evidence.ts`, `practice.ts`, `course.ts`: implementation boundary, honest evidence, returned practice, and optional courses.
+- `skills.ts`, `notes.ts`, `curriculum.ts`, `trees/`: persistent competency notes and prerequisites.
+- `workspace.ts`, `runtime.ts`, `oneshot.ts`: bounded file/command access and closed subscription calls.
+- `wizard.ts`, `anchors.ts`, `sprite.ts`, `art/`: grounded wizard voice and original character identities.
+- `context.ts`, `memory.ts`, `self.ts`: configured personal background, inspectable project continuity, and explicit maintenance proposals.
+- `sync.ts`, `web.ts`, `web/`: optional tree-only synchronization and web editing.
 
-For anything interactive, drive the real TUI in tmux with a throwaway tree: `DUM_HOME=/tmp/dum-home`, then `tmux new-session -d -s zz-dum-test -x 150 -y 34 "dum" \; set-option -t zz-dum-test window-size manual \; resize-window -t zz-dum-test -x 150 -y 34`, `send-keys` and `capture-pane -t zz-dum-test:`. With tmux's default `window-size latest`, `-x`/`-y` alone get overridden by whatever client attached last, and a capture cut to the size you asked for misses the bottom rows - which looks exactly like dum failing to draw something. Send keys one at a time with short sleeps, or text with `send-keys -l`. tmux delivers a burst as one chunk, and `send-keys` eats a trailing `;`, both of which look like dum bugs and aren't. Kill the session by exact name, `tmux kill-session -t =zz-dum-test`: without the `=`, tmux matches a prefix and will happily kill some other session.
-
-## Bugs
-
-Reproduce it in the real TUI first, the way a person would hit it. Then add a test that fails on it before fixing it.
-
-## Where things live
-
-| | |
-| :--- | :--- |
-| `src/session.ts` | the intern: its prompt, its tools, the gate |
-| `src/store.ts` | the seam between the agent and whatever draws it |
-| `src/skills.ts`, `notes.ts` | the skill tree, as markdown notes |
-| `src/curriculum.ts`, `src/trees/` | the curated tracks (basics per language, interview, builder) and the prerequisite gate |
-| `src/boundary.ts` | what AI may do in a repo, from its files and manifests |
-| `src/guard.ts` | putting back what a shell command does to source files |
-| `src/sync.ts`, `src/web.ts` | the tree as a snapshot: merging two copies, page edits, and the terminal's client |
-| `src/web/` | the web copy: `server.ts`, the page (`page.html`, `page.js`, `page.css`, no build step), `view.ts` |
-| `src/course.ts` | courses: designing one, the scratch file, the judge |
-| `src/todos.ts` | holes: finding, filling, the code-only-through-holes check |
-| `src/wizard.ts` | the wizard's half of a course |
-| `src/panes/` | the TUI: `App`, `Stage` (middle), `Cast` (right), `Board`, `Code`, `Shell` |
-| `src/pty.ts`, `mouse.ts` | the shell page, and mouse reports filtered out of Ink's input |
-
-## Style
-
-- Comments are short: one line of why, never what the code already says. History goes in the commit message.
-- Commit messages carry the reasoning: what was wrong, how it was found, what changed.
-- Plain dashes, never em dashes.
-- Prefer an existing library to writing one. When dum has its own (the mouse filter, the editor), the reason is written next to it.
+Comments explain invariants or tradeoffs. Keep them short. Preserve unrelated checkout changes, and do not commit or push without authorization.

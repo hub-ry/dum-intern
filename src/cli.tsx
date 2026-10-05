@@ -1,29 +1,31 @@
-// The environment you drop into.
+// The environment you drop into: one conversation in your terminal, beside your own editor.
 
-import { argv, exit, cwd, stdout, stdin } from "node:process";
+import { argv, exit, cwd } from "node:process";
+import { homedir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { readRepo } from "./repo.ts";
-import { run, mainLang, courseFor, type Mode } from "./session.ts";
+import { run, prepare, mainLang } from "./session.ts";
+import type { Mode } from "./gate.ts";
 import { Store } from "./store.ts";
-import { banner, runPlain, Input } from "./plain.ts";
-import { read as readLayout, type Node as LayoutNode } from "./layout.ts";
+import { Terminal } from "./plain.ts";
+import { c, infoLines, printable } from "./lines.ts";
 import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
 import * as boundary from "./boundary.ts";
 import * as web from "./web.ts";
 import * as todos from "./todos.ts";
-import * as shell from "./shell.ts";
-import { debugTo } from "./debug.ts";
-import { shell as pty } from "./pty.ts";
-import { filtered, ON as MOUSE_ON, OFF as MOUSE_OFF } from "./mouse.ts";
-import { createInterface } from "node:readline/promises";
-import { c } from "./lines.ts";
+import * as course from "./course.ts";
 import * as wizard from "./wizard.ts";
-import { homedir } from "node:os";
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import * as context from "./context.ts";
+import * as memory from "./memory.ts";
+import * as self from "./self.ts";
+import { MODELS } from "./runtime.ts";
+import { readState, writeState } from "./workspace.ts";
+import { createInterface } from "node:readline/promises";
 
 type Args = {
-  mode: Mode;
-  plain: boolean;
+  /** Only when a flag chose one; otherwise the repo's saved mode stands. */
+  mode: Mode | null;
   request: string;
   show: boolean;
   bounds: boolean;
@@ -32,35 +34,31 @@ type Args = {
   reset: boolean;
   add: string[] | null;
   fresh: boolean;
+  dev: boolean;
 };
 
 function parse(args: string[]): Args {
-  let mode: Mode = "understand";
-  let plain = false;
-  let show = false;
-  let bounds = false;
-  let webArgs: string[] | null = null;
-  let forget: string[] | null = null;
-  let reset = false;
-  let addArgs: string[] | null = null;
-  let fresh = false;
+  const out: Args = { mode: null, request: "", show: false, bounds: false, web: null, forget: null, reset: false, add: null, fresh: false, dev: false };
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
-    if (a === "--understand" || a === "-u") mode = "understand";
-    else if (a === "--anti-vibe" || a === "-a") mode = "anti-vibe";
-    else if (a === "--plain" || a === "-p") plain = true;
-    else if (a === "--skills" || a === "-s") show = true;
-    else if (a === "--boundary" || a === "-b") bounds = true;
-    else if (a === "--web" || a === "-w") webArgs = args.slice(i + 1);
-    else if (a === "--forget") forget = args.slice(i + 1);
-    else if (a === "--reset") reset = true;
-    else if (a === "--add") addArgs = args.slice(i + 1);
-    else if (a === "--new" || a === "-n") fresh = true;
+    if (a === "--understand" || a === "-u") out.mode = "understand";
+    else if (a === "--anti-vibe" || a === "-a") out.mode = "anti-vibe";
+    // Kept for scripts and habits: there is one terminal surface, and this is it.
+    else if (a === "--plain" || a === "-p") continue;
+    else if (a === "--skills" || a === "-s" || a === "--tree") out.show = true;
+    else if (a === "--boundary" || a === "-b") out.bounds = true;
+    else if (a === "--web" || a === "-w") out.web = args.slice(i + 1);
+    else if (a === "--forget") out.forget = args.slice(i + 1);
+    else if (a === "--reset") out.reset = true;
+    else if (a === "--add") out.add = args.slice(i + 1);
+    else if (a === "--new" || a === "-n") out.fresh = true;
+    else if (a === "--dev") out.dev = true;
     else rest.push(a);
-    if (forget !== null || addArgs !== null || webArgs !== null) break;
+    if (out.forget !== null || out.add !== null || out.web !== null) break;
   }
-  return { mode, plain, request: rest.join(" ").trim(), show, bounds, web: webArgs, forget, reset, add: addArgs, fresh };
+  out.request = rest.join(" ").trim();
+  return out;
 }
 
 /** `"recursion" --in python` into a name and a language. */
@@ -72,34 +70,44 @@ function nameAndLang(args: string[]): { name: string; lang: string } {
   };
 }
 
-/** The languages worth drawing: whatever has something unlocked, plus where they're standing. */
+// -- the tree ---------------------------------------------------------------
+
+/** The languages worth drawing: whatever has something on the tree, plus where they're standing. */
 function langsToShow(t: skills.Tree, root: string): string[] {
   const here = root ? mainLang(readRepo(root)) : "";
   return [...new Set([here, ...t.skills.map((s) => s.lang)].filter(Boolean))];
 }
 
-/** The tree, printed. */
-function printSkills(root: string) {
-  const t = skills.read();
-  const langs = langsToShow(t, root);
-  if (!t.skills.length && !langs.length) {
-    console.log(`\n  ${c.dim("nothing unlocked yet. ask dum for something, or: dum \"course printing in python\"")}`);
-    console.log(`  ${c.dim(`curated tracks: ${curriculum.languages().join(", ")}`)}\n`);
-    return;
-  }
-  console.log();
-  for (const l of curriculum.view(t, langs)) {
-    const m = /^(\s*)([●◐○·]) (.*)$/.exec(l);
-    if (!m) console.log(l ? `  ${c.bold(l)}` : "");
-    else if (m[2] === "●") console.log(`  ${m[1]}${c.green("●")} ${m[3]!.replace(/  applied$/, c.dim("  applied"))}`);
-    else if (m[2] === "◐") console.log(`  ${m[1]}${c.blue("◐")} ${m[3]!.replace(/  recognized$/, c.dim("  recognized"))}`);
-    else if (m[2] === "○") console.log(`  ${m[1]}${c.blue("○")} ${m[3]!.replace(/  course open$/, c.dim("  course open"))}`);
-    else console.log(`  ${m[1]}${c.dim(`· ${m[3]}`)}`);
-  }
-  const where = `${skills.folder()}/`.replace(homedir(), "~");
-  console.log(`  ${c.green("●")} ${c.dim("built - AI writes it")}   ${c.blue("◐")} ${c.dim("recognized - AI may use it as a tool")}   ${c.blue("○")} ${c.dim("course open")}   ${c.dim("· locked")}`);
-  console.log(`  ${c.dim(`one note per skill in ${where} - open the folder in Obsidian if you like.`)}`);
-  console.log();
+/**
+ * The tree as text: what you know, then each track with its levels, prerequisites and what's open
+ * next. `arg` picks a language or "all"; with nothing chosen and nothing to go on, every track's
+ * summary, so an empty tree still shows where to start.
+ */
+function treeText(t: skills.Tree, root: string, arg = ""): string {
+  const want = arg.trim().toLowerCase().replace(/^in\s+/, "");
+  const known = curriculum.languages();
+  const lang = want && want !== "all" ? skills.langName(want) : "";
+  if (lang && !known.includes(lang)) return `no curated track for "${arg.trim()}". tracks: ${known.join(", ")}.\n:tree <language> picks one; :tree all shows every track.`;
+  const langs = lang ? [lang] : want === "all" ? [] : langsToShow(t, root);
+  const built = t.skills.filter((s) => skills.rank(s.level) >= skills.rank("build")).length;
+  const out = [t.skills.length ? `you know: ${built} built, ${t.skills.length - built} recognized only` : "you know: nothing on the tree yet", ""];
+  if (want !== "all" && !langs.length) {
+    for (const tr of curriculum.tracks()) {
+      const p = curriculum.progress(t, tr);
+      const next = curriculum.frontier(t, tr);
+      out.push(`${tr.lang && tr.name !== tr.lang ? `${tr.lang} · ${tr.name}` : tr.name}  ${curriculum.bar(p.done, p.total)}  ${p.done}/${p.total}`);
+      out.push(`  ○ next: ${next.slice(0, 4).join(", ") || "nothing open yet"}${next.length > 4 ? ` (+${next.length - 4})` : ""}`);
+    }
+    out.push("", ":tree <language> shows a track's skills, levels and prerequisites; :tree all shows them all.");
+  } else out.push(...curriculum.view(t, langs, want === "all"));
+  out.push(
+    "",
+    "● built   ◐ recognized   ○ open: its prerequisites are built   · locked",
+    "AI writes a concept only once you've built it, and uses a tool once you recognize it. The project's core stays yours.",
+    ":practice <skill> suggests a task for your own editor; :submit it when it's done. :skill x adds what you can already write.",
+    `one note per skill in ${`${skills.folder()}/`.replace(homedir(), "~")}`,
+  );
+  return out.join("\n");
 }
 
 /** `dum --web [server | rotate | off]`: the private web link to your tree. */
@@ -155,23 +163,19 @@ function printBoundary() {
   console.log();
 }
 
-/** Ask one line on the terminal. Empty string when input has ended. */
-async function line(prompt: string): Promise<string> {
-  const rl = createInterface({ input: stdin, output: stdout });
-  try {
-    return await rl.question(prompt);
-  } catch {
-    return "";
-  } finally {
-    rl.close();
-  }
-}
-
 /** Start the tree over. */
 async function resetSkills() {
   const n = skills.read().skills.length;
   if (n) {
-    const ok = (await line(`\n  start your skill tree over? ${n} skill${n === 1 ? "" : "s"} get moved aside, not deleted. [y/N] `)).trim().toLowerCase();
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    let ok = "";
+    try {
+      ok = (await rl.question(`\n  start your skill tree over? ${n} skill${n === 1 ? "" : "s"} get moved aside, not deleted. [y/N] `)).trim().toLowerCase();
+    } catch {
+      /* input ended: that's a no */
+    } finally {
+      rl.close();
+    }
     if (ok !== "y" && ok !== "yes") {
       console.log(`\n  ${c.dim("left it alone.")}\n`);
       return;
@@ -183,15 +187,12 @@ async function resetSkills() {
 
 const RULE = "only add what you can write from a blank file, completely without AI.";
 
+// One line per paragraph: the renderer wraps to the width it has.
 const EMPTY_TREE = [
-  "Nothing's unlocked yet, so dum won't write a line of code for you.",
+  "Nothing's on your tree yet, so dum won't write code for you. It will still plan with you, read what you share, and ask about the decisions that matter.",
   "",
-  "Ask for something anyway. dum shows the skills it rests on. A locked",
-  "one is yours to type, or you unlock it with a short course:",
-  "",
-  "  course printing in python",
-  "",
-  "Courses go in order: recursion opens once functions are yours.",
+  ":tree shows the tracks and what's open first.",
+  ":practice <skill> suggests a task to do in your own editor. When it's yours, :submit it.",
   "",
   "Already know some things? Add them, lowest first:",
   "",
@@ -231,26 +232,25 @@ function forgetSkill(name: string, lang: string): string {
   return `${skills.label(hits[0]!)} is locked again.`;
 }
 
-function printHelp() {
-  const d = c.dim;
-  console.log(`
-  ${c.bold("dum")}                       start, inside a git repo
-  ${c.bold('dum "request"')}             start with a request
-  ${c.bold('dum "course x in python"')}  start with a course
-  ${c.bold("dum -a")}                    anti-vibe: explain locked skills instead of typing them
-  ${c.bold("dum --new")}                 a fresh intern in this repo
-  ${c.bold("dum -p")}                    plain lines instead of panes
+const HELP = `
+  dum                         start, inside a git repo
+  dum "request"               start with a request
+  dum -a | -u                 anti-vibe or understand mode, saved for this repo
+  dum --new                   a fresh intern in this repo (the old session is moved aside)
+  dum -p                      accepted for scripts; the terminal is the same
+  dum-dev, dum --dev          development edition: :self proposes changes to dum, :restart reloads
+  dum --memory                notes remembered for this repo
+  dum --context               personal background used for project suggestions
 
-  ${d("your skill tree")}
-  dum --skills              what's unlocked, open, and locked
-  dum --boundary            what AI may do in this repo
-  dum --web <server>        your tree at a private link you can edit ${d("(rotate, off)")}
-  dum --add "x, y" --in c   add skills you can write without AI, lowest first
-  dum --forget "x" --in c   lock one again ${d("(--reset: start over)")}
+  your skill tree
+  dum --skills [lang | all]   tracks, levels, prerequisites and what's open next
+  dum --boundary              what AI may do in this repo
+  dum --web <server>          your tree at a private link you can edit (rotate, off)
+  dum --add "x, y" --in c     add skills you can write without AI, lowest first
+  dum --forget "x" --in c     lock one again (--reset: start over)
 
-  ${d("inside dum, :help lists the rest.")}
-`);
-}
+  inside dum, :help lists the commands.
+`;
 
 /** The repo root, or "" outside one. */
 function repoRoot(): string {
@@ -261,20 +261,72 @@ function repoRoot(): string {
   }
 }
 
+// -- the repo's mode ----------------------------------------------------------
+
+type Prefs = { mode?: Mode; explained?: boolean };
+
+const ANTI_VIBE = [
+  "anti-vibe changes how dum coaches you, not what AI may write.",
+  "",
+  "- Explaining a concept here counts as recognizing it. It no longer lets dum write that concept:",
+  "  that needed only an explanation in earlier versions, and now it needs your build evidence",
+  "  (your own unaided implementation, submitted with :submit and reviewed) in both modes.",
+  "- Tools still need recognizing, and the project's core stays yours in both modes.",
+  "- Skills already on your tree keep the level they have.",
+  "",
+  "dum -u switches this repo back to understand.",
+].join("\n");
+
+function readPrefs(root: string): Prefs {
+  try {
+    const raw: unknown = JSON.parse(readState(root, "preferences.json", 16 * 1024) ?? "{}");
+    if (!raw || typeof raw !== "object") return {};
+    const mode = "mode" in raw && (raw.mode === "understand" || raw.mode === "anti-vibe") ? raw.mode : undefined;
+    return { ...(mode ? { mode } : {}), ...("explained" in raw && raw.explained === true ? { explained: true } : {}) };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The mode a flag chose, saved for next time, or the one saved before; understand by default.
+ * The first anti-vibe start after the gates tightened says what changed, once, as a board.
+ */
+function chooseMode(root: string, flag: Mode | null): { mode: Mode; changed: boolean; explain: boolean } {
+  const prefs = readPrefs(root);
+  const mode = flag ?? prefs.mode ?? "understand";
+  const explain = mode === "anti-vibe" && !prefs.explained;
+  const next: Prefs = { ...prefs, mode, ...(explain ? { explained: true } : {}) };
+  const changed = mode !== (prefs.mode ?? "understand");
+  if (changed || explain || (flag && !prefs.mode)) writeState(root, "preferences.json", JSON.stringify(next, null, 2) + "\n");
+  return { mode, changed, explain };
+}
+
+// -- the session ------------------------------------------------------------
+
 async function main() {
-  if (argv.slice(2).some((a) => a === "--help" || a === "-h")) return printHelp();
-  const { mode, plain, request: fromArgs, show, bounds, web: webArgs, forget, reset, add: addArgs, fresh } = parse(argv.slice(2));
+  const argList = argv.slice(2);
+  if (argList.some((a) => a === "--help" || a === "-h")) return void console.log(HELP);
+  if (argList.includes("--context")) return void console.log(context.describe(context.read()));
+  if (argList.includes("--memory")) return void console.log(memory.describe(readRepo(cwd()).root));
+  const args = parse(argList);
+  const restarted = process.env.DUM_RESTARTED === "1";
+  delete process.env.DUM_RESTARTED;
+  const fromArgs = restarted || args.show ? "" : args.request;
 
   // The tree is yours, not the repo's, so looking at it or editing it works from anywhere.
-  if (webArgs !== null) return webCommand(webArgs);
+  if (args.web !== null) return webCommand(args.web);
   // Whatever was changed on the web shows up before anything is read. A server that doesn't
   // answer costs a few seconds, once.
-  if (show || addArgs !== null || forget !== null) await web.syncNow();
-  if (show) return printSkills(repoRoot());
-  if (bounds) return printBoundary();
-  if (reset) return resetSkills();
-  if (addArgs !== null) {
-    const { name, lang } = nameAndLang(addArgs);
+  if (args.show || args.add !== null || args.forget !== null) await web.syncNow();
+  if (args.show) {
+    const text = `\n${infoLines(treeText(skills.read(), repoRoot(), args.request)).map((l) => (l ? `  ${l}` : "")).join("\n")}\n`;
+    return void console.log(process.env.NO_COLOR ? printable(text) : text);
+  }
+  if (args.bounds) return printBoundary();
+  if (args.reset) return resetSkills();
+  if (args.add !== null) {
+    const { name, lang } = nameAndLang(args.add);
     if (!name) {
       console.error(`\n  usage: dum --add "<skill>, <skill>" [--in <language>]   (${RULE})\n`);
       exit(1);
@@ -283,8 +335,8 @@ async function main() {
     await web.syncNow();
     return;
   }
-  if (forget !== null) {
-    const { name, lang } = nameAndLang(forget);
+  if (args.forget !== null) {
+    const { name, lang } = nameAndLang(args.forget);
     if (!name) {
       console.error(`\n  usage: dum --forget "<skill>" [--in <language>]   (\`dum --skills\` lists them)\n`);
       exit(1);
@@ -295,22 +347,46 @@ async function main() {
   }
 
   const repo = readRepo(cwd());
-  // A fresh intern: its memory and any open holes moved aside, not deleted.
-  if (fresh) {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    for (const f of ["session", "todos.json"]) {
+  // A fresh intern: its memory and any open work moved aside, not deleted.
+  if (args.fresh && !restarted) memory.fresh(repo.root);
+  const { mode, changed, explain } = chooseMode(repo.root, args.mode);
+  const personal = context.read();
+  const store = new Store(repo.name, mode, repo.root, repo.files);
+  const saved = memory.load(repo.root);
+  store.restoreTranscript(saved.entries);
+  const stopMemory = memory.attach(repo.root, store);
+  store.setModel("intern", MODELS.dum.model, MODELS.dum.effort);
+  store.setModel("wizard", wizard.MODEL, wizard.EFFORT);
+  store.setUnlocked(skills.read().skills.length);
+
+  let term: Terminal | null = null;
+  let finished = false;
+  /** Every way out goes through here, once: save, put the terminal back, leave. */
+  const shutdown = (code: number): never => {
+    if (!finished) {
+      finished = true;
       try {
-        renameSync(`${repo.root}/.dum/${f}`, `${repo.root}/.dum/${f}.old-${stamp}`);
+        memory.save(repo.root, store.getSnapshot().transcript);
       } catch {
-        /* nothing to move */
+        /* attach has kept it as it went */
+      }
+      stopMemory();
+      term?.stop();
+      // For scripts: the session as entries with their kinds, not as drawn text.
+      if (process.env.DUM_TRANSCRIPT) {
+        try {
+          writeFileSync(process.env.DUM_TRANSCRIPT, JSON.stringify(store.getSnapshot().transcript));
+        } catch {
+          /* nothing to keep */
+        }
       }
     }
-  }
-  // From the first screen, not the first request: startup has bugs too.
-  debugTo(repo.root);
-  const store = new Store(repo.name, mode, repo.root, repo.files);
-  store.setUnlocked(skills.read().skills.length);
-  store.setModel("wizard", wizard.MODEL, wizard.EFFORT);
+    return exit(code);
+  };
+
+  store.onMemory = () => memory.describe(repo.root);
+  store.onRemember = (note) => store.note(`remembered: ${memory.remember(repo.root, note)}`);
+  store.onContext = () => context.describe(personal);
   store.onSkillEdit = (action, name, lang) => {
     const l = skills.langName(lang);
     const msg = action === "add" ? addSkills(name, l || mainLang(repo)) : forgetSkill(name, l);
@@ -318,11 +394,7 @@ async function main() {
     web.soon();
     store.show(action === "add" ? "added" : "forgot", msg);
   };
-  store.onSkills = () => {
-    const t = skills.read();
-    const lines = curriculum.view(t, langsToShow(t, repo.root));
-    return [...(lines.length ? lines : ["nothing unlocked yet."]), "● built   ◐ recognized   ○ course open   · locked", "course <skill> takes one.", "edit your tree on the webpage: :web"].join("\n");
-  };
+  store.onSkills = (arg) => treeText(skills.read(), repo.root, arg);
   store.onWeb = async (server) => {
     let conf = web.config();
     if (server) {
@@ -336,135 +408,64 @@ async function main() {
     const status = result.ok ? "synced - edits on the webpage are on this tree now." : `not synced: ${result.why}`;
     return `${web.pageUrl(conf)}\n\n${status}\n\nEdit skills on the page, then type :web again to use those changes here.\nAnyone with this link can see and edit your tree. dum --web rotate gives you a new one.`;
   };
-  // The web copy's edits come down in the background; the header catches up when they land.
-  void web.syncNow().then((r) => r.ok && r.pulled && store.setUnlocked(skills.read().skills.length));
   store.onBoundary = () => boundary.lines(boundary.boundary(skills.read(), repo.root, repo.files)).join("\n");
+  if (args.dev) {
+    store.onSelfChange = (request) => self.maintain(self.checkout, request, store);
+    store.onRestart = () => shutdown(75);
+  }
+  // Inspection, changes, practice, submissions and git commands answer from the first prompt on.
+  prepare(repo, mode, store, personal);
+
+  term = new Terminal(store, { history: saved.entries.length, onEnd: shutdown });
+  store.onLog = () => term?.log();
+
+  if (saved.entries.length) store.note(`restored ${saved.entries.length} conversation entries - :log shows them`);
+  if (saved.warning) store.note(saved.warning);
+  if (args.dev) store.note(`development edition - :self proposes changes to ${self.checkout} for you to apply in your editor; :restart loads your saved changes`);
+  if (personal.text) store.note(`personal context loaded: ${personal.path} - :context shows it`);
+  if (personal.warning) store.note(personal.warning);
+  if (changed) store.note(`mode: ${mode}, saved for this repo${mode === "anti-vibe" ? " - dum -u switches back" : " - dum -a switches to anti-vibe"}`);
+  if (mode === "anti-vibe" && !explain) store.note("anti-vibe: explanations count as recognition only; AI writes a concept once you've built it, same as understand");
+  // Earlier sessions' open work is still yours: said, never forced.
+  const holes = todos.load(repo.root);
+  if (holes.length) {
+    const list = holes.slice(0, 4).map((h) => `${h.concept} in ${h.path}`).join(", ");
+    store.note(`still yours from an earlier session: ${list}${holes.length > 4 ? ` (+${holes.length - 4})` : ""}. Write it in your editor, then :submit <skill> <path> --unaided.`);
+  }
+  const ongoing = course.active(repo.root);
+  if (ongoing) store.note(`an optional course is unfinished: ${skills.label({ name: ongoing.course.skill, lang: ongoing.course.lang })}. "course ${ongoing.course.skill} in ${ongoing.course.lang}" picks it up.`);
+
   // An empty tree is where people go wrong: say how it works, once, up front. Otherwise, in a
   // repo with something in it, the first thing is what AI may do here.
-  if (!skills.read().skills.length) store.show("nothing's unlocked yet", EMPTY_TREE);
+  if (explain) store.show("anti-vibe, tightened", ANTI_VIBE);
+  else if (!skills.read().skills.length) store.show("nothing's on your tree yet", EMPTY_TREE);
   else if (!fromArgs && repo.files.some((f) => skills.langOf(f))) store.command("boundary");
+  // The web copy's edits come down in the background; the header catches up when they land.
+  void web.syncNow().then((r) => r.ok && r.pulled && store.setUnlocked(skills.read().skills.length));
 
-  // A pane layout needs a terminal it can own.
-  const tui = !plain && stdout.isTTY && stdin.isTTY;
-
-  const ui = tui ? await startInk(store, readLayout(repo.root)) : null;
-  const stop = ui ? ui.stop : startPlain(store, repo.name, mode);
-  if (ui) {
-    // A program in the shell (./guess asking for a number) gets what you type.
-    store.onProgram = (line) => {
-      if (!pty.running()) return false;
-      store.showMiddle("shell");
-      pty.write(line + "\r");
-      return true;
-    };
-    store.onInterrupt = () => {
-      if (pty.running()) return pty.write("\x03");
-      ui.stop();
-      exit(130);
-    };
-    setInterval(() => store.setRunning(pty.running()), 400).unref();
+  let request = (fromArgs || (await store.askQuestion("what do you want?", "", false))).trim();
+  // A maintenance request can be the first input, before opening a learning SDK session.
+  while (/^:\s*self(?:\s|$)/i.test(request)) {
+    const reply = await store.changeSelf(request.replace(/^:\s*self\s*/i, ""));
+    if (!store.onSelfChange) store.note(reply);
+    request = (await store.askNext()).trim();
   }
-  // In the panes, a command types into the shell page. Plain mode has no pages, so it runs the
-  // command in the terminal directly.
-  let shelling = false;
-  store.onShell = (cmd) => {
-    if (ui) {
-      pty.setCwd(repo.root);
-      store.openShell();
-      if (cmd) pty.write(cmd + "\r");
-      return;
-    }
-    if (shelling) return;
-    shelling = true;
-    void shell
-      .run(cmd, repo.root, false)
-      .then((code) => store.note(cmd ? `$ ${cmd}  (exit ${code})` : "back from the shell."))
-      .finally(() => (shelling = false));
-  };
+  if (!request) {
+    store.note("nothing to do.");
+    return shutdown(0);
+  }
+  if (["exit", "quit", ":q", "bye"].includes(request.toLowerCase())) return shutdown(0);
   try {
-    // An unfinished hole is the first thing you see on the way back in.
-    const holes = todos.load(repo.root);
-    if (holes.length && !fromArgs) {
-      const t = holes[0]!;
-      let at = 0;
-      try {
-        at = Math.max(0, todos.hole(readFileSync(`${repo.root}/${t.path}`, "utf8"), t.concept));
-      } catch {
-        /* the file went away; the review will say so */
-      }
-      store.setTodos(holes.map((h) => ({ concept: h.concept, path: h.path, course: courseFor(skills.read(), h) })));
-      store.openFile(t.path, at);
-    }
-    const how = mode === "anti-vibe" ? "explain it here and dum fills it" : "tab into the file, type it, :w, and say done";
-    const request =
-      fromArgs ||
-      (holes.length
-        ? await store.askQuestion(
-            `your turn: ${holes[0]!.concept} in ${holes[0]!.path}`,
-            `${how}.${courseFor(skills.read(), holes[0]!) ? ` or course ${courseFor(skills.read(), holes[0]!)}.` : ""} or ask for something else.`,
-            false,
-          )
-        : await store.askQuestion("what do you want?", "", false)
-      ).trim();
-    if (!request) {
-      store.note("nothing to do.");
-      return;
-    }
-    await run(request, repo, mode, store);
-  } finally {
-    stop();
-    // For scripts: the session as entries with their kinds, not as drawn text.
-    if (process.env.DUM_TRANSCRIPT) {
-      try {
-        writeFileSync(process.env.DUM_TRANSCRIPT, JSON.stringify(store.getSnapshot().transcript));
-      } catch {
-        /* nothing to keep */
-      }
-    }
+    await run(request, repo, mode, store, personal);
+  } catch (err) {
+    store.note(`✗ ${(err as Error).message}`);
+    return shutdown(1);
   }
-}
-
-async function startInk(store: Store, layout: LayoutNode): Promise<{ stop: () => void }> {
-  // Imported lazily so the plain path never pays to load React and Ink, which matters for `dum`
-  // in a pipe and for the startup cost of `--plain`.
-  const [{ render }, React, { App }] = await Promise.all([
-    import("ink"),
-    import("react"),
-    import("./panes/App.tsx"),
-  ]);
-  // Mouse reports on, and a filtered stdin so Ink never sees them.
-  const input = filtered(stdin);
-  const mouseOn = () => stdout.write(MOUSE_ON);
-  const mouseOff = () => stdout.write(MOUSE_OFF);
-  process.on("exit", mouseOff);
-  const mount = () => {
-    mouseOn();
-    // ctrl-c is dum's to route: to a program in the shell, or to quit.
-    return render(React.createElement(App, { store, layout }), { exitOnCtrlC: false, stdin: input.stdin as never });
-  };
-  const app = mount();
-  return {
-    stop: () => {
-      app.unmount();
-      input.close();
-      mouseOff();
-      pty.kill();
-    },
-  };
-}
-
-function startPlain(store: Store, repo: string, mode: Mode): () => void {
-  banner(repo, mode);
-  const input = new Input();
-  // Runs for the life of the process: it is a renderer, not a step.
-  void runPlain(store, input).catch((err: Error) => {
-    console.error(`\n  \x1b[38;5;167m✗\x1b[0m ${err.message}\n`);
-    exit(1);
-  });
-  return () => input.close();
+  return shutdown(0);
 }
 
 main().catch((err: Error) => {
+  process.stdout.write("\n");
   console.error(`\n  \x1b[38;5;167m✗\x1b[0m ${err.message}\n`);
   exit(1);
 });

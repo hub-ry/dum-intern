@@ -2,9 +2,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { deps, langs, boundary, lines } from "../src/boundary.ts";
+import { deps, langs, boundary } from "../src/boundary.ts";
 import { unlock, type Tree } from "../src/skills.ts";
 
 function dir(files: Record<string, string>): string {
@@ -41,9 +41,8 @@ test("every manifest's dependencies are read, versions and markers stripped", ()
   ]);
 });
 
-test("a repo with nothing in it says so, and broken manifests are skipped", () => {
+test("broken manifests are skipped", () => {
   assert.deepEqual(deps(dir({ "package.json": "{nope" }), []), []);
-  assert.deepEqual(lines(boundary({ skills: [] }, dir({}), [])), ["no source files or manifests here yet - it's whatever you start."]);
 });
 
 test("the boundary says what AI writes per language and which tools you recognize", () => {
@@ -57,20 +56,33 @@ test("the boundary says what AI writes per language and which tools you recogniz
   assert.deepEqual(b.langs[0]!.built, ["printing", "variables", "functions"]);
   assert.ok(b.langs[0]!.open.includes("arithmetic"));
   assert.deepEqual(b.tools.map((d) => [d.name, d.recognized]), [["fastapi", true], ["sqlalchemy", false]]);
-  const text = lines(b).join("\n");
-  assert.match(text, /^python  █+░+  3\/\d+  · 2 files$/m);
-  assert.match(text, /^  AI writes: printing, variables, functions$/m);
-  assert.match(text, /^typescript  ░+  0\/\d+  · 1 file\n  AI writes nothing here yet - every line of it is yours$/m);
-  assert.match(text, /^tools \(requirements\.txt\)\n  ✓ fastapi  AI may use it\n  \? sqlalchemy  say what it's for when a plan needs it$/m);
 });
 
-test("the opening question leaves the first board up; the intern's own question takes it down", async () => {
-  const { Store } = await import("../src/store.ts");
-  const s = new Store("r", "understand");
-  s.show("what AI may do in r", "python ...");
-  void s.askQuestion("what do you want?", "", false);
-  assert.equal(s.getSnapshot().stage.kind, "info");
-  s.submit("a cli");
-  void s.askQuestion("one value or a list?", "");
-  assert.equal(s.getSnapshot().stage.kind, "code");
+test("revoked prerequisites close dependent permissions and practice without deleting historical builds", () => {
+  let t: Tree = { skills: [] };
+  for (const name of ["printing", "variables", "for loops", "list comprehensions"]) {
+    t = unlock(t, { name, lang: "python", how: "typed", why: "historical build" });
+  }
+  const before = structuredClone(t);
+  const root = dir({});
+  try {
+    const locked = boundary(t, root, ["app.py"]).langs[0]!;
+    assert.ok(!locked.built.includes("for loops"));
+    assert.ok(!locked.built.includes("list comprehensions"));
+    assert.ok(!locked.open.includes("list comprehensions"));
+    assert.deepEqual(t, before);
+    t = unlock(t, { name: "lists", lang: "python", how: "typed", why: "prerequisite restored" });
+    const restored = boundary(t, root, ["app.py"]).langs[0]!;
+    assert.ok(restored.built.includes("for loops"));
+    assert.ok(restored.built.includes("list comprehensions"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a manifest that's a symlink out of the repo is skipped, not read", () => {
+  const outside = dir({ "requirements.txt": "secretpkg\n" });
+  const root = dir({ "go.mod": "module x\n\nrequire github.com/spf13/cobra v1.8.0\n" });
+  symlinkSync(`${outside}/requirements.txt`, `${root}/requirements.txt`);
+  assert.deepEqual(deps(root, []).map((d) => d.name), ["cobra"]);
 });

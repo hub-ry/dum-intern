@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dum-intern launcher. Runs the package's own tsx: the panes are JSX, which Node can't strip.
+# dum-intern launcher. Runs the package's own tsx loader: Node can't strip types from cli.tsx.
 set -euo pipefail
 
 # `npm link` makes this a symlink, and macOS readlink has no -f, hence the loop.
@@ -12,7 +12,13 @@ while [ -L "$target" ]; do
 done
 root="$(cd -P "$(dirname "$target")/.." && pwd)"
 
-# Node warnings on stderr land on top of the panes; DUM_DEBUG brings them back.
+# Node warnings on stderr land in the middle of the conversation; DUM_DEBUG brings them back.
 [ -n "${DUM_DEBUG:-}" ] || export NODE_NO_WARNINGS=1
 
-exec "$root/node_modules/.bin/tsx" "$root/src/cli.tsx" "$@"
+# A requested restart loads the edited sources in a fresh process.
+while true; do
+  code=0
+  node --import "$root/node_modules/tsx/dist/loader.mjs" "$root/src/cli.tsx" "$@" || code=$?
+  [ "$code" -eq 75 ] || exit "$code"
+  export DUM_RESTARTED=1
+done

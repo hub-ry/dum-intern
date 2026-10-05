@@ -1,20 +1,12 @@
 // What AI may do in a repo it has never seen: its languages and its dependencies, held against
 // your tree. Read from the files in code - no model guesses at what a project uses.
 
-import { readFileSync } from "node:fs";
 import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
+import { Workspace } from "./workspace.ts";
 
 /** A library or tool the repo depends on, and the manifest that says so. */
 export type Dep = { name: string; lang: string; from: string };
-
-const read = (root: string, file: string) => {
-  try {
-    return readFileSync(`${root}/${file}`, "utf8");
-  } catch {
-    return null;
-  }
-};
 
 /** The name in a requirement line: `fastapi[all]>=0.110 ; python_version>"3.8"` is fastapi. */
 function pyName(spec: string): string {
@@ -41,7 +33,17 @@ export function deps(root: string, files: string[]): Dep[] {
   const add = (name: string, lang: string, from: string) => {
     if (name && !out.some((d) => d.name === name && d.lang === lang)) out.push({ name, lang, from });
   };
-  const pkg = read(root, "package.json");
+  // Only these known manifests, through the workspace's checks: a symlink out of the repo, a
+  // secret or an oversized file is skipped like a missing one. Only dependency names leave here.
+  const ws = new Workspace(root);
+  const read = (file: string) => {
+    try {
+      return ws.file(file).text;
+    } catch {
+      return null;
+    }
+  };
+  const pkg = read("package.json");
   if (pkg) {
     try {
       const j = JSON.parse(pkg);
@@ -52,17 +54,17 @@ export function deps(root: string, files: string[]): Dep[] {
       /* not JSON: nothing to read */
     }
   }
-  const req = read(root, "requirements.txt");
+  const req = read("requirements.txt");
   if (req) for (const l of req.split("\n")) if (l.trim() && !/^\s*(#|-)/.test(l)) add(pyName(l), "python", "requirements.txt");
-  const pyproject = read(root, "pyproject.toml");
+  const pyproject = read("pyproject.toml");
   if (pyproject) {
     const list = /^dependencies\s*=\s*\[([\s\S]*?)\]/m.exec(pyproject)?.[1] ?? "";
     for (const m of list.matchAll(/["']([^"']+)["']/g)) add(pyName(m[1]!), "python", "pyproject.toml");
     for (const k of tomlKeys(pyproject, "tool.poetry.dependencies")) if (k !== "python") add(k, "python", "pyproject.toml");
   }
-  const cargo = read(root, "Cargo.toml");
+  const cargo = read("Cargo.toml");
   if (cargo) for (const k of tomlKeys(cargo, "dependencies")) add(k, "rust", "Cargo.toml");
-  const gomod = read(root, "go.mod");
+  const gomod = read("go.mod");
   if (gomod) {
     const block = /^require\s*\(([\s\S]*?)^\)/m.exec(gomod)?.[1] ?? "";
     const lines = [...block.split("\n"), ...[...gomod.matchAll(/^require\s+(\S+\s+\S+)\s*$/gm)].map((m) => m[1]!)];
@@ -71,7 +73,7 @@ export function deps(root: string, files: string[]): Dep[] {
       if (path && !l.includes("// indirect")) add(path.split("/").filter((p) => !/^v\d+$/.test(p)).pop()!.toLowerCase(), "go", "go.mod");
     }
   }
-  const cmake = read(root, "CMakeLists.txt");
+  const cmake = read("CMakeLists.txt");
   if (cmake) for (const m of cmake.matchAll(/find_package\s*\(\s*([A-Za-z0-9_]+)/gi)) add(m[1]!.toLowerCase(), "c++", "CMakeLists.txt");
   return out;
 }
@@ -100,31 +102,32 @@ export function boundary(t: skills.Tree, root: string, files: string[]): Boundar
       return {
         lang,
         files,
-        built: all.filter((n) => skills.holds(t, n, lang)),
+        built: all.filter((n) => curriculum.current(t, n, lang).state === "unlocked"),
         open: tracks.flatMap((tr) => curriculum.frontier(t, tr)),
         done: tracks.reduce((a, tr) => a + curriculum.progress(t, tr).done, 0),
         total: all.length,
       };
     }),
-    tools: deps(root, files).map((d) => ({ ...d, recognized: skills.holds(t, d.name, d.lang, "recognize") })),
+    tools: deps(root, files).map((d) => ({ ...d, recognized: curriculum.current(t, d.name, d.lang, "recognize").state === "unlocked" })),
   };
 }
 
 const MAX_TOOLS = 12;
 
-/** The boundary as lines, for the board, `dum --boundary`, and the intern. */
+/** The boundary as lines, for :boundary, `dum --boundary`, and the intern. */
 export function lines(b: Boundary): string[] {
   const out: string[] = [];
   if (!b.langs.length && !b.tools.length) return ["no source files or manifests here yet - it's whatever you start."];
   for (const l of b.langs) {
     out.push(`${l.lang}  ${l.total ? `${curriculum.bar(l.done, l.total)}  ${l.done}/${l.total}` : "no curated track"}  · ${l.files} file${l.files === 1 ? "" : "s"}`);
-    out.push(l.built.length ? `  AI writes: ${l.built.join(", ")}` : "  AI writes nothing here yet - every line of it is yours");
-    if (l.open.length) out.push(`  next courses: ${l.open.slice(0, 5).join(", ")}`);
+    out.push(l.built.length ? `  dum may write what you've built: ${l.built.join(", ")}` : "  dum writes nothing here yet - every line of it is yours");
+    if (l.open.length) out.push(`  next to practice: ${l.open.slice(0, 5).join(", ")}`);
   }
+  if (b.langs.length) out.push("", "the core of whatever you build stays yours to implement");
   if (b.tools.length) {
     const from = [...new Set(b.tools.map((d) => d.from))].join(", ");
     out.push("", `tools (${from})`);
-    for (const d of b.tools.slice(0, MAX_TOOLS)) out.push(d.recognized ? `  ✓ ${d.name}  AI may use it` : `  ? ${d.name}  say what it's for when a plan needs it`);
+    for (const d of b.tools.slice(0, MAX_TOOLS)) out.push(d.recognized ? `  ✓ ${d.name}  dum may use it` : `  ? ${d.name}  say what it's for when a plan needs it`);
     if (b.tools.length > MAX_TOOLS) out.push(`  + ${b.tools.length - MAX_TOOLS} more`);
   }
   return out;
