@@ -27,7 +27,7 @@
 
 ## Development
 
-Node 22.6+ (CI also runs Node 24), Git, and the `claude` CLI with subscription login for the terminal edition. The desktop app needs none of those at runtime. No system-wide tooling changes are needed.
+Node 22.6+ (CI also runs Node 24), Git, and the `claude` CLI with subscription login for the terminal edition. The desktop app bundles its own Node runtime (Electron) and Claude Code, so it needs neither, but it still needs Git; on a Mac without it, first launch says to install Apple's Command Line Tools. No system-wide tooling changes are needed.
 
 ```sh
 npm install
