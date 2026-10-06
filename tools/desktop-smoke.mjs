@@ -1,14 +1,15 @@
 // Exercises the installed Electron app with a clean private profile. No model or account login.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import puppeteer from 'puppeteer-core';
 import { inflateSync } from 'node:zlib';
 
-const fixture = await mkdtemp(join(tmpdir(), 'dum-desktop-smoke-'));
+// macOS temp folders sit behind a /var symlink, and dum reports the canonical path.
+const fixture = await realpath(await mkdtemp(join(tmpdir(), 'dum-desktop-smoke-')));
 const project = join(fixture, 'sample-project');
 const profile = join(fixture, 'desktop');
 const output = resolve(process.env.DUM_SMOKE_OUTPUT || 'release/desktop-smoke');
@@ -122,12 +123,13 @@ async function snapshot() {
   return reply.snapshot;
 }
 async function until(predicate, label) {
+  let last;
   for (let attempt = 0; attempt < 100; attempt++) {
-    const state = await snapshot();
-    if (predicate(state)) return state;
+    last = await snapshot();
+    if (predicate(last)) return last;
     await delay(100);
   }
-  throw new Error(`${label} did not arrive`);
+  throw new Error(`${label} did not arrive (project ${last.state ? 'open' : 'not open'}; runtime: ${last.runtime.message})`);
 }
 async function stop() {
   if (!active) return;
