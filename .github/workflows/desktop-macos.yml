@@ -2,7 +2,7 @@ name: desktop macOS
 
 on:
   push:
-    branches: [desktop/macos-companion]
+    branches: [main, desktop/macos-companion]
   workflow_dispatch:
 
 permissions:
