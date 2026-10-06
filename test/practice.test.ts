@@ -9,7 +9,7 @@ import { Practice, parseSubmit, parseTarget, toTask, MAX_TASKS } from "../src/pr
 import { Evidence } from "../src/evidence.ts";
 import { Workspace } from "../src/workspace.ts";
 import * as skills from "../src/skills.ts";
-import type { Store } from "../src/store.ts";
+import { Store, Cancelled } from "../src/store.ts";
 
 const BASICS = ["printing", "variables", "functions", "conditionals", "return values"];
 
@@ -22,7 +22,7 @@ function setup(built: string[], reply: (prompt: string) => string | Promise<stri
   let t: skills.Tree = { skills: [] };
   for (const name of built) t = skills.unlock(t, { name, lang: "python", how: "added", level: "build", why: "" });
   if (t.skills.length) skills.write(t);
-  const store = { note: () => {}, setUnlocked: () => {} } as unknown as Store;
+  const store = new Store("r", "understand", root);
   const evidence = new Evidence(root, store);
   const prompts: string[] = [];
   const practice = new Practice(root, store, new Workspace(root), evidence, undefined, async (prompt) => {
@@ -30,7 +30,7 @@ function setup(built: string[], reply: (prompt: string) => string | Promise<stri
     return /^You check practice tasks/.test(prompt) ? audit() : reply(prompt);
   });
   const saved = () => JSON.parse(readFileSync(`${root}/.dum/practice.json`, "utf8"));
-  return { root, practice, prompts, saved, done: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, store, practice, prompts, saved, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 const level = (name: string) => skills.find(skills.read(), name, "python")?.level ?? null;
@@ -300,5 +300,44 @@ test("a submission for a locked skill, an unknown task or a missing file is refu
     assert.match(await practice.submit("variables in python walk.js --unaided"), /none of those files is python/);
   } finally {
     done();
+  }
+});
+
+test("a review or generation that returns after Stop or close records and saves nothing", async () => {
+  const late = (answer: string) => {
+    const { promise, resolve } = Promise.withResolvers<string>();
+    const started = Promise.withResolvers<void>();
+    return { call: () => (started.resolve(), promise), started: started.promise, finish: () => resolve(answer) };
+  };
+
+  // Stop: the reviewer's pass comes back anyway, after the person pressed Stop.
+  const review = late(JSON.stringify({ passed: true, feedback: "base case and the step are both there" }));
+  const a = setup(BASICS, review.call);
+  try {
+    writeFileSync(`${a.root}/walk.py`, "def countdown(n):\n    return [] if n == 0 else [n] + countdown(n - 1)\n");
+    const submitting = a.practice.submit("recursion in python walk.py --unaided");
+    await review.started;
+    a.store.cancel();
+    review.finish();
+    await assert.rejects(submitting, Cancelled);
+    assert.equal(level("recursion"), null, "a stopped review builds nothing, even one that passed");
+    await a.store.settled();
+  } finally {
+    a.done();
+  }
+
+  // Close: generated tasks that arrive after the project closed are not saved.
+  const generate = late(JSON.stringify({ tasks: [task()] }));
+  const b = setup(BASICS, generate.call);
+  try {
+    const suggesting = b.practice.suggest("recursion in python");
+    await generate.started;
+    b.store.close();
+    generate.finish();
+    await assert.rejects(suggesting, (err) => err instanceof Cancelled && err.final);
+    assert.equal(existsSync(`${b.root}/.dum/practice.json`), false);
+    await b.store.settled();
+  } finally {
+    b.done();
   }
 });

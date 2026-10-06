@@ -1,0 +1,42 @@
+appId: com.dumintern.companion
+productName: Dum
+artifactName: Dum-${version}-${os}-${arch}.${ext}
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - package.json
+  - "!node_modules/tsx/**"
+  - "!node_modules/esbuild/**"
+  - "!node_modules/@esbuild/**"
+asar: true
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude
+npmRebuild: false
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+mac:
+  target:
+    - dmg
+    - zip
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  minimumSystemVersion: '13.0'
+  identity: '-'
+  hardenedRuntime: false
+  notarize: false
+  extendInfo:
+    LSUIElement: true
+dmg:
+  title: Dum
+  sign: false
+linux:
+  target: dir
+  icon: build/icon.png
+  category: Development
+publish: null

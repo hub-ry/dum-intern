@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { MODELS, assertProvider, assertSubscription, closed, start, subscriptionEnv } from "../src/runtime.ts";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { MODELS, assertProvider, assertSubscription, closed, login, start, subscriptionEnv } from "../src/runtime.ts";
 import { oneShot, type Query } from "../src/oneshot.ts";
 
 const signal = new AbortController().signal;
@@ -82,6 +84,8 @@ test("oneShot refuses unexpected access and surfaces route and model failures", 
 test("an incomplete SDK handshake needs positive OAuth provenance, never a paid or unknown login", async () => {
   const q = { accountInfo: async () => ({ apiProvider: "firstParty" }) };
   await assertProvider(q, 20, () => ({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }));
+  await assertProvider(q, 20, async () => ({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }));
+  await assert.rejects(assertProvider(q, 20, () => Promise.reject(new Error("couldn't verify the Claude CLI login"))), /couldn't verify/);
   for (const login of [
     {},
     { loggedIn: false, authMethod: "claude.ai", apiProvider: "firstParty" },
@@ -89,6 +93,7 @@ test("an incomplete SDK handshake needs positive OAuth provenance, never a paid 
     { loggedIn: true, authMethod: "claude.ai", apiProvider: "gateway" },
   ]) {
     await assert.rejects(assertProvider(q, 20, () => login), /subscription/);
+    await assert.rejects(assertProvider(q, 20, async () => login), /subscription/, "an asynchronous status check refuses the same logins");
   }
 });
 
@@ -134,4 +139,24 @@ test("managed hooks or routing are refused before starting a Claude process", as
     effective: { hooks: {} }, provenance: {}, sources: [{ source: "managed", settings: { hooks: {} } }],
   })), /managed policy/);
   assert.equal(started, false);
+});
+
+test("a signed-out CLI that prints its status and exits 1 is an answer; a broken one is not", async () => {
+  const dir = mkdtempSync(`${tmpdir()}/dum-login-`);
+  const cli = (name: string, body: string) => {
+    const path = `${dir}/${name}`;
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  try {
+    const out = cli("signed-out", `echo '{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty","email":"x@example.com"}'\nexit 1`);
+    assert.deepEqual(await login(out), { loggedIn: false, authMethod: "none", apiProvider: "firstParty" });
+    for (const bad of [cli("crash", "exit 1"), cli("noise", "echo not json\nexit 1"), cli("shapeless", "echo '{}'"), cli("hung-up", `echo '{"loggedIn":true}' >&2\nkill -9 $$`)]) {
+      await assert.rejects(login(bad), /couldn't verify/, bad);
+    }
+    await assert.rejects(login(`${dir}/missing`), /couldn't verify/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

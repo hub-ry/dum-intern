@@ -10,7 +10,7 @@ import * as todos from "./todos.ts";
 import * as wizard from "./wizard.ts";
 import * as context from "./context.ts";
 import { createState, readState, writeState } from "./workspace.ts";
-import type { CourseCard, Store } from "./store.ts";
+import { Cancelled, type CourseCard, type Store } from "./store.ts";
 
 /** The most lines the gap may ask for. A course is minutes, not an evening. */
 export const GAP_LINES = 3;
@@ -83,8 +83,8 @@ Reply with one JSON object and nothing else:
 }
 
 /** The course, or null if the model didn't produce one worth showing. Route failures throw. */
-export async function design(name: string, lang: string, t: skills.Tree, path: string): Promise<Course | null> {
-  const raw = json(await oneShot(designPrompt(name, lang, t, path), { model: MODELS.helper.model, effort: MODELS.helper.effort }), "{");
+export async function design(name: string, lang: string, t: skills.Tree, path: string, signal?: AbortSignal): Promise<Course | null> {
+  const raw = json(await oneShot(designPrompt(name, lang, t, path), { model: MODELS.helper.model, effort: MODELS.helper.effort, signal }), "{");
   return toCourse(raw, name, lang, path);
 }
 
@@ -118,7 +118,7 @@ export function toVerdict(raw: unknown): Verdict | null {
 }
 
 /** Did what they typed do what the gap asked? Judged like a reviewer, not against an answer key. */
-export async function judge(c: Course, typed: string): Promise<Verdict | null> {
+export async function judge(c: Course, typed: string, signal?: AbortSignal): Promise<Verdict | null> {
   const prompt = `You are dum, checking the one gap someone typed in a three-minute course on
 ${c.skill} in ${c.lang}.
 
@@ -139,11 +139,11 @@ Reply with one JSON object and nothing else:
   "feedback": if it passed, one short line on what they got right. If it failed, ONE
               question that makes them run the failing case in their head - never the
               fix, never code. Contractions, no cheering, plain dashes. }`;
-  return toVerdict(json(await oneShot(prompt, { model: MODELS.helper.model, effort: MODELS.helper.effort }), "{"));
+  return toVerdict(json(await oneShot(prompt, { model: MODELS.helper.model, effort: MODELS.helper.effort, signal }), "{"));
 }
 
 /** A question asked mid-course, answered without doing the gap for them. */
-export async function answer(c: Course, question: string, now: string | null): Promise<string> {
+export async function answer(c: Course, question: string, now: string | null, signal?: AbortSignal): Promise<string> {
   const prompt = `You are dum, running a three-minute course on ${c.skill} in ${c.lang}.
 The lesson: ${c.lesson}
 The gap they're typing: ${c.task}
@@ -152,7 +152,7 @@ They asked: ${question}
 
 Answer in two sentences at most, like a teammate. Never write the code for the gap
 and never describe it line by line - a hint they can act on is fine. Plain dashes only.`;
-  return (await oneShot(prompt, { model: MODELS.helper.model, effort: MODELS.helper.effort })).replace(/\s*—\s*/g, " - ").trim();
+  return (await oneShot(prompt, { model: MODELS.helper.model, effort: MODELS.helper.effort, signal })).replace(/\s*—\s*/g, " - ").trim();
 }
 
 export type Ctx = {
@@ -255,8 +255,13 @@ export async function take(name: string, lang: string, ctx: Ctx, exercise = lang
     let designed: Course | null;
     let aside: string | null;
     try {
-      [designed, aside] = await Promise.all([design(nm, exercise, tree, planned), wizard.aside(nm, exercise).catch(() => null)]);
+      [designed, aside] = await store.helper(async (signal) => {
+        const [made, said] = await Promise.allSettled([design(nm, exercise, tree, planned, signal), wizard.aside(nm, exercise, signal)]);
+        if (made.status === "rejected") throw made.reason;
+        return [made.value, said.status === "fulfilled" ? said.value : null] as const;
+      });
     } catch (err) {
+      if (err instanceof Cancelled) throw err;
       store.say(`couldn't put a course on ${what} together: ${(err as Error).message}`);
       return false;
     }
@@ -351,8 +356,12 @@ export async function take(name: string, lang: string, ctx: Ctx, exercise = lang
       store.working("checking it");
       let v: Verdict | null;
       try {
-        v = await judge(c, body);
+        v = await store.helper((signal) => judge(c, body, signal));
       } catch (err) {
+        if (err instanceof Cancelled) {
+          store.endCourse(card, false);
+          throw err;
+        }
         store.note(`couldn't check it: ${(err as Error).message} - say done again.`);
         continue;
       }
@@ -369,8 +378,12 @@ export async function take(name: string, lang: string, ctx: Ctx, exercise = lang
     }
     store.working("thinking");
     try {
-      store.say((await answer(c, reply, read())) || "not sure - give the gap a go and say done.");
+      store.say((await store.helper((signal) => answer(c, reply, read(), signal))) || "not sure - give the gap a go and say done.");
     } catch (err) {
+      if (err instanceof Cancelled) {
+        store.endCourse(card, false);
+        throw err;
+      }
       store.note(`couldn't answer that: ${(err as Error).message}`);
     }
   }

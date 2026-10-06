@@ -1,8 +1,10 @@
 {
   "name": "dum-intern",
+  "productName": "Dum",
   "version": "0.0.1",
   "description": "One intern. It only writes code on skills you have unlocked.",
   "type": "module",
+  "main": "dist/desktop/main.js",
   "bin": {
     "dum": "./bin/dum",
     "dum-dev": "./bin/dum-dev",
@@ -12,20 +14,29 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p src/desktop/ui",
     "practice": "bash tools/practice.sh",
     "replay": "tsx tools/replay.ts",
     "web": "tsx src/web/server.ts",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "desktop:build": "node tools/desktop-build.mjs",
+    "desktop": "npm run desktop:build && electron .",
+    "desktop:pack": "npm run desktop:build && electron-builder --dir --publish never",
+    "desktop:mac": "npm run desktop:build && electron-builder --mac --publish never",
+    "desktop:smoke": "node tools/desktop-smoke.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^22.0.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "puppeteer-core": "^24.43.1",
     "typescript": "^5.6.0"
   },
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.280",
+    "@anthropic-ai/claude-agent-sdk": "0.3.290",
     "tsx": "^4.23.13",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"

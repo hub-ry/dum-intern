@@ -2,7 +2,10 @@
 // no tools except the in-process MCP servers dum registers itself.
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { accessSync, constants, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import { promisify } from "node:util";
 import { query, resolveSettings, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AccountInfo,
@@ -89,18 +92,58 @@ const FLAGS = {
 
 type Login = { loggedIn?: boolean; authMethod?: string; apiProvider?: string };
 
-/** Read provenance only; auth status's account fields are never returned, logged or sent. */
-function login(): Login {
+/**
+ * The Claude executable. The terminal edition uses `claude` from PATH; the desktop app runs its
+ * bundled native binary and names it by absolute path in DUM_CLAUDE_BIN, since a Finder-launched
+ * app has no user PATH. A set value that isn't an executable file is refused, never looked up.
+ */
+export function claudeExecutable(env: NodeJS.ProcessEnv = process.env): string {
+  const path = env.DUM_CLAUDE_BIN;
+  if (!path) return "claude";
   try {
-    const raw = execFileSync("claude", [
-      "--safe-mode", "--setting-sources", "", "--settings", JSON.stringify(FLAGS), "auth", "status",
-    ], { env: subscriptionEnv(), encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-    const status = JSON.parse(raw);
-    return { loggedIn: status.loggedIn === true, authMethod: status.authMethod, apiProvider: status.apiProvider };
+    if (!isAbsolute(path) || !statSync(path).isFile()) throw new Error("not a file");
+    accessSync(path, constants.X_OK);
   } catch {
-    throw new Error("couldn't verify the Claude CLI login - install a current `claude`, then run it and /login");
+    throw new Error("DUM_CLAUDE_BIN must be an absolute path to the claude executable");
   }
+  return path;
 }
+
+/** CLI arguments that keep a direct `claude` command as isolated as an SDK session: safe mode, no setting files, no hooks or plugins. */
+export function cliArgs(...command: string[]): string[] {
+  return ["--safe-mode", "--setting-sources", "", "--settings", JSON.stringify(FLAGS), ...command];
+}
+
+/**
+ * Read provenance only; auth status's account fields are never returned, logged or sent.
+ * Asynchronous, so a desktop main process keeps drawing while the CLI answers.
+ */
+export async function login(executable?: string): Promise<Login> {
+  let stdout: string;
+  try {
+    const status = promisify(execFile)(executable ?? claudeExecutable(), cliArgs("auth", "status"), {
+      env: subscriptionEnv(), encoding: "utf8", timeout: 15_000, maxBuffer: 64 * 1024,
+    });
+    // Nothing is typed into it: stdin closes now, as the synchronous call's "ignore" did.
+    status.child.stdin?.end();
+    stdout = (await status).stdout;
+  } catch (err) {
+    // Signed out, the CLI still prints its status as JSON but exits 1: that is an answer, not a failure.
+    const failed = err as { code?: unknown; killed?: boolean; stdout?: unknown };
+    if (typeof failed.code !== "number" || failed.killed || typeof failed.stdout !== "string") throw unverified();
+    stdout = failed.stdout;
+  }
+  let parsed: Login;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw unverified();
+  }
+  if (!parsed || typeof parsed !== "object" || typeof parsed.loggedIn !== "boolean") throw unverified();
+  return { loggedIn: parsed.loggedIn, authMethod: parsed.authMethod, apiProvider: parsed.apiProvider };
+}
+
+const unverified = () => new Error("couldn't verify the Claude CLI login - install a current `claude`, then run it and /login");
 
 /**
  * SDK options with no built-in tools, no filesystem settings (so no CLAUDE.md, hooks, plugins,
@@ -123,7 +166,7 @@ export function closed(o: ClosedInput): Options {
     // Safe mode keeps the existing OAuth login while excluding user hooks and customizations.
     extraArgs: { "safe-mode": null },
     settings: FLAGS,
-    pathToClaudeCodeExecutable: "claude",
+    pathToClaudeCodeExecutable: claudeExecutable(),
     strictMcpConfig: true,
     mcpServers: mcp,
     permissionMode: "default",
@@ -155,7 +198,7 @@ export function assertSubscription(init: Init, servers: string[] = ["dum"]): voi
  * The account must be on Anthropic's own route (not a cloud provider or gateway). Prints nothing,
  * and fails closed if Claude can't say within `ms`.
  */
-export async function assertProvider(q: { accountInfo(): Promise<AccountInfo> }, ms = 15_000, auth: () => Login = login): Promise<void> {
+export async function assertProvider(q: { accountInfo(): Promise<AccountInfo> }, ms = 15_000, auth: () => Login | Promise<Login> = login): Promise<void> {
   const stop = new AbortController();
   const late = sleep(ms, undefined, { signal: stop.signal }).then(
     () => { throw new Error("Claude didn't confirm its login route in time"); },
@@ -170,7 +213,7 @@ export async function assertProvider(q: { accountInfo(): Promise<AccountInfo> },
     if (info?.apiKeySource === undefined) {
       // During initialization this SDK reports only the backend, before resolving auth.
       // Confirm OAuth with the same installed CLI, without sending a model prompt.
-      const status = auth();
+      const status = await auth();
       if (!status.loggedIn || status.authMethod !== "claude.ai" || status.apiProvider !== "firstParty") {
         throw new Error("Claude isn't logged in through its first-party subscription - run `claude` and /login");
       }
@@ -186,6 +229,7 @@ export async function assertProvider(q: { accountInfo(): Promise<AccountInfo> },
  * Hold every user message until the SDK's initialization handshake confirms the login.
  * Policy can override flag settings and run hooks even in safe mode, so it is not supported.
  * Fixed system prompts and tool schemas contain no personal context; that waits here too.
+ * Aborting `options.abortController` while this waits closes the Claude process at once.
  */
 export async function start(
   prompt: string | AsyncIterable<SDKUserMessage>,
@@ -193,7 +237,10 @@ export async function start(
   runQuery: typeof query = query,
   settings: typeof resolveSettings = resolveSettings,
 ): Promise<Query> {
+  const signal = options.abortController?.signal;
+  const stopped = () => new Error("stopped before Claude finished starting");
   const policy = await settings({ cwd: options.cwd, settingSources: [] });
+  if (signal?.aborted) throw stopped();
   if (policy.sources.some((s) => s.source === "managed" && Object.keys(s.settings).length)) {
     throw new Error("dum can't isolate Claude's hooks and routing while managed policy is active; an unmanaged first-party subscription login is required");
   }
@@ -207,13 +254,20 @@ export async function start(
     }
   }
   const session = runQuery({ prompt: input(), options });
+  const { promise: aborted, reject: abort } = Promise.withResolvers<never>();
+  aborted.catch(() => {});
+  const onAbort = () => abort(stopped());
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    await assertProvider(session);
+    if (signal?.aborted) throw stopped();
+    await Promise.race([assertProvider(session), aborted]);
     release(true);
     return session;
   } catch (err) {
     release(false);
     session.close();
     throw err;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 }

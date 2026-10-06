@@ -20,6 +20,8 @@ const entry = z.discriminatedUnion("kind", [
   z.object({ ...base, kind: z.literal("diff"), path: text, diff: text, outcome: z.enum(["proposed", "created", "refused"]), artifact: text.optional() }),
   z.object({ ...base, kind: z.literal("user"), text }),
   z.object({ ...base, kind: z.literal("result"), label: text, output: text, code: z.number().int() }),
+  // What one look at a shared picture said; the picture is never saved.
+  z.object({ ...base, kind: z.literal("shot"), label: text, observation: text, sha: z.string().regex(/^[0-9a-f]{64}$/) }),
 ]);
 export const MAX_ENTRIES = 500;
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -130,6 +132,7 @@ function recall(entries: Entry[]): Record<string, unknown>[] {
     if (e.kind === "excerpt") return [{ [e.by === "you" ? "they_shared" : "dum_read"]: `${e.path}:${e.from}`, text: clip(e.text) }];
     if (e.kind === "diff") return [{ change: e.path, outcome: e.outcome, ...(e.artifact ? { artifact: e.artifact } : {}) }];
     if (e.kind === "result") return [{ ran: e.label, exit: e.code, output: clip(e.output) }];
+    if (e.kind === "shot") return [{ they_shared_picture: e.label, one_look_saw: clip(e.observation) }];
     if (e.kind === "fill") return [{ old_session_filled: e.concept, path: e.path }];
     return [];
   });

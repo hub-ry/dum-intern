@@ -13,7 +13,7 @@ import { withoutHeld } from "./gate.ts";
 import { toVerdict } from "./course.ts";
 import { readState, writeState, type Artifact, type Workspace } from "./workspace.ts";
 import type { Evidence } from "./evidence.ts";
-import type { Store } from "./store.ts";
+import { Cancelled, type Store } from "./store.ts";
 
 export type Shape = "learn" | "implement" | "create" | "project";
 export const SHAPES: Shape[] = ["learn", "implement", "create", "project"];
@@ -250,6 +250,11 @@ export class Practice {
     private readonly ask: typeof oneShot = oneShot,
   ) {}
 
+  /** One helper-model call that Stop and close abort: nothing after it runs for work they stopped. */
+  private helped(prompt: string, o: Parameters<typeof oneShot>[1]): Promise<string> {
+    return this.store.helper((signal) => this.ask(prompt, { ...o, signal }));
+  }
+
   /** `:practice` and its arguments. */
   async suggest(arg: string): Promise<string> {
     const a = arg.trim();
@@ -293,7 +298,7 @@ export class Practice {
     const files = this.files();
     const project = basename(this.root);
     const helper = { model: MODELS.helper.model, effort: MODELS.helper.effort, cwd: this.root };
-    const reply = await this.ask(
+    const reply = await this.helped(
       generatePrompt({
         skill: name,
         exercise,
@@ -324,7 +329,7 @@ export class Practice {
     // What a task says it uses is the generator's word. A separate read of its own words names
     // everything it needs, and the tree decides on that: one read, and a task it doesn't clear
     // is left out.
-    const audit = json(await this.ask(auditPrompt({ skill: name, exercise, skills: known, project, files, tasks: offered }), helper), "{") as { tasks?: unknown } | undefined;
+    const audit = json(await this.helped(auditPrompt({ skill: name, exercise, skills: known, project, files, tasks: offered }), helper), "{") as { tasks?: unknown } | undefined;
     if (!audit || !Array.isArray(audit.tasks)) throw new Error("the check of the generated tasks couldn't be read - nothing saved, try :practice again");
     tree = this.tree();
     const gone = closed();
@@ -379,6 +384,7 @@ export class Practice {
       try {
         artifacts.push(await this.workspace.shareExternal(path));
       } catch (err) {
+        if (err instanceof Cancelled) throw err;
         return `couldn't read ${path}: ${(err as Error).message}`;
       }
     }
@@ -386,7 +392,7 @@ export class Practice {
     if (bytes > MAX_SUBMIT_BYTES) return `that's ${Math.ceil(bytes / 1024)} KiB - submit the files that hold ${name}, at most ${MAX_SUBMIT_BYTES / 1024} KiB.`;
     if (exercise && !artifacts.some((a) => skills.langOf(a.path) === exercise)) return `none of those files is ${exercise}.`;
 
-    const verdict = toVerdict(json(await this.ask(reviewPrompt({ skill: name, exercise, task, files: artifacts }), { model: MODELS.helper.model, effort: MODELS.helper.effort, cwd: this.root }), "{"));
+    const verdict = toVerdict(json(await this.helped(reviewPrompt({ skill: name, exercise, task, files: artifacts }), { model: MODELS.helper.model, effort: MODELS.helper.effort, cwd: this.root }), "{"));
     if (!verdict) throw new Error("the reviewer's reply couldn't be read - nothing recorded, :submit again");
     const result = this.evidence.submit(
       { skill: name, lang, paths: artifacts.map((a) => a.path), unaided: p.unaided, feedback: verdict.feedback, passed: verdict.passed },

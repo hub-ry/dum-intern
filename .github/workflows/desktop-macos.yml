@@ -1,0 +1,82 @@
+name: desktop macOS
+
+on:
+  push:
+    branches: [desktop/macos-companion]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: macOS ${{ matrix.arch }} test app
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+            appdir: mac-arm64
+            machine: arm64
+          - os: macos-15-intel
+            arch: x64
+            appdir: mac
+            machine: x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Verify native architecture
+        run: node -e 'if (process.arch !== "${{ matrix.arch }}") throw new Error("runner architecture mismatch")'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build ad-hoc signed, non-notarized test app
+        run: npm run desktop:mac -- --${{ matrix.arch }}
+      - name: Verify native bundle, runtime architecture and distributables
+        env:
+          APP: release/${{ matrix.appdir }}/Dum.app
+          ARCH: ${{ matrix.arch }}
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          set -euo pipefail
+          expected="$(node -p 'require("@anthropic-ai/claude-agent-sdk/package.json").claudeCodeVersion')"
+          claude="$APP/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-$ARCH/claude"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature|flags'
+          test "$(lipo -archs "$APP/Contents/MacOS/Dum")" = "$MACHINE"
+          test "$(lipo -archs "$claude")" = "$MACHINE"
+          test "$("$claude" --version | awk '{print $1}')" = "$expected"
+          hdiutil verify release/*.dmg
+          mkdir -p "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/dmg-app" "$RUNNER_TEMP/zip-app"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" release/*.dmg
+          ditto "$RUNNER_TEMP/dmg/Dum.app" "$RUNNER_TEMP/dmg-app/Dum.app"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+          ditto -x -k release/*.zip "$RUNNER_TEMP/zip-app"
+          codesign --verify --deep --strict "$RUNNER_TEMP/dmg-app/Dum.app"
+          codesign --verify --deep --strict "$RUNNER_TEMP/zip-app/Dum.app"
+      - name: Exercise the app from the disk image without a global Node or Claude runtime
+        env:
+          DUM_SMOKE_EXECUTABLE: ${{ runner.temp }}/dmg-app/Dum.app/Contents/MacOS/Dum
+          DUM_SMOKE_OUTPUT: release/smoke-${{ matrix.arch }}
+        run: npm run desktop:smoke
+      - name: Hash distributable artifacts
+        run: shasum -a 256 release/*.dmg release/*.zip > release/SHA256SUMS-${{ matrix.arch }}.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Dum-macos-${{ matrix.arch }}-unsigned-test
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/SHA256SUMS-*.txt
+            release/smoke-${{ matrix.arch }}/report.json
+          retention-days: 30
+          if-no-files-found: error

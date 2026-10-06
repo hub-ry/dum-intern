@@ -1,12 +1,50 @@
 # dum-intern
 
-- A terminal coding partner beside your IDE. Build real software, teach dum your reasoning, and keep a persistent skill tree of what you've demonstrated.
+- A Mac desktop companion that floats beside your IDE or browser. Build real software, teach dum your reasoning, and keep a persistent skill tree of what you've demonstrated.
 - Dum is a capable beginner, not an examiner. It proposes approaches, asks at meaningful decisions, remembers useful guidance, and uses it in later work.
 - The wizard is the experienced voice beside you. Its short engineering anchors come from verified primary sources, with links. Unsupported specifics are omitted rather than invented.
 - The outcome is being able to take the LLM away and still understand the architecture, start implementing, and ask precise questions.
 - Ryan's recalled story about a chess player improving after teaching a beginner inspired the relationship. It is not verified research or a claim that dum improves learning.
+- The original terminal edition still ships in this repo as development infrastructure. The sections from [Terminal edition](#terminal-edition-development) down describe it, and its teaching rules apply to the desktop app too.
 
-## Start
+## Install on a Mac
+
+- Needs macOS 13 or later and Git. If Git is missing, dum says so on first launch; Apple's Command Line Tools provide it.
+- Needs a Claude subscription that includes `claude-opus-5-5` and `claude-fable-5-1`. There is no API-key setup, paid-usage route, or provider fallback.
+- Nothing else to install. The app carries its own Claude Code runtime (native 2.1.290 for your chip, from Agent SDK 0.3.290). It does not use a global Node or a separately installed `claude`.
+- Download the DMG or ZIP that matches your chip from the latest successful run of the [desktop macOS workflow](https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml), under the artifacts: `Dum-macos-arm64-unsigned-test` for Apple Silicon, `Dum-macos-x64-unsigned-test` for Intel. GitHub asks you to be signed in to download workflow artifacts. Each artifact has SHA-256 sums.
+- Open the DMG and drag Dum to Applications.
+- These builds are ad-hoc signed, not Developer ID signed, and not notarized, because no Apple signing credentials exist for this project. Gatekeeper will refuse the first launch. Per Apple's instructions for apps from unidentified developers, open System Settings, then Privacy & Security, scroll to Security, and click Open Anyway after the refusal. This path was not exercised on a physical Mac for this project.
+- A signed, notarized release needs an Apple Developer ID certificate and notarization credentials. The build config has the hooks off until those exist.
+
+## Use
+
+- Dum has no Dock icon. It lives in the menu bar (Show or Hide dum, Conversation, Quit dum) and as a small floating character pair, Dum and the wizard, that stays on top by default. Settings can also show it on all desktops; how that behaves over full-screen apps is not yet verified on a Mac. Drag it anywhere; it remembers the spot and stays on a display.
+- Click the characters or press the global shortcut, default `Cmd+Shift+D`, to open the conversation window beside them. Change the shortcut in Settings. A shortcut needs a non-Shift modifier, and one another app already owns is refused with the old one kept.
+- First launch asks you to sign in. The Sign in button runs the bundled `claude auth login --claudeai`, which opens Claude's page in your browser. Dum never sees your password. If Claude shows a code, paste it into the form.
+- Choose a project folder (it must be a Git repository), or pick a recent one. The conversation, the skill tree, project memory, history, evidence, and the boundary of what the tree currently permits are all in the window.
+- In the conversation, `Enter` sends, `Shift+Enter` adds a line, and `Esc` closes the open sheet, or hides the window if none is open. You can interrupt a reply with Stop.
+- Sharing your screen is explicit. Pick a screen or window, look at the preview, then press Send with message. A preview that you don't send is discarded and expires after five minutes. There is no microphone capture, key logging, or background screenshot. macOS asks for Screen Recording permission the first time you share.
+- Settings cover always on top, all desktops, launch at login, the shortcut, the project's coaching mode, and an opt-in personal context file.
+- Rarely, a force-quit or crash while dum opens or closes a project leaves `.dum/session.lock.guard` behind, and the next open says so. Quit every Dum, check in the menu bar and Activity Monitor that none is running, then delete that file in Finder and reopen the project. Never delete it while any Dum is running; a live guard or `.dum/session.lock` protects the project from two Dums writing at once. The `.dum` folder is hidden; press `Cmd+Shift+.` in Finder to show hidden files. No Terminal is needed.
+
+## Privacy and storage
+
+- The app's own settings are one private file, `settings.json`, in Electron's per-user data folder: hotkey, window toggles, the eight most recent projects, and the companion position. Electron names that folder `Dum`; on Linux the packaged build used `~/.config/Dum`, and on a Mac it is `~/Library/Application Support/Dum` by Electron's convention. It holds no tokens, transcripts, captures, or account data.
+- Project state, memory, and evidence live in `<project>/.dum/`, and the skill tree in `~/.dum/`, exactly as in the terminal edition (see Access and storage below). Memory and the conversation are plain files you can read, edit, or delete.
+- A screenshot is sent only after the source, preview, and Send steps above. Dum keeps the image in memory for the preview and writes no screenshot bytes to disk, and it doesn't start a resumable Claude session for the desktop app. A text description Claude produces of what it saw does enter the local conversation and project memory. This does not mean Claude's service never retains an image, and it doesn't claim that every copy in memory is securely erased.
+- Conversations use your first-party Claude subscription over the network, so signing in and every reply need a connection. Provider overrides and API credentials are excluded from the model subprocess environment. Subscription provenance is checked before a prompt is sent, and unknown provider, tool, or plugin metadata is refused.
+- Advice, images, and personal context never unlock skills. Skills come from the evidence rules below.
+
+## What is verified
+
+- On Linux under a virtual display (Xvfb), the real Electron app and the packaged Linux build were driven through the same scripted checks (`npm run desktop:smoke`). The renderer has no Node access, the bundled runtime starts from the packaged archive with `PATH` cut to `/usr/bin:/bin:/usr/sbin:/sbin`, a signed-out clean profile reports a real signed-out state, a project opens through the utility process, a stale or out-of-catalog request is refused, the skill tree keeps prerequisite locks, memory and settings persist across a quit and relaunch, and a real screen capture preview can be discarded with its token dead.
+- Real model conversations with Claude Opus 5.5 and Fable 5.1 on a signed-in subscription ran from the same source on that machine. Treat them as qualitative observations.
+- macOS builds are produced on GitHub's macOS runners, one Apple Silicon and one Intel, and the same smoke runs against the app copied out of the DMG. The workflow has not been run yet when this line was written; check the latest run for its outcome.
+- Not verified on a physical Mac: panel focus over full-screen apps and Spaces, the Screen Recording prompt, global-shortcut permission, launch at login, tray rendering, first-launch Gatekeeper, and native interactive sign-in.
+- Screenshots from verification stay private and are never published.
+
+## Terminal edition (development)
 
 Requires Node 22.6+, Git, and a current `claude` CLI logged into a Claude subscription. The app uses `claude-opus-5-5` at high effort for dum and `claude-fable-5-1` at high effort for bounded helpers. The exact models must be available on that login; there is no provider fallback or API-key setup.
 
@@ -20,9 +58,10 @@ dum
 
 - A conversation uses Claude's subscription through the Agent SDK. Tree commands do not need a model call.
 - No Google, Gemini, Antigravity, or paid API-key route. Provider overrides and API credentials are excluded from the model subprocess environment.
-- The SDK launches the installed `claude` CLI. Claude CLI 2.1.289 was exercised with SDK 0.3.280; `claude update` updates the runtime. Subscription provenance is checked before sending conversation or personal context. Unknown provider, tool, or plugin metadata is refused, as are managed settings that could override isolation.
+- The terminal edition's SDK launches the installed `claude` CLI; `claude update` updates it. Claude CLI 2.1.290 matches the SDK 0.3.290 pinned here. Subscription provenance is checked before sending conversation or personal context. Unknown provider, tool, or plugin metadata is refused, as are managed settings that could override isolation.
 - `npm run practice` starts a scratch Git repository with a separate tree and personal context disabled. It prints the paths and leaves them available for inspection.
 - `dum --help` lists startup flags. `:help` lists conversational commands.
+- Build the desktop app from source with `npm run desktop` (compile and launch), `npm run desktop:pack` (unpacked app for this OS), or `npm run desktop:mac` (DMG and ZIP; run on a Mac). `npm run desktop:smoke` drives a built app; see CONTRIBUTING.md.
 
 ## Build and teach
 

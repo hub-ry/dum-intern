@@ -245,12 +245,12 @@ export function compose(raw: string, d: Decision, offered: readonly Anchor[]): s
   return render(anchor, screen(reply.say, d, anchor));
 }
 
-async function ask(d: Decision, moment: "deciding" | "practice" | "course"): Promise<string | null> {
+async function ask(d: Decision, moment: "deciding" | "practice" | "course", signal?: AbortSignal): Promise<string | null> {
   if (!d.request.trim()) return null;
   const offered = candidates(d);
   let raw: string;
   try {
-    raw = await oneShot(prompt(d, offered, moment), { model: MODEL, effort: EFFORT });
+    raw = await oneShot(prompt(d, offered, moment), { model: MODEL, effort: EFFORT, signal });
   } catch {
     // A route or auth failure is dum's to report; the wizard just has nothing to say.
     return null;
@@ -259,12 +259,12 @@ async function ask(d: Decision, moment: "deciding" | "practice" | "course"): Pro
 }
 
 /** The wizard at a decision in the conversation: a sourced line, or null to stay quiet. */
-export async function decision(d: Decision): Promise<string | null> {
+export async function decision(d: Decision, signal?: AbortSignal): Promise<string | null> {
   if (d.practice) return null;
-  return ask(d, "deciding");
+  return ask(d, "deciding", signal);
 }
 
 /** The wizard's half of a course: what it's called out in the world and where it shows up, or null. */
-export async function aside(skill: string, lang: string): Promise<string | null> {
-  return ask({ request: `a short course on ${skill}${lang ? ` in ${lang}` : ""}`, skills: [skill], lang, practice: true }, "course");
+export async function aside(skill: string, lang: string, signal?: AbortSignal): Promise<string | null> {
+  return ask({ request: `a short course on ${skill}${lang ? ` in ${lang}` : ""}`, skills: [skill], lang, practice: true }, "course", signal);
 }

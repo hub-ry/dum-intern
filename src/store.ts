@@ -1,5 +1,6 @@
 // The seam between the agent and whatever is drawing it: one conversation, in order.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Mode } from "./gate.ts";
 
 export type Outcome = "ran" | "held" | "refused";
@@ -42,12 +43,20 @@ export type Entry =
   /** Something you said that wasn't the answer to a question. */
   | { kind: "user"; id: number; text: string }
   /** A read-only command dum ran, and what it printed. */
-  | { kind: "result"; id: number; label: string; output: string; code: number };
+  | { kind: "result"; id: number; label: string; output: string; code: number }
+  /**
+   * A picture they chose to share, as one separate look described it. `sha` (SHA-256) names the
+   * exact picture; the picture itself is never kept. A look that failed is a note instead.
+   */
+  | { kind: "shot"; id: number; label: string; observation: string; sha: string };
+
+/** A yes/no that only they can give, about their own work or their own files. Never answered by default. */
+export type Purpose = "attest" | "share";
 
 /** What the agent is currently blocked on, if anything. */
 export type Prompt =
   /** `intern`: dum asking, rather than the app asking for a request or a permission. */
-  | { type: "question"; question: string; why: string; intern?: boolean }
+  | { type: "question"; question: string; why: string; intern?: boolean; purpose?: Purpose }
   | { type: "plan"; plan: string }
   | { type: "course"; card: CourseCard }
   | { type: "next" }
@@ -73,8 +82,23 @@ export type State = {
   models: { intern: Voice; wizard: Voice };
 };
 
+/** A picture they chose to share with one request: base64 PNG, held only until that turn is sent. */
+export type SharedImage = { data: string; mimeType: "image/png"; label: string };
+
+/**
+ * A parked prompt that was withdrawn rather than answered. Nothing waiting on it may treat that as
+ * a reply. `final`: the store is closed, so no prompt will ever be answered again.
+ */
+export class Cancelled extends Error {
+  constructor(readonly final: boolean) {
+    super(final ? "dum closed" : "stopped");
+  }
+}
+
 /** A command whose work happens elsewhere and may take a while. */
 type Async = (arg: string) => Promise<string | void>;
+
+type Wait = { resolve: (v: string) => void; reject: (err: Cancelled) => void; entryId: number | null; prompt: Prompt };
 
 const CONVERSATION: Stage = { kind: "conversation" };
 
@@ -87,7 +111,7 @@ export class Store {
    * Prompts parked on a person, innermost last. A command can ask for permission while dum's own
    * question is open; answering it gives the outer prompt back.
    */
-  private waits: { resolve: (v: string) => void; entryId: number | null; prompt: Prompt }[] = [];
+  private waits: Wait[] = [];
 
   /** Lines typed while dum was working. Only a "what next" takes them: never an approval. */
   private typedAhead: string[] = [];
@@ -98,6 +122,12 @@ export class Store {
   /** The slow command running, if any. One at a time, so a permission question is unambiguous. */
   private running = "";
   private runningPrompt: Prompt = null;
+  private closed = false;
+  /** Aborted by Stop and by close: every helper-model call and slow command in flight sees it. */
+  private stopper = new AbortController();
+  private readonly scope = new AsyncLocalStorage<AbortSignal>();
+  /** Work started under `helper` or `slow` that hasn't settled yet. */
+  private work = new Set<Promise<unknown>>();
 
   onSkillEdit: ((action: "add" | "forget", name: string, lang: string) => void) | null = null;
   /** What `:tree [language|all]` and `:skills` show. */
@@ -121,6 +151,8 @@ export class Store {
   onSubmit: Async | null = null;
   /** `:run status|diff|log`: dum's read-only git catalog. Never a shell. */
   onRun: Async | null = null;
+  /** A picture shared with the next request: looked at once, the description shared, the picture dropped. */
+  onAttach: ((image: SharedImage, note: string) => Promise<void>) | null = null;
   /** Set while a Claude turn is in flight: ctrl-c stops that turn. */
   onInterrupt: (() => void) | null = null;
   /** Set by a renderer that can reprint the whole conversation itself. */
@@ -149,6 +181,98 @@ export class Store {
   /** A local command suspends its original input; a nested permission remains answerable. */
   get inputReady(): boolean {
     return !!this.state.prompt && (!this.running || this.state.prompt !== this.runningPrompt);
+  }
+
+  /** True only at the "what next" prompt itself: the one place a picture may go with a request. */
+  get canAttach(): boolean {
+    const top = this.waits[this.waits.length - 1];
+    return !this.closed && !this.selfChanging && !this.running && top?.prompt?.type === "next" && this.state.prompt === top.prompt;
+  }
+
+  /**
+   * A picture they chose to share with the request they're about to send. Looked at once, under
+   * the one-slow-command guard, so the prompt takes nothing until it's done. Only what the look
+   * said is kept; the picture goes out of scope here. True when it was seen; Stop or close
+   * while it looks throws Cancelled.
+   */
+  async attach(image: SharedImage, note: string): Promise<boolean> {
+    if (!this.canAttach) throw new Error("a picture only goes with a request when dum asks what's next - nothing was sent");
+    const look = this.onAttach;
+    const outcome = await this.slow("look", look && (() => look(image, note)), "");
+    if (outcome === "stopped") throw new Cancelled(this.closed);
+    return outcome === "done";
+  }
+
+  /**
+   * Helper-model work (a look, practice, a course, the wizard) that Stop and close abort. Work
+   * aborted while it ran ends in Cancelled even if it happened to finish, so nothing after it
+   * records evidence, tasks or memory for something they stopped. Inside an `operation` it is
+   * that operation's Stop that counts, however late in it the call is made.
+   */
+  async helper<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const signal = this.scope.getStore() ?? this.stopper.signal;
+    if (signal.aborted) throw new Cancelled(this.closed);
+    try {
+      const out = await this.track(work(signal));
+      if (signal.aborted) throw new Cancelled(this.closed);
+      return out;
+    } catch (err) {
+      if (signal.aborted) throw new Cancelled(this.closed);
+      throw err;
+    }
+  }
+
+  /**
+   * A command, a tool or a course: one piece of work that Stop or close ends. Every helper call
+   * inside it shares the Stop that was current when it began, so a step that starts after Stop
+   * can't carry on for work they stopped. Tracked, so `settled` waits for it.
+   */
+  operation<T>(work: () => Promise<T>): Promise<T> {
+    const signal = this.scope.getStore() ?? this.stopper.signal;
+    return this.track(this.scope.run(signal, work));
+  }
+
+  private track<T>(job: Promise<T>): Promise<T> {
+    this.work.add(job);
+    return job.finally(() => this.work.delete(job));
+  }
+
+  /** Settles once every tracked job (helper calls, slow commands, tools) has ended: nothing is left to write late. */
+  async settled(): Promise<void> {
+    while (this.work.size) await Promise.allSettled([...this.work]);
+  }
+
+  /**
+   * Withdraw every parked prompt except "what next": a question, a permission, a plan, a course.
+   * Each waiter sees Cancelled, never an answer, so stopping approves nothing. Lines typed earlier
+   * stay typed-ahead: they only ever become a next request.
+   */
+  cancel() {
+    this.stopper.abort();
+    this.stopper = new AbortController();
+    const gone = this.waits.filter((w) => w.prompt?.type !== "next");
+    if (!gone.length) return;
+    this.waits = this.waits.filter((w) => w.prompt?.type === "next");
+    this.withdraw(gone, false);
+    const top = this.waits[this.waits.length - 1];
+    this.patch(top ? { prompt: top.prompt, busy: false, status: "" } : { prompt: null, busy: true, status: "stopping" });
+  }
+
+  /**
+   * This conversation is over: every prompt is withdrawn, nothing typed is kept, later prompts are
+   * refused at once and nothing that finishes late changes what anyone sees.
+   */
+  close() {
+    if (this.closed) return;
+    this.stopper.abort();
+    const gone = this.waits;
+    this.waits = [];
+    this.typedAhead.length = 0;
+    this.queued.length = 0;
+    this.withdraw(gone, true);
+    this.patch({ prompt: null, busy: false, status: "" });
+    this.closed = true;
+    this.listeners.clear();
   }
 
   subscribe = (fn: () => void): (() => void) => {
@@ -188,6 +312,7 @@ export class Store {
 
   /** A person submitted a line. Commands are handled here and never reach dum as an answer. */
   submit(text: string) {
+    if (this.closed) return;
     const line = text.trim();
     const self = /^:\s*self(?:\s+([\s\S]*))?$/i.exec(line);
     if (self) {
@@ -348,6 +473,11 @@ export class Store {
     if (this.state.unlocked !== unlocked) this.patch({ unlocked });
   }
 
+  /** What a one-time look at a shared picture saw. Never the picture itself. */
+  shot(label: string, observation: string, sha: string) {
+    this.append({ kind: "shot", label, observation, sha });
+  }
+
   /** Which model is behind a voice. */
   setModel(who: "intern" | "wizard", model: string, effort = "") {
     const was = this.state.models[who];
@@ -361,9 +491,9 @@ export class Store {
    * Ask one question and park until it is answered. Only a line typed after it shows answers
    * it: a permission is never granted by something said before the question existed.
    */
-  askQuestion(question: string, why = "", intern = true): Promise<string> {
+  askQuestion(question: string, why = "", intern = true, purpose?: Purpose): Promise<string> {
     const id = this.append({ kind: "question", question, why, answer: null });
-    return this.park({ type: "question", question, why, intern }, id, false);
+    return this.park({ type: "question", question, why, intern, ...(purpose ? { purpose } : {}) }, id, false);
   }
 
   /** The `what next` prompt between turns. Takes a line typed while dum was working. */
@@ -371,10 +501,19 @@ export class Store {
     return this.park({ type: "next" }, null, true);
   }
 
-  /** Show the plan and park for the reply: y approves; anything else doesn't. */
+  /**
+   * Show the plan and park for the reply: y approves; anything else doesn't. Withdrawn, it
+   * stays in the record as not approved.
+   */
   async proposePlan(plan: string): Promise<string> {
     const id = this.append({ kind: "plan", plan, approved: null });
-    const reply = (await this.park({ type: "plan", plan }, null, false)).trim();
+    let reply: string;
+    try {
+      reply = (await this.park({ type: "plan", plan }, null, false)).trim();
+    } catch (err) {
+      this.patch({ transcript: this.state.transcript.map((e) => (e.id === id && e.kind === "plan" ? { ...e, approved: false } : e)) });
+      throw err;
+    }
     const approved = /^(y|yes)$/i.test(reply);
     const paused = /^:?\s*(course|learn|unlock)\s+\S/i.test(reply);
     this.patch({
@@ -420,6 +559,7 @@ export class Store {
       else if (e.kind === "excerpt") out.push(`${e.by === "you" ? "you shared" : "dum read"} ${e.path}:${e.from}${e.note ? ` (${e.note})` : ""}\n${e.text}`);
       else if (e.kind === "diff") out.push(`${e.outcome} ${e.path}${e.artifact ? ` -> ${e.artifact}` : ""}\n${e.diff}`);
       else if (e.kind === "result") out.push(`$ ${e.label}  (exit ${e.code})\n${e.output}`);
+      else if (e.kind === "shot") out.push(`you shared a picture of ${e.label}; one look saw:\n${e.observation}`);
     }
     return out.join("\n") || "nothing said yet.";
   }
@@ -451,16 +591,29 @@ export class Store {
     ].join("\n");
   }
 
-  private async slow(name: string, fn: Async | null, arg: string) {
-    if (!fn) return this.note(`:${name} works once dum has started in this repo`);
-    if (this.running) return this.note(`wait for :${this.running} to finish`);
+  /** How the command ended: ran to the end, failed (and said why), or was stopped by Stop/close. */
+  private async slow(name: string, fn: Async | null, arg: string): Promise<"done" | "failed" | "stopped"> {
+    if (!fn) {
+      this.note(`:${name} works once dum has started in this repo`);
+      return "failed";
+    }
+    if (this.running) {
+      this.note(`wait for :${this.running} to finish`);
+      return "failed";
+    }
     this.running = name;
     this.runningPrompt = this.state.prompt;
     this.patch({ status: `:${name}` });
     try {
-      await fn(arg);
+      await this.operation(() => fn(arg));
+      return "done";
     } catch (err) {
+      if (err instanceof Cancelled) {
+        this.note(`:${name} stopped - nothing from it was kept`);
+        return "stopped";
+      }
       this.note(`:${name} didn't work: ${(err as Error).message}`);
+      return "failed";
     } finally {
       this.running = "";
       this.runningPrompt = null;
@@ -482,6 +635,7 @@ export class Store {
   }
 
   private park(prompt: Prompt, entryId: number | null, ahead: boolean): Promise<string> {
+    if (this.closed) return Promise.reject(new Cancelled(true));
     // dum asking something takes the conversation back from a help panel.
     if (prompt?.type === "question" && prompt.intern) this.closeBoard();
     if (ahead && this.typedAhead.length) {
@@ -490,10 +644,18 @@ export class Store {
       this.patch({ busy: false, status: "" });
       return Promise.resolve(early);
     }
-    return new Promise<string>((resolve) => {
-      this.waits.push({ resolve, entryId, prompt });
-      this.patch(this.selfChanging ? {} : { prompt, busy: false, status: "" });
-    });
+    const { promise, resolve, reject } = Promise.withResolvers<string>();
+    this.waits.push({ resolve, reject, entryId, prompt });
+    this.patch(this.selfChanging ? {} : { prompt, busy: false, status: "" });
+    return promise;
+  }
+
+  /** Withdrawn prompts, innermost first: an open course is left, and every waiter sees Cancelled. */
+  private withdraw(gone: Wait[], final: boolean) {
+    for (const w of gone.reverse()) {
+      if (w.prompt?.type === "course") this.endCourse(w.prompt.card, false);
+      w.reject(new Cancelled(final));
+    }
   }
 
   /** An answer lands on its question; anything else said is its own entry. */
@@ -515,8 +677,9 @@ export class Store {
     return id;
   }
 
-  /** Every mutation goes through here, so the snapshot identity is the signal. */
+  /** Every mutation goes through here, so the snapshot identity is the signal. Closed, nothing changes. */
   private patch(p: Partial<State>) {
+    if (this.closed) return;
     this.state = { ...this.state, ...p };
     for (const fn of this.listeners) fn();
   }

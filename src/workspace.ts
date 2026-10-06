@@ -740,6 +740,7 @@ export class Workspace {
       `share ${real} with dum? (y/n)`,
       `it's outside ${basename(this.root)}; dum reads this one file once and nothing else there`,
       false,
+      "share",
     );
     if (!/^\s*y(?:es)?\s*$/i.test(answer)) throw new Error(`not shared: ${real}`);
     if (realpathSync(given) !== real) throw new Error(`${given} changed where it points while you decided - not shared`);

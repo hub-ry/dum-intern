@@ -393,6 +393,12 @@ export function format(raw: Entry, width: number): string[] {
         "",
       ];
     }
+    case "shot":
+      return [
+        `${c.blue("▸")} ${c.dim("you shared a picture of")} ${c.bold(e.label)}${c.dim("  one look, picture not kept")}`,
+        ...wrap(e.observation, "  ", width).map(c.dim),
+        "",
+      ];
   }
 }
 

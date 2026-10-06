@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Store, parseCommand } from "../src/store.ts";
+import { Store, Cancelled, parseCommand } from "../src/store.ts";
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -163,4 +163,24 @@ test("an init without effort never wipes an effort already read back", () => {
   assert.deepEqual(s.getSnapshot().models.intern, { model: "claude-opus-5-5", effort: "high" });
   s.setModel("intern", "claude-fable-5-1");
   assert.deepEqual(s.getSnapshot().models.intern, { model: "claude-fable-5-1", effort: "" });
+});
+
+test("a helper call begun after Stop, inside the work Stop ended, never runs; work begun after Stop is unaffected", async () => {
+  const s = new Store("r", "understand");
+  let ran = 0;
+  await assert.rejects(
+    s.operation(async () => {
+      await Promise.resolve();
+      s.cancel();
+      await Promise.resolve();
+      await s.helper(async () => void ran++);
+    }),
+    (err) => err instanceof Cancelled && !err.final,
+  );
+  assert.equal(ran, 0);
+  assert.equal(await s.helper(async () => (ran++, "fresh")), "fresh", "the next thing they ask for runs normally");
+  s.close();
+  await assert.rejects(s.helper(async () => void ran++), (err) => err instanceof Cancelled && err.final);
+  assert.equal(ran, 1);
+  await s.settled();
 });

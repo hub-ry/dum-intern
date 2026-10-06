@@ -20,7 +20,9 @@ import * as context from "./context.ts";
 import * as memory from "./memory.ts";
 import * as self from "./self.ts";
 import { MODELS } from "./runtime.ts";
-import { readState, writeState } from "./workspace.ts";
+import { treeText } from "./tree.ts";
+import { ANTI_VIBE, chooseMode } from "./prefs.ts";
+import { acquire } from "./session-lock.ts";
 import { createInterface } from "node:readline/promises";
 
 type Args = {
@@ -71,44 +73,6 @@ function nameAndLang(args: string[]): { name: string; lang: string } {
 }
 
 // -- the tree ---------------------------------------------------------------
-
-/** The languages worth drawing: whatever has something on the tree, plus where they're standing. */
-function langsToShow(t: skills.Tree, root: string): string[] {
-  const here = root ? mainLang(readRepo(root)) : "";
-  return [...new Set([here, ...t.skills.map((s) => s.lang)].filter(Boolean))];
-}
-
-/**
- * The tree as text: what you know, then each track with its levels, prerequisites and what's open
- * next. `arg` picks a language or "all"; with nothing chosen and nothing to go on, every track's
- * summary, so an empty tree still shows where to start.
- */
-function treeText(t: skills.Tree, root: string, arg = ""): string {
-  const want = arg.trim().toLowerCase().replace(/^in\s+/, "");
-  const known = curriculum.languages();
-  const lang = want && want !== "all" ? skills.langName(want) : "";
-  if (lang && !known.includes(lang)) return `no curated track for "${arg.trim()}". tracks: ${known.join(", ")}.\n:tree <language> picks one; :tree all shows every track.`;
-  const langs = lang ? [lang] : want === "all" ? [] : langsToShow(t, root);
-  const built = t.skills.filter((s) => skills.rank(s.level) >= skills.rank("build")).length;
-  const out = [t.skills.length ? `you know: ${built} built, ${t.skills.length - built} recognized only` : "you know: nothing on the tree yet", ""];
-  if (want !== "all" && !langs.length) {
-    for (const tr of curriculum.tracks()) {
-      const p = curriculum.progress(t, tr);
-      const next = curriculum.frontier(t, tr);
-      out.push(`${tr.lang && tr.name !== tr.lang ? `${tr.lang} · ${tr.name}` : tr.name}  ${curriculum.bar(p.done, p.total)}  ${p.done}/${p.total}`);
-      out.push(`  ○ next: ${next.slice(0, 4).join(", ") || "nothing open yet"}${next.length > 4 ? ` (+${next.length - 4})` : ""}`);
-    }
-    out.push("", ":tree <language> shows a track's skills, levels and prerequisites; :tree all shows them all.");
-  } else out.push(...curriculum.view(t, langs, want === "all"));
-  out.push(
-    "",
-    "● built   ◐ recognized   ○ open: its prerequisites are built   · locked",
-    "AI writes a concept only once you've built it, and uses a tool once you recognize it. The project's core stays yours.",
-    ":practice <skill> suggests a task for your own editor; :submit it when it's done. :skill x adds what you can already write.",
-    `one note per skill in ${`${skills.folder()}/`.replace(homedir(), "~")}`,
-  );
-  return out.join("\n");
-}
 
 /** `dum --web [server | rotate | off]`: the private web link to your tree. */
 async function webCommand(args: string[]) {
@@ -263,44 +227,7 @@ function repoRoot(): string {
 
 // -- the repo's mode ----------------------------------------------------------
 
-type Prefs = { mode?: Mode; explained?: boolean };
-
-const ANTI_VIBE = [
-  "anti-vibe changes how dum coaches you, not what AI may write.",
-  "",
-  "- Explaining a concept here counts as recognizing it. It no longer lets dum write that concept:",
-  "  that needed only an explanation in earlier versions, and now it needs your build evidence",
-  "  (your own unaided implementation, submitted with :submit and reviewed) in both modes.",
-  "- Tools still need recognizing, and the project's core stays yours in both modes.",
-  "- Skills already on your tree keep the level they have.",
-  "",
-  "dum -u switches this repo back to understand.",
-].join("\n");
-
-function readPrefs(root: string): Prefs {
-  try {
-    const raw: unknown = JSON.parse(readState(root, "preferences.json", 16 * 1024) ?? "{}");
-    if (!raw || typeof raw !== "object") return {};
-    const mode = "mode" in raw && (raw.mode === "understand" || raw.mode === "anti-vibe") ? raw.mode : undefined;
-    return { ...(mode ? { mode } : {}), ...("explained" in raw && raw.explained === true ? { explained: true } : {}) };
-  } catch {
-    return {};
-  }
-}
-
-/**
- * The mode a flag chose, saved for next time, or the one saved before; understand by default.
- * The first anti-vibe start after the gates tightened says what changed, once, as a board.
- */
-function chooseMode(root: string, flag: Mode | null): { mode: Mode; changed: boolean; explain: boolean } {
-  const prefs = readPrefs(root);
-  const mode = flag ?? prefs.mode ?? "understand";
-  const explain = mode === "anti-vibe" && !prefs.explained;
-  const next: Prefs = { ...prefs, mode, ...(explain ? { explained: true } : {}) };
-  const changed = mode !== (prefs.mode ?? "understand");
-  if (changed || explain || (flag && !prefs.mode)) writeState(root, "preferences.json", JSON.stringify(next, null, 2) + "\n");
-  return { mode, changed, explain };
-}
+const ANTI_VIBE_HERE = `${ANTI_VIBE}\n\ndum -u switches this repo back to understand.`;
 
 // -- the session ------------------------------------------------------------
 
@@ -347,6 +274,8 @@ async function main() {
   }
 
   const repo = readRepo(cwd());
+  // One dum per project: a second would write over this one's conversation. Every exit releases it.
+  process.once("exit", acquire(repo.root, "terminal"));
   // A fresh intern: its memory and any open work moved aside, not deleted.
   if (args.fresh && !restarted) memory.fresh(repo.root);
   const { mode, changed, explain } = chooseMode(repo.root, args.mode);
@@ -437,7 +366,7 @@ async function main() {
 
   // An empty tree is where people go wrong: say how it works, once, up front. Otherwise, in a
   // repo with something in it, the first thing is what AI may do here.
-  if (explain) store.show("anti-vibe, tightened", ANTI_VIBE);
+  if (explain) store.show("anti-vibe, tightened", ANTI_VIBE_HERE);
   else if (!skills.read().skills.length) store.show("nothing's on your tree yet", EMPTY_TREE);
   else if (!fromArgs && repo.files.some((f) => skills.langOf(f))) store.command("boundary");
   // The web copy's edits come down in the background; the header catches up when they land.
