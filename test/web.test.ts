@@ -54,6 +54,15 @@ test("the page's view lays tracks out by depth and marks each skill", () => {
   assert.equal(iv.nodes.find((n) => n.name === "arrays and strings")!.depth, 0, "a prerequisite from another track doesn't add depth");
 });
 
+test("growth excludes recognition and re-locks built dependents when a prerequisite is revoked", () => {
+  const printing = sk("printing", "python", "t");
+  const variables = sk("variables", "python", "t");
+  const recognized = sk("a library", "python", "t", "recognize");
+  assert.equal(view({ skills: [printing, variables, recognized] }).usableBuilt, 2);
+  assert.equal(view({ skills: [variables, recognized] }).usableBuilt, 0);
+  assert.equal(view({ skills: [printing, { ...variables, level: "apply" }, recognized] }).usableBuilt, 2);
+});
+
 async function server() {
   const data = mkdtempSync(`${tmpdir()}/dum-web-`);
   const s = createServer({ data });
@@ -100,6 +109,36 @@ test("the server keeps a tree at a private link, edits it under the rules, and n
   } finally {
     await s.close();
   }
+});
+
+test("public docs serve typed assets without making private trees cacheable or exposing source paths", async () => {
+  const s = await server();
+  try {
+    for (const path of ["/", "/install", "/how-it-works", "/subjects"]) {
+      const page = await fetch(`${s.base}${path}`);
+      assert.equal(page.status, 200);
+      assert.equal(page.headers.get("content-type"), "text/html; charset=utf-8");
+      assert.equal(page.headers.get("x-robots-tag"), null);
+      assert.equal(page.headers.get("cache-control"), "public, max-age=300");
+      const head = await fetch(`${s.base}${path}`, { method: "HEAD" });
+      assert.equal(head.status, 200);
+      assert.equal(await head.text(), "");
+    }
+    const font = await fetch(`${s.base}/site/hack-regular.woff2`);
+    assert.equal(font.headers.get("content-type"), "font/woff2");
+    assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString("ascii"), "wOF2", "the browser receives binary font bytes, not JSON");
+    const script = await fetch(`${s.base}/site/game.js`);
+    assert.equal(script.headers.get("content-type"), "text/javascript; charset=utf-8");
+    for (const path of ["/site/server.ts", "/site/..%2fweb%2fserver.ts", "/site/game.js/extra"]) {
+      assert.equal((await fetch(`${s.base}${path}`)).status, 404);
+    }
+    assert.equal((await fetch(`${s.base}/install`, { method: "POST" })).status, 404);
+    const made = await (await fetch(`${s.base}/api/trees`, { method: "POST", body: JSON.stringify(tree) })).json();
+    const privatePage = await fetch(`${s.base}/${made.id}`);
+    assert.equal(privatePage.headers.get("cache-control"), "no-store");
+    assert.equal(privatePage.headers.get("x-robots-tag"), "noindex, nofollow");
+    assert.equal(privatePage.headers.get("referrer-policy"), "no-referrer");
+  } finally { await s.close(); }
 });
 
 test("the terminal links, pulls a page edit, pushes its own, and takes the copy down", async () => {

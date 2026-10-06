@@ -32,6 +32,14 @@ mac:
   notarize: false
   extendInfo:
     LSUIElement: true
+  # OpenSuperWhisper is bundled only on Apple Silicon; prepare-dictation.mjs creates this
+  # directory on all platforms so electron-builder does not error when the filter matches nothing.
+  extraResources:
+    - from: build/extra-resources
+      to: .
+      filter:
+        - "OpenSuperWhisper.app/**"
+        - "OpenSuperWhisper-LICENSE.txt"
 dmg:
   title: Dum
   sign: false

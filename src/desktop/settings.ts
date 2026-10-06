@@ -13,6 +13,8 @@ export const DEFAULTS: Settings = {
   allWorkspaces: true,
   launchAtLogin: false,
   personalContext: false,
+  wizardAdvice: true,
+  wizardSource: 'screen' as const,
 };
 
 const MODIFIERS: Record<string, "shift" | "other"> = {
@@ -39,6 +41,8 @@ export const SettingsSchema = z.object({
   allWorkspaces: z.boolean(),
   launchAtLogin: z.boolean(),
   personalContext: z.boolean(),
+  wizardAdvice: z.boolean().default(false),
+  wizardSource: z.enum(["screen", "files"]).default("screen"),
 }).strict();
 
 const MAX_RECENT = 8;

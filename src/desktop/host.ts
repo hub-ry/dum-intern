@@ -16,7 +16,7 @@ const controller = new DesktopController(() => {
   scheduled = true;
   setImmediate(() => {
     scheduled = false;
-    if (!closing) post({ type: "state", epoch, state: controller.state, inputToken: controller.inputToken, canAttach: controller.canAttach, tree: controller.tree });
+    if (!closing) post({ type: "state", epoch, state: controller.state, inputToken: controller.inputToken, canAttach: controller.canAttach, tree: controller.tree, wizardStatus: controller.wizardStatus });
   });
 });
 
@@ -26,11 +26,13 @@ async function receive(value: unknown) {
   const request = parsed.data;
   try {
     switch (request.op) {
-      case "open": await controller.choose(request.root, request.personal, request.mode); break;
+      case "open": controller.setWizardAdvice(request.wizardAdvice, 'files'); await controller.choose(request.root, request.personal, request.mode); break;
       case "send": await controller.send(request.text, request.inputToken, request.image); break;
       case "command": controller.command(request.name, request.argument); break;
       case "panel": controller.panel(request.panel); break;
       case "interrupt": controller.interrupt(); break;
+      case "wizard-advice": controller.setWizardAdvice(request.enabled, 'files'); break;
+      case "quip": controller.publishQuip(request.text); break;
       case "close": closing = true; await controller.close(); break;
     }
     post({ type: "reply", epoch, id: request.id, ok: true });

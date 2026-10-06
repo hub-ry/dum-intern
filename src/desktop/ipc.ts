@@ -12,6 +12,7 @@ import type { View } from "../web/view.ts";
 import type { SharedImage } from "./controller.ts";
 import type { Captures, Binding } from "./capture.ts";
 import type { RuntimeSetup } from "./runtime-setup.ts";
+import type { DictationHelper } from "./dictation.ts";
 import { SettingsSchema, type DesktopSettings } from "./settings.ts";
 import type { CapturePreview, CaptureSource, Panel, Reply, Request, Settings, Snapshot } from "./protocol.ts";
 
@@ -36,6 +37,7 @@ export const RequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("screen-permission") }).strict(),
   z.object({ type: z.literal("runtime-check") }).strict(),
   z.object({ type: z.literal("runtime-login") }).strict(),
+  z.object({ type: z.literal("dictation-open") }).strict(),
   z.object({ type: z.literal("runtime-login-open") }).strict(),
   z.object({ type: z.literal("runtime-login-code"), code: z.string().min(1).max(4096) }).strict(),
   z.object({ type: z.literal("runtime-login-cancel") }).strict(),
@@ -62,6 +64,8 @@ export type Controller = {
   readonly inputToken: string;
   readonly canAttach: boolean;
   readonly tree: View | null;
+  readonly wizardStatus: string;
+  setWizardAdvice(enabled: boolean, source?: 'screen' | 'files'): void | Promise<void>;
   choose(root: string, personal: Context, mode?: Mode): Promise<void>;
   send(text: string, inputToken: string, image?: SharedImage): Promise<void>;
   command(name: string, argument?: string): void | Promise<void>;
@@ -94,6 +98,7 @@ export type RouterPorts = {
   settings: DesktopSettings;
   runtime: Runtime;
   native: Native;
+  dictation: Pick<DictationHelper, "status" | "open">;
   /** The personal context to hand a newly opened project: empty unless the setting is on. */
   personal(enabled: boolean): Context;
   platform: string;
@@ -171,8 +176,10 @@ export class Router {
       canAttach: controller.canAttach,
       recentProjects: settings.recent.map((root) => ({ name: basename(root) || root, root })),
       settings: { ...settings.settings },
+      wizardStatus: controller.wizardStatus,
       runtime: { ...runtime.status },
       screenPermission: native.screenPermission(),
+      dictation: this.o.dictation.status(),
       hotkeyError: native.hotkeyError(),
       platform: this.o.platform,
       version: this.o.version,
@@ -197,6 +204,7 @@ export class Router {
     this.opening = true;
     captures.discard();
     try {
+      await controller.setWizardAdvice(settings.settings.wizardAdvice, settings.settings.wizardSource);
       await controller.choose(root, this.o.personal(settings.settings.personalContext), mode);
       try {
         settings.remember(controller.state?.root ?? root);
@@ -265,9 +273,11 @@ export class Router {
         native.applySettings(r.settings, previous);
         try {
           settings.update(r.settings);
+          await controller.setWizardAdvice(r.settings.wizardAdvice, r.settings.wizardSource);
         } catch (err) {
+          if (settings.settings !== previous) settings.update(previous);
           native.applySettings(previous, r.settings);
-          throw new Error(`Settings couldn't be saved: ${(err as Error).message}`);
+          throw new Error(`Settings couldn't be applied: ${(err as Error).message}`);
         }
         return {};
       }
@@ -281,6 +291,9 @@ export class Router {
       }
       case "capture-discard":
         captures.discard();
+        return {};
+      case "dictation-open":
+        await this.o.dictation.open();
         return {};
       case "screen-permission":
         await native.openScreenSettings();

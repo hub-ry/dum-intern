@@ -2,6 +2,7 @@
 
 import type { CapturePreview, CaptureSource, Panel, Reply, Request, Settings, Snapshot } from "../protocol.ts";
 import type { Prompt, State } from "../../store.ts";
+import type { View } from "../../web/view.ts";
 import type { Mode } from "../../gate.ts";
 import { h, icon, iconButton, plain, type IconName } from "./dom.ts";
 import { Transcript } from "./transcript.ts";
@@ -11,7 +12,7 @@ import { Creature } from "./sprites.ts";
 type Sheet = "info" | "tools" | "settings" | "projects" | "sources";
 
 const PANELS: Record<Panel, { label: string; icon: IconName }> = {
-  tree: { label: "Tree", icon: "tree" },
+  tree: { label: "Skill tree", icon: "tree" },
   memory: { label: "Memory", icon: "memory" },
   history: { label: "History", icon: "history" },
   context: { label: "Context", icon: "context" },
@@ -20,8 +21,8 @@ const PANELS: Record<Panel, { label: string; icon: IconName }> = {
 };
 
 const MODES: Record<Mode, string> = {
-  understand: "dum writes a concept once you've built it yourself, and a tool once you can say what it's for. The core is always yours.",
-  "anti-vibe": "Same gates, and you explain your approach to dum before you write the core. Explanations count as recognizing, never building.",
+  understand: "dum can implement with skills you've unlocked. Concepts need work you've built yourself. Tools need you to know what they're for.",
+  "anti-vibe": "The same skill gates, with your approach first. Tell dum how you want it done, then delegate the unlocked parts. Explaining an approach doesn't count as building a skill.",
 };
 
 const yesNo = (q: string) => /\((?:y\/n|yes\/no)\)\s*$/i.test(q.trim());
@@ -103,9 +104,19 @@ export function panel() {
     return reply;
   }
 
+  function tierInfo(tree: View | null): { pct: number; tier: "newbie" | "intern" | "good" | "cracked"; built: number } {
+    const built = tree?.usableBuilt ?? 0;
+    const pct = Math.min(built / 64, 1);
+    const tier = built >= 64 ? "cracked" : built >= 24 ? "good" : built >= 8 ? "intern" : "newbie";
+    return { pct, tier, built };
+  }
+
   // -- header ---------------------------------------------------------------
 
   const face = new Creature("dum", 3);
+  const tierFill = h("div", { class: "tier-fill tier-newbie" });
+  const tierBar = h("div", { class: "tier-bar", role: "progressbar", "aria-label": "Skill tier: newbie", hidden: true }, tierFill);
+  const tierName = h("span", { class: "tier-name", hidden: true }, "newbie");
   const projectName = h("span", { class: "project-name" }, "no project");
   const projectBtn = h(
     "button",
@@ -113,37 +124,32 @@ export function panel() {
     projectName,
     icon("chevron"),
   );
-  const modeSelect = h(
-    "select",
-    { class: "mode-select", "aria-label": "Mode for this project", title: "Mode, saved for this project" },
-    h("option", { value: "understand" }, "understand"),
-    h("option", { value: "anti-vibe" }, "anti-vibe"),
-  );
-  modeSelect.addEventListener("change", async () => {
-    const mode = modeSelect.value as Mode;
-    const r = await call({ type: "mode", mode });
-    if (!r.ok && snap?.state) modeSelect.value = snap.state.mode;
-  });
-  const toolsBtn = iconButton("tools", "Tools: files, changes, practice, hand in, git", (e) => openSheet("tools", e.currentTarget as HTMLElement));
+  const toolsBtn = iconButton("tools", "Tools and project notes", (e) => openSheet("tools", e.currentTarget as HTMLElement));
+  const treeBtn = iconButton("tree", "Open your skill tree", () => void showPanel("tree", treeBtn), "Skills", "tree-btn");
   const header = h(
     "header",
     { class: "top" },
     h("div", { class: "face" }, face.canvas),
     projectBtn,
-    modeSelect,
     h("span", { class: "spacer" }),
+    treeBtn,
+    tierName,
     toolsBtn,
-    iconButton("gear", "Settings", (e) => openSheet("settings", e.currentTarget as HTMLElement)),
     iconButton("hide", "Hide (Esc)", () => void hide()),
+    tierBar,
   );
 
-  const tabs = h("nav", { class: "tabs", "aria-label": "Panels" });
-  const tabButtons = new Map<Panel, HTMLButtonElement>();
+  const panelButtons = new Map<Panel, HTMLButtonElement>([["tree", treeBtn]]);
+  const projectPanels = h("nav", { class: "project-panels", "aria-label": "Project notes" });
   for (const [panelName, meta] of Object.entries(PANELS) as [Panel, (typeof PANELS)[Panel]][]) {
-    const btn = h("button", { type: "button", class: "tab", "aria-pressed": "false", onclick: () => void showPanel(panelName, btn) }, icon(meta.icon), h("span", {}, meta.label));
-    tabButtons.set(panelName, btn);
-    tabs.append(btn);
+    if (panelName === "tree") continue;
+    const btn = h("button", { type: "button", class: "panel-link", onclick: () => void showPanel(panelName, toolsBtn) }, icon(meta.icon), h("span", {}, meta.label));
+    panelButtons.set(panelName, btn);
+    projectPanels.append(btn);
   }
+  treeBtn.setAttribute("aria-pressed", "false");
+  treeBtn.setAttribute("aria-haspopup", "dialog");
+  toolsBtn.setAttribute("aria-haspopup", "dialog");
 
   // -- setup: Claude and Git ------------------------------------------------
 
@@ -315,15 +321,26 @@ export function panel() {
     closeSheet();
     textarea.value = text;
     syncComposer();
-    textarea.focus();
+    openInput();
     textarea.setSelectionRange(text.length, text.length);
+  };
+  const storyButtons: HTMLButtonElement[] = [];
+  const storyAction = (className: string) => {
+    const button = h("button", {
+      type: "button",
+      class: className,
+      "data-action": "tell-story",
+      onclick: () => draftInto(textarea.value.trim() ? textarea.value : "Here's what I built and why I made it this way:\n\n"),
+    }, "Tell dum what I built");
+    storyButtons.push(button);
+    return button;
   };
   const transcript = new Transcript((record, path) => void call({ type: "open-record", record, path }));
   const empty = h(
     "div",
     { class: "empty" },
-    h("p", {}, "Ask dum for something in this project. It plans first, writes only what your tree allows, and the core stays yours."),
-    h("p", { class: "muted" }, "The wizard chimes in now and then. Tabs above show your tree, memory and the rest."),
+    h("p", {}, "Build on your own. dum can wait."),
+    h("p", { class: "muted" }, "When you're satisfied, tell dum what you built and why. You can share saved files from Tools. If you want to delegate a change, ask explicitly; dum still checks your unlocked skills."),
   );
   const conversation = h("section", { class: "conversation", hidden: true }, transcript.el, empty);
 
@@ -392,7 +409,7 @@ export function panel() {
     const stage = s?.state?.stage;
     const title = activePanel ? PANELS[activePanel].label : stage?.kind === "info" ? stage.title : "";
     sheetTitle.textContent = title;
-    for (const [n, b] of tabButtons) b.setAttribute("aria-pressed", String(sheet === "info" && n === activePanel));
+    for (const [n, b] of panelButtons) b.setAttribute("aria-pressed", String(sheet === "info" && n === activePanel));
     const kids: Node[] = [];
     if (activePanel === "tree" && s?.tree) {
       tree.update(s.tree);
@@ -412,8 +429,24 @@ export function panel() {
   }
 
   // Tools: every command a person would otherwise type.
+  const provenance = h("div", { class: "provenance" });
+  const runtimeDetails = h("details", { class: "runtime-details" }, h("summary", {}, "Models in this conversation"), provenance);
+  const projectTools = h("div", { class: "project-tools" });
   const field = (label: string, input: HTMLElement, hint = "") => h("label", { class: "field" }, h("span", {}, label), input, hint ? h("span", { class: "hint" }, hint) : null);
   const toolsBody = (() => {
+    const story = h(
+      "section",
+      { class: "tool" },
+      storyAction("btn ghost"),
+      h("p", { class: "hint" }, "Whenever you're ready. Include how it works, why you chose that approach and any files you want dum to read. This only starts a draft."),
+    );
+    const projects = h(
+      "section",
+      { class: "tool" },
+      h("h3", {}, "Find a project to build"),
+      h("p", { class: "hint" }, "Project ideas use your skill tree, saved memory and any personal context you've opted into. Compare them by time and difficulty; you're not limited to tiny exercises."),
+      h("button", { type: "button", class: "btn ghost", "data-action": "suggest-projects", onclick: () => void command("practice", "projects") }, "Suggest projects"),
+    );
     const inspectPath = h("input", { class: "input", type: "text", placeholder: "src/app.ts or src/app.ts:10-40", spellcheck: "false" });
     const inspect = h("form", { class: "tool" }, h("h3", {}, "Show dum a file"), field("Saved file", inspectPath, "dum reads what's saved on disk, not your editor's buffer."), h("button", { type: "submit", class: "btn" }, "Show it"));
     inspect.addEventListener("submit", (e) => {
@@ -472,24 +505,43 @@ export function panel() {
     );
 
     const remember = h("div", { class: "tool" }, h("h3", {}, "Remember a note"), rememberForm());
-    return h("div", { class: "tools" }, inspect, changes, practice, submit, git, remember);
+    const projectNotes = h("section", { class: "tool" }, h("h3", {}, "Project notes"), projectPanels);
+    const appDetails = h(
+      "section",
+      { class: "tool" },
+      h("button", { type: "button", class: "btn ghost", onclick: () => openSheet("settings", toolsBtn) }, icon("gear"), "Settings"),
+      runtimeDetails,
+    );
+    projectTools.append(story, projects, projectNotes, inspect, changes, practice, submit, git, remember);
+    return h("div", { class: "tools" }, appDetails, projectTools);
   })();
 
   // Settings: the window, privacy, the project's mode, Claude.
   const hotkeyInput = h("input", { class: "input hotkey", type: "text", readonly: true, "aria-label": "Shortcut to show or hide dum", "aria-describedby": "hotkey-hint" });
   const hotkeyHint = h("span", { id: "hotkey-hint", class: "hint" }, "Click, then press the new shortcut. It needs ⌘, ⌃ or ⌥.");
   const hotkeyError = h("p", { class: "hint error-text", role: "alert" });
-  const toggles: Record<"alwaysOnTop" | "allWorkspaces" | "launchAtLogin" | "personalContext", HTMLInputElement> = {
+  const toggles: Record<"alwaysOnTop" | "allWorkspaces" | "launchAtLogin" | "personalContext" | "wizardAdvice", HTMLInputElement> = {
     alwaysOnTop: h("input", { type: "checkbox" }),
     allWorkspaces: h("input", { type: "checkbox" }),
     launchAtLogin: h("input", { type: "checkbox" }),
     personalContext: h("input", { type: "checkbox" }),
+    wizardAdvice: h("input", { type: "checkbox", id: "wizard-advice", "aria-describedby": "wizard-advice-hint wizard-advice-status" }),
   };
+  const wizardSourceSelect = h("select", { class: "input", id: "wizard-source", "aria-label": "Wizard watches" },
+    h("option", { value: "screen" }, "your screen"),
+    h("option", { value: "files" }, "saved file changes"),
+  );
   const settingsMode = h("select", { class: "input", "aria-label": "Mode" }, h("option", { value: "understand" }, "understand"), h("option", { value: "anti-vibe" }, "anti-vibe"));
   const modeHint = h("p", { class: "hint" });
+  const wizardStatus = h("p", { class: "hint", id: "wizard-advice-status" });
   const screenStatus = h("p", { class: "hint" });
   const claudeStatus = h("p", { class: "hint" });
   const versionLine = h("p", { class: "hint" });
+  const dictationStatus = h("p", { class: "hint", id: "dictation-status" });
+  const dictationOpen = h("button", {
+    type: "button", class: "btn ghost", "data-action": "dictation-open",
+    onclick: () => void call({ type: "dictation-open" }),
+  }, "Open voice setup");
 
   async function saveSettings(patch: Partial<Settings>) {
     if (!snap) return;
@@ -503,6 +555,9 @@ export function panel() {
       void saveSettings(patch);
     });
   }
+  wizardSourceSelect.addEventListener("change", () => {
+    void saveSettings({ wizardSource: wizardSourceSelect.value as 'screen' | 'files' });
+  });
   hotkeyInput.addEventListener("focus", () => {
     recordingHotkey = true;
     hotkeyInput.value = "press a shortcut…";
@@ -545,9 +600,21 @@ export function panel() {
       h("h3", {}, "Privacy"),
       h("label", { class: "check" }, toggles.personalContext, h("span", {}, "Use my personal context file for suggestions")),
       h("p", { class: "hint" }, "Off unless you turn it on. It's the Markdown file linked at ~/.dum/context.md. dum uses it for project ideas and course examples. It never adds skills, and it applies the next time a project opens."),
-      h("p", { class: "hint" }, "dum only sees your screen when you pick a screen or window, look at the preview and press Send with message. No microphone, no key logging, no background screenshots."),
+      h("label", { class: "check" }, toggles.wizardAdvice, h("span", {}, "Let the wizard offer advice while I build")),
+      h("p", { class: "hint", id: "wizard-advice-hint" }, "Screen advice sends periodic screenshots to Claude through your subscription. Pause it before showing private information or practicing unaided. It doesn't record audio or keystrokes."),
+      h("label", { class: "field" }, h("span", {}, "Wizard watches"), wizardSourceSelect),
+      h("p", { class: "hint" }, "Screen: periodic screenshots sent to Claude when the wizard is on. Saved files: reads only what you've saved, no screen access."),
+      wizardStatus,
+      h("p", { class: "hint" }, "Manual screenshot sharing is separate: pick a screen or window, review the preview, then Send with message. Ambient screen advice doesn't wait for that Send."),
       screenStatus,
       h("button", { type: "button", class: "btn ghost", onclick: () => void call({ type: "screen-permission" }) }, icon("external"), "Screen Recording settings"),
+    ),
+    h("div", { class: "group", id: "voice-settings" },
+      h("h3", {}, "Voice"),
+      dictationStatus,
+      dictationOpen,
+      h("p", { class: "hint" }, "Bundled OpenSuperWhisper needs macOS 14+ on Apple Silicon. Set up its local model, microphone and Accessibility permissions, and recording shortcut. Return to dum's input, use that shortcut, review the transcript, then Send. Opening setup doesn't start recording."),
+      h("p", { class: "hint" }, "OpenSuperWhisper may retain recordings locally. Review its settings. Enabled screen advice can independently see any visible draft."),
     ),
     h("div", { class: "group" }, h("h3", {}, "This project"), h("label", { class: "field" }, h("span", {}, "Mode, saved for this project"), settingsMode), modeHint),
     h(
@@ -571,6 +638,11 @@ export function panel() {
     hotkeyError.textContent = s.hotkeyError;
     hotkeyError.hidden = !s.hotkeyError;
     for (const [k, box] of Object.entries(toggles) as [keyof typeof toggles, HTMLInputElement][]) if (force || document.activeElement !== box) box.checked = s.settings[k];
+    if (force || document.activeElement !== wizardSourceSelect) wizardSourceSelect.value = s.settings.wizardSource;
+    wizardSourceSelect.disabled = !s.settings.wizardAdvice;
+    wizardStatus.textContent = s.wizardStatus;
+    dictationStatus.textContent = s.dictation.message;
+    dictationOpen.disabled = !s.dictation.supported || !s.dictation.available;
     settingsMode.disabled = !s.state;
     if (s.state && document.activeElement !== settingsMode) settingsMode.value = s.state.mode;
     modeHint.textContent = s.state ? MODES[s.state.mode] : "Open a project to pick its mode.";
@@ -649,7 +721,7 @@ export function panel() {
     preview = r.preview;
     closeSheet();
     renderPreview();
-    textarea.focus();
+    openInput();
   }
 
   const previewImg = h("img", { class: "preview-img", alt: "" });
@@ -717,18 +789,46 @@ export function panel() {
   const statusText = h("span", { class: "status-text" });
   const stopBtn = h("button", { type: "button", class: "btn ghost small", onclick: () => void call({ type: "interrupt" }) }, icon("stop"), "Stop");
   const statusLine = h("div", { class: "status-line", hidden: true, role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), statusText, h("span", { class: "spacer" }), stopBtn);
-  const textarea = h("textarea", { class: "input composer-input", rows: "2", "aria-label": "Message to dum", placeholder: "Ask dum for something" });
+  const textarea = h("textarea", { class: "input composer-input", rows: "1", "aria-label": "Story, request or message to dum", "aria-describedby": "composer-keys", placeholder: "Tell dum about what you built…" });
   const attachBtn = iconButton("screen", "Share a screen or window", (e) => void openSources(e.currentTarget as HTMLElement));
   const sendLabel = h("span", {}, "Send");
   const sendBtn = h("button", { type: "submit", class: "btn primary send" }, icon("send"), sendLabel);
   const composer = h(
     "form",
-    { class: "composer" },
+    { class: "composer", id: "dum-input", hidden: true },
     textarea,
-    h("div", { class: "composer-row" }, attachBtn, h("span", { class: "hint keys" }, "Return sends · Shift-Return new line"), h("span", { class: "spacer" }), sendBtn),
+    h("div", { class: "composer-row" }, attachBtn, h("span", { id: "composer-keys", class: "hint keys" }, "Return sends · Shift-Return new line"), h("span", { class: "spacer" }), sendBtn),
   );
-  const provenance = h("div", { class: "provenance" });
-  const dock = h("footer", { class: "dock", hidden: true }, statusLine, promptBox, previewNote, previewCard, composer, provenance);
+  let inputOpen = false;
+  const requestBtn = h("button", {
+    type: "button", class: "link-btn", "data-action": "write-to-dum",
+    "aria-controls": "dum-input", "aria-expanded": "false",
+    onclick: () => {
+      inputOpen = !inputOpen;
+      syncComposer();
+      if (inputOpen) textarea.focus();
+    },
+  }, "Write to dum");
+  const voiceBtn = h("button", {
+    type: "button", class: "link-btn", "data-action": "voice-setup",
+    onclick: (e: Event) => {
+      openInput();
+      openSheet("settings", e.currentTarget as HTMLElement);
+      document.getElementById("voice-settings")?.scrollIntoView({ block: "nearest" });
+    },
+  }, "Voice");
+  function openInput() {
+    inputOpen = true;
+    syncComposer();
+    textarea.focus();
+  }
+  const storyBtn = storyAction("link-btn");
+  const wizardPill = h("button", { type: "button", class: "wizard-pill", hidden: true, onclick: (e: Event) => openSheet("settings", e.currentTarget as HTMLElement) });
+  const wizardToggle = h("button", {
+    type: "button", class: "link-btn", "data-action": "wizard-pause",
+    onclick: () => { if (snap) void saveSettings({ wizardAdvice: !snap.settings.wizardAdvice }); },
+  }, "Pause");
+  const dock = h("footer", { class: "dock", hidden: true }, statusLine, promptBox, previewNote, previewCard, h("div", { class: "dock-actions" }, wizardPill, wizardToggle), h("div", { class: "dock-actions" }, storyBtn, requestBtn, voiceBtn), composer);
 
   async function answer(text: string, buttons: HTMLButtonElement[]) {
     if (!snap?.inputToken || sending) return;
@@ -744,14 +844,17 @@ export function panel() {
 
   async function submitComposer() {
     const text = textarea.value.trim();
-    if (!text || !snap?.inputToken || sending) return;
+    if (!text || !snap?.inputToken || sending || !snap.runtime.available || !snap.runtime.authenticated || !snap.runtime.gitAvailable) return;
     sending = true;
     syncComposer();
     const captureToken = preview?.token;
     const r = await call({ type: "send", text, inputToken: snap.inputToken, ...(captureToken ? { captureToken } : {}) });
     sending = false;
     if (r.ok) {
-      if (textarea.value.trim() === text) textarea.value = "";
+      if (textarea.value.trim() === text) {
+        textarea.value = "";
+        inputOpen = false;
+      }
       if (captureToken && preview?.token === captureToken) {
         preview = null;
         renderPreview();
@@ -760,7 +863,7 @@ export function panel() {
       renderTranscript();
     }
     syncComposer();
-    textarea.focus();
+    (inputOpen ? textarea : requestBtn).focus();
   }
   composer.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -785,7 +888,14 @@ export function panel() {
 
   function syncComposer() {
     const s = snap;
-    const ready = !!s?.state && !!s.inputToken && !sending;
+    const ready = !!s?.state && !!s.inputToken && !sending && s.runtime.available && s.runtime.authenticated && s.runtime.gitAvailable;
+    const canTellStory = !!s?.state && !s.state.busy && !sending && (!s.state.prompt || s.state.prompt.type === "next");
+    for (const button of storyButtons) button.disabled = !canTellStory;
+    storyBtn.hidden = !canTellStory;
+    composer.hidden = !inputOpen;
+    requestBtn.textContent = inputOpen ? "Hide input" : textarea.value.trim() ? "Resume draft" : "Write to dum";
+    requestBtn.setAttribute("aria-expanded", String(inputOpen));
+    voiceBtn.title = s?.dictation.message ?? "Set up voice dictation";
     sendBtn.disabled = !ready || !textarea.value.trim();
     sendLabel.textContent = preview ? "Send with message" : "Send";
     sendBtn.classList.toggle("with-image", !!preview);
@@ -806,7 +916,7 @@ export function panel() {
     promptKey = key;
     promptBox.replaceChildren();
     promptBox.className = "prompt-box";
-    let placeholder = "Ask dum for something";
+    let placeholder = "Tell dum about what you built…";
     const buttons: HTMLButtonElement[] = [];
     const btn = (label: string, text: string, cls = "btn") => {
       const b = h("button", { type: "button", class: cls, onclick: () => void answer(text, buttons) }, label);
@@ -816,8 +926,8 @@ export function panel() {
     if (p?.type === "plan") {
       promptBox.classList.add("plan");
       promptBox.append(
-        h("h3", {}, "Build this plan?"),
-        h("p", { class: "hint" }, "Approving lets dum write only the parts listed under dum may write. Not this plan writes nothing, and the parts marked yours stay yours either way."),
+        h("h3", {}, "Go ahead with this plan?"),
+        h("p", { class: "hint" }, "dum writes only the approved, unlocked parts. Anything outside that scope stays untouched. Declining writes nothing."),
         h("div", { class: "actions" }, btn("Approve plan", "y", "btn primary"), btn("Not this plan", "n", "btn")),
       );
       placeholder = "Or say what to change - anything typed here declines the plan";
@@ -856,6 +966,7 @@ export function panel() {
       placeholder = "Answer dum";
     }
     promptBox.hidden = !promptBox.childElementCount;
+    if (fresh && p?.type === "question" && !promptBox.querySelector("button")) inputOpen = true;
     for (const b of buttons) b.disabled = sending || !s.inputToken;
     textarea.placeholder = placeholder;
     // A new decision gets attention without pre-selecting an answer.
@@ -870,7 +981,9 @@ export function panel() {
     stopBtn.hidden = !state.busy;
     const v = state.models;
     const voice = (who: string, m: { model: string; effort: string }) => h("span", { class: "voice" }, h("span", { class: "muted" }, who), " ", m.model ? `${m.model}${m.effort ? ` · ${m.effort}` : ""}` : "not started");
-    provenance.replaceChildren(voice("dum", v.intern), voice("wizard", v.wizard), h("span", { class: "spacer" }), h("span", { class: "muted" }, `${state.unlocked} skill${state.unlocked === 1 ? "" : "s"} on your tree`));
+    provenance.replaceChildren(voice("dum", v.intern), voice("wizard", v.wizard));
+    const { tier, built } = tierInfo(snap?.tree ?? null);
+    treeBtn.title = `Open your skill tree · ${built} built skill${built === 1 ? "" : "s"} · ${tier}`;
     let mood: "idle" | "asking" | "thinking" | "building" = "idle";
     if (state.prompt && state.prompt.type !== "next") mood = "asking";
     else if (state.busy) mood = /think/i.test(state.status) || !state.status ? "thinking" : "building";
@@ -904,7 +1017,7 @@ export function panel() {
     if (name === "info") renderInfo();
     else {
       activePanel = null;
-      for (const b of tabButtons.values()) b.setAttribute("aria-pressed", "false");
+      for (const b of panelButtons.values()) b.setAttribute("aria-pressed", "false");
       sheetTitle.textContent = sheetBodies[name].title;
       sheetBody.replaceChildren(sheetBodies[name].body);
       if (snap) renderSettings(snap);
@@ -922,11 +1035,11 @@ export function panel() {
     activePanel = null;
     awaiting = null;
     sheetEl.hidden = true;
-    for (const b of tabButtons.values()) b.setAttribute("aria-pressed", "false");
+    for (const b of panelButtons.values()) b.setAttribute("aria-pressed", "false");
     const back = sheetReturn;
     sheetReturn = null;
     if (back?.isConnected && !back.closest("[hidden]")) back.focus();
-    else if (!dock.hidden) textarea.focus();
+    else if (!dock.hidden) (inputOpen ? textarea : requestBtn).focus();
   }
 
   async function hide() {
@@ -938,13 +1051,17 @@ export function panel() {
     if (e.key !== "Escape" || e.defaultPrevented) return;
     e.preventDefault();
     if (sheet) closeSheet();
-    else void hide();
+    else if (inputOpen) {
+      inputOpen = false;
+      syncComposer();
+      requestBtn.focus();
+    } else void hide();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden" && preview && !capturing) void discard("Discarded when dum was hidden. Nothing was sent.");
   });
   window.addEventListener("focus", () => {
-    if (!sheet && !dock.hidden && document.activeElement === document.body) textarea.focus();
+    if (!sheet && !dock.hidden && document.activeElement === document.body) (inputOpen ? textarea : requestBtn).focus();
   });
   window.addEventListener("pagehide", () => {
     if (preview) void window.dum.invoke({ type: "capture-discard" });
@@ -965,6 +1082,7 @@ export function panel() {
         promptKey = "\u0000";
         if (preview) void discard("The image was discarded when you switched projects. Nothing was sent.");
         textarea.value = "";
+        inputOpen = false;
         closeSheet();
       }
       shownRoot = root;
@@ -976,18 +1094,16 @@ export function panel() {
     setup.hidden = ready;
     chooser.hidden = !ready || !!state;
     conversation.hidden = !ready || !state;
-    dock.hidden = !ready || !state;
+    dock.hidden = !state;
     projectName.textContent = state?.repo || "no project";
     projectBtn.title = state ? `${state.root} - switch project` : "Pick a project";
-    modeSelect.disabled = !state;
-    modeSelect.hidden = !state;
-    if (state && document.activeElement !== modeSelect) modeSelect.value = state.mode;
-    tabs.hidden = !state || !ready;
-    for (const b of tabButtons.values()) b.disabled = !state;
-    toolsBtn.disabled = !state || !ready;
+    treeBtn.hidden = !state;
+    for (const b of panelButtons.values()) b.disabled = !state;
+    projectTools.hidden = !state;
+    runtimeDetails.hidden = !state;
 
     if (state) {
-      // A panel's text arriving: from a tab, or from a typed :command.
+      // A panel's text arriving from navigation, or from a typed :command.
       const stage = state.stage;
       const stageKey = stage.kind === "info" ? stage.title + "\u0000" + stage.body : "";
       if (stageKey && stageKey !== shownStage) {
@@ -1011,13 +1127,41 @@ export function panel() {
     if (sheet === "info") renderInfo();
     if (sheet === "settings") renderSettings(s);
     syncComposer();
+    // Tier bar
+    const tInfo = tierInfo(s.tree);
+    tierFill.className = `tier-fill tier-${tInfo.tier}`;
+    tierFill.style.width = `${Math.round(tInfo.pct * 100)}%`;
+    const tierText = `${tInfo.tier} · ${tInfo.built} currently usable built skills`;
+    tierBar.setAttribute("aria-label", tierText);
+    tierBar.setAttribute("aria-valuemin", "0");
+    tierBar.setAttribute("aria-valuemax", "64");
+    tierBar.setAttribute("aria-valuenow", String(Math.min(tInfo.built, 64)));
+    tierBar.setAttribute("aria-valuetext", tierText);
+    tierBar.title = "newbie → intern (8) → good (24) → cracked (64). Counts built skills with intact prerequisites, not messages or a mastery rating.";
+    tierName.textContent = tInfo.tier;
+    tierName.hidden = !s.tree || !s.state;
+    tierBar.hidden = !s.tree || !s.state;
+
+    // Wizard quick-access pill
+    if (s.settings.wizardAdvice && s.state) {
+      const src = s.settings.wizardSource === "screen" ? "screen" : "files";
+      const statusShort = s.wizardStatus.replace(/^(screen wizard|wizard( advice| is)?( is)?|wizard)\s+/i, "").slice(0, 40);
+      wizardPill.textContent = `wizard · ${src} · ${statusShort}`;
+      wizardPill.hidden = false;
+    } else {
+      wizardPill.textContent = "wizard · paused";
+      wizardPill.hidden = !s.state;
+    }
+    wizardToggle.hidden = !s.state;
+    wizardToggle.textContent = s.settings.wizardAdvice ? "Pause" : "Resume";
+    wizardToggle.setAttribute("aria-label", s.settings.wizardAdvice ? "Pause wizard advice" : "Resume wizard advice");
   }
 
-  const app = h("div", { class: "app" }, header, tabs, errors, h("main", { class: "body" }, setup, chooser, conversation, sheetEl), dock);
+  const app = h("div", { class: "app" }, header, errors, h("main", { class: "body" }, setup, chooser, conversation, sheetEl), dock);
   document.body.append(app);
   window.dum.subscribe(apply);
   void call({ type: "snapshot" }).then(() => {
-    if (!dock.hidden) textarea.focus();
+    if (!dock.hidden) (inputOpen ? textarea : requestBtn).focus();
     else (document.querySelector("section:not([hidden]) h1") as HTMLElement | null)?.focus();
   });
 }

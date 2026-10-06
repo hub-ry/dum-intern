@@ -22,7 +22,7 @@
     "desktop:build": "node tools/desktop-build.mjs",
     "desktop": "npm run desktop:build && electron .",
     "desktop:pack": "npm run desktop:build && electron-builder --dir --publish never",
-    "desktop:mac": "npm run desktop:build && electron-builder --mac --publish never",
+    "desktop:mac": "npm run desktop:build && node tools/prepare-dictation.mjs && electron-builder --mac --publish never",
     "desktop:smoke": "node tools/desktop-smoke.mjs"
   },
   "devDependencies": {

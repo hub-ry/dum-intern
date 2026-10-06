@@ -123,7 +123,7 @@ export function lines(b: Boundary): string[] {
     out.push(l.built.length ? `  dum may write what you've built: ${l.built.join(", ")}` : "  dum writes nothing here yet - every line of it is yours");
     if (l.open.length) out.push(`  next to practice: ${l.open.slice(0, 5).join(", ")}`);
   }
-  if (b.langs.length) out.push("", "the core of whatever you build stays yours to implement");
+  if (b.langs.length) out.push("", "core algorithms follow the same skill and prerequisite gates");
   if (b.tools.length) {
     const from = [...new Set(b.tools.map((d) => d.from))].join(", ");
     out.push("", `tools (${from})`);

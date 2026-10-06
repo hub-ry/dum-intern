@@ -8,10 +8,9 @@ cd "$(dirname "$0")/.."
 npm test
 
 sudo install -d -m 755 /opt/skill-tree
-# Only what the server imports: the web folder, the tree code it shares with
-# the terminal, and the curated tracks.
+# Only the public docs, private tree UI, shared tree code, and curated tracks.
 sudo rsync -a --delete --chown=root:root --chmod=D755,F644 \
-  --include='/src/' --include='/src/web/***' --include='/src/trees/***' \
+  --include='/src/' --include='/src/site/***' --include='/src/web/***' --include='/src/trees/***' \
   --include='/src/sync.ts' --include='/src/skills.ts' --include='/src/curriculum.ts' --include='/src/notes.ts' \
   --exclude='/node_modules/' --exclude='*' \
   ./ /opt/skill-tree/

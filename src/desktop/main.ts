@@ -20,6 +20,7 @@ import {
   type NativeImage,
   type WebPreferences,
 } from "electron";
+import { execFile } from "node:child_process";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as context from "../context.ts";
@@ -27,6 +28,7 @@ import * as sprite from "../sprite.ts";
 import { HostController } from "./host-client.ts";
 import { Captures, MAX_PNG_BYTES, type Capturer } from "./capture.ts";
 import { companionSize } from "./companion-layout.ts";
+import { DictationHelper } from "./dictation.ts";
 import { Router, ownedPage, type Controller, type Native } from "./ipc.ts";
 import { RuntimeSetup, runtimeExecutable } from "./runtime-setup.ts";
 import { DesktopSettings, placeOnScreen, type Rect } from "./settings.ts";
@@ -282,6 +284,8 @@ async function start(): Promise<void> {
   } catch (err) {
     executable = { error: (err as Error).message };
   }
+  // Allow wizard.screenDecision() calls from main by exposing the bundled claude executable
+  if ('path' in executable) process.env.DUM_CLAUDE_BIN = executable.path;
 
   let pending = false;
   let router: Router | null = null;
@@ -306,15 +310,25 @@ async function start(): Promise<void> {
     throw new Error(`${missing}. Download a complete build of dum.`);
   };
   const controller: Controller = "path" in executable
-    ? new HostController(changed, { executable: executable.path })
+    ? new HostController(changed, { executable: executable.path, capturer })
     : {
-        state: null, inputToken: "", canAttach: false, tree: null,
+        state: null, inputToken: "", canAttach: false, tree: null, wizardStatus: "wizard is unavailable without the bundled runtime",
+        setWizardAdvice: async () => {},
         choose: async () => refuse(), send: async () => refuse(),
         command: refuse, panel: refuse, interrupt: refuse,
         close: async () => {},
       };
   const runtime = new RuntimeSetup(executable, broadcast);
   const captures = new Captures(capturer);
+  const dictation = new DictationHelper({
+    platform: process.platform,
+    arch: process.arch,
+    systemVersion: process.getSystemVersion(),
+    resourcesPath: () => process.resourcesPath,
+    spawnOpen: (path) => new Promise<void>((resolve, reject) => {
+      execFile("/usr/bin/open", [path], { timeout: 10_000 }, (error) => error ? reject(error) : resolve());
+    }),
+  });
 
   const native: Native = {
     async chooseDirectory() {
@@ -364,6 +378,7 @@ async function start(): Promise<void> {
     settings,
     runtime,
     native,
+    dictation,
     personal: (enabled) => context.read(enabled ? undefined : "off"),
     platform: process.platform,
     version: app.getVersion(),

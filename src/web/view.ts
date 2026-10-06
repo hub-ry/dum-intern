@@ -13,6 +13,8 @@ export type View = {
   /** Unlocked skills no track has: libraries, one-off ideas. */
   off: { name: string; lang: string; level: skills.Level }[];
   count: number;
+  /** Built/apply notes whose prerequisite chain still permits build-level work. */
+  usableBuilt: number;
 };
 
 function stateOf(t: skills.Tree, name: string, lang: string): { state: State; level: skills.Level | null; needs: string[] } {
@@ -53,5 +55,9 @@ export function view(t: skills.Tree): View {
     .filter((s) => !curriculum.curated(s.name, s.lang))
     .map((s) => ({ name: s.name, lang: s.lang, level: s.level }))
     .sort((a, b) => (a.lang + a.name).localeCompare(b.lang + b.name));
-  return { tracks, off, count: t.skills.length };
+  let usableBuilt = 0;
+  for (const s of t.skills) {
+    if (s.level !== "recognize" && curriculum.current(t, s.name, s.lang, "build", curriculum.curated(s.name, s.lang)?.requires ?? s.requires).state === "unlocked") usableBuilt++;
+  }
+  return { tracks, off, count: t.skills.length, usableBuilt };
 }

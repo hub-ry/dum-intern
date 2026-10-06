@@ -55,7 +55,7 @@ test("nothing changes before a plan is approved, and refusals are shown", async 
   } finally { done(); }
 });
 
-test("an approved plan lets dum propose what's unlocked - as a diff, never the core or a locked piece", async () => {
+test("an approved plan lets dum propose unlocked pieces as diffs and refuses locked pieces", async () => {
   const { root, store, ctx, tools, done } = setup({ "main.py": "print('hi')\n", "detect.py": "# yours\n" });
   try {
     built("printing", "python");
@@ -79,7 +79,7 @@ test("an approved plan lets dum propose what's unlocked - as a diff, never the c
     assert.ok(diff?.kind === "diff" && diff.outcome === "proposed" && diff.artifact && existsSync(resolve(root, diff.artifact)));
     assert.match(readFileSync(resolve(root, diff.artifact), "utf8"), /hello/, "the proposal holds the change for their editor");
 
-    assert.match(await tools.propose_change!({ path: "detect.py", skills: ["printing"], edits: [{ old_text: "# yours", new_text: "x = 1" }] }), /Refused: .*core/);
+    assert.match(await tools.propose_change!({ path: "detect.py", skills: ["printing"], edits: [{ old_text: "# yours", new_text: "x = 1" }] }), /Refused: .*change detection/);
     assert.match(await tools.create_file!({ path: "walk.py", skills: ["recursion"], content: "def walk(): pass\n" }), /Refused/);
     assert.match(await tools.create_file!({ path: "other.py", skills: ["printing"], content: "print(2)\n" }), /Refused: .*isn't a file the approved plan lists/);
     assert.equal(readFileSync(`${root}/detect.py`, "utf8"), "# yours\n");
@@ -91,6 +91,36 @@ test("an approved plan lets dum propose what's unlocked - as a diff, never the c
     assert.match(await tools.create_file!({ path: "util.py", skills: ["printing"], content: "print(3)\n" }), /Not created/);
     assert.equal(readFileSync(`${root}/util.py`, "utf8"), "# their save\n", "an existing file is never overwritten");
   } finally { done(); }
+});
+
+test("an unlocked core algorithm can be approved, proposed and created in either mode", async () => {
+  for (const mode of ["understand", "anti-vibe"] as const) {
+    const { root, store, ctx, done } = setup({ "walk.py": "# current\n" });
+    try {
+      ctx.mode = mode;
+      const tools = Object.fromEntries(toolkit(ctx).map((t) => [t.name, t.run]));
+      for (const name of ["printing", "variables", "functions", "conditionals", "return values", "recursion"]) built(name, "python");
+      const plan = tools.propose_plan!({
+        summary: "walk the supplied tree recursively",
+        pieces: [{ skill: "recursion", lang: "python", what: "walk the tree", core: true, paths: ["walk.py", "copy.py"] }],
+      });
+      await reply(store, "plan", "y");
+      await plan;
+      assert.ok(ctx.plan);
+      const proposed = await tools.propose_change!({
+        path: "walk.py", skills: ["recursion"],
+        edits: [{ old_text: "# current", new_text: "def walk(node):\n    return [node] + [item for child in node.children for item in walk(child)]" }],
+      });
+      assert.match(proposed, /NOT applied/);
+      assert.equal(readFileSync(`${root}/walk.py`, "utf8"), "# current\n");
+      await tools.create_file!({ path: "copy.py", skills: ["recursion"], content: "def walk(node):\n    return [node] + [item for child in node.children for item in walk(child)]\n" });
+      assert.ok(existsSync(`${root}/copy.py`));
+      ctx.evidence.undo("return values");
+      assert.match(await tools.propose_change!({
+        path: "walk.py", skills: ["recursion"], edits: [{ old_text: "# current", new_text: "# changed" }],
+      }), /Refused/);
+    } finally { done(); }
+  }
 });
 
 test("a declined plan approves nothing, and a not-yet locks a piece again at execution time", async () => {
@@ -122,7 +152,7 @@ test("a new plan revokes the old approval even when it's refused before it's sho
       { skill: "change detection", lang: "python", what: "core", core: true, paths: ["core.py"] },
     ];
     const invalid = [
-      // No core path: the files that stay theirs aren't named.
+      // No core path: the files the algorithm touches aren't named.
       [approved[0]!, { ...approved[1]!, paths: [] }],
       // The core spells an earlier piece again, so it classifies away.
       [approved[0]!, { ...approved[0]!, core: true }],
@@ -155,6 +185,33 @@ test("an explanation counts only when quoted from what they said this turn, and 
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize", "an explanation is never a build");
     store.submit("not yet");
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
+  } finally { done(); }
+});
+
+test("a post-build story remembers reasoning without borrowing mastery or skipping the unaided answer", async () => {
+  const { root, store, ctx, tools, done } = setup({ "hello.py": "print('hello')\n" });
+  try {
+    built("printing", "rust");
+    const reasoning = "print puts text on the screen so I can see what the program did";
+    ctx.said = [`I'm happy with hello.py. I built it after using Rust for years. ${reasoning}.`];
+    await tools.remember!({ note: "They used a visible greeting to check their first Python program." });
+    assert.match(readFileSync(`${root}/.dum/memory.md`, "utf8"), /visible greeting/);
+    assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
+    await tools.check_answer!({ skill: "printing", lang: "python", quote: reasoning, holds: true, feedback: "the output lets you see the result" });
+    assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize");
+    assert.equal(ctx.plan, null, "sharing reasoning doesn't approve implementation work");
+
+    const review = tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: true, feedback: "the program prints a greeting" });
+    await reply(store, "question", "I built it and I'm happy with it");
+    assert.match(await review, /Not recorded/);
+    assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize", "ownership and satisfaction don't attest to unaided work");
+
+    const unaided = tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: true, feedback: "the program prints a greeting" });
+    await reply(store, "question", "yes");
+    assert.match(await unaided, /Recorded/);
+    assert.equal(skills.levelIn(skills.read(), "printing", "python"), "build");
+    assert.equal(skills.levelIn(skills.read(), "printing", "rust"), "build");
+    assert.equal(ctx.plan, null);
   } finally { done(); }
 });
 

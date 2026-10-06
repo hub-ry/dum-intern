@@ -29,6 +29,9 @@ import { home as dumHome } from "./skills.ts";
 import type { Store } from "./store.ts";
 
 export type Artifact = { path: string; text: string; sha: string; from: number };
+/** Saved-change observation never widens the ordinary workspace read boundary. */
+export type SavedChange = Artifact & { diff: string };
+export const SAVED_CHANGE_LIMITS = { files: 8, contextBytes: 16 * 1024 } as const;
 
 export const LIMITS = {
   /** Largest file read, proposed or created. */
@@ -422,11 +425,11 @@ export function gitSync(root: string, args: string[]): GitOut {
 
 const execFileAsync = promisify(execFile);
 
-async function gitAsync(root: string, args: string[]): Promise<GitOut> {
+async function gitAsync(root: string, args: string[], signal?: AbortSignal): Promise<GitOut> {
   try {
     const { stdout, stderr } = await execFileAsync("git", [...SAFE_GIT, ...args], {
       cwd: root, env: gitEnv(), encoding: "utf8", timeout: LIMITS.gitMs, maxBuffer: LIMITS.gitBuffer,
-      killSignal: "SIGKILL", shell: false, windowsHide: true,
+      killSignal: "SIGKILL", shell: false, windowsHide: true, signal,
     });
     return { stdout, stderr, code: 0, truncated: false };
   } catch (err) {
@@ -754,6 +757,43 @@ export class Workspace {
     const shown = bound(body || (arg.trim() ? `no changes in ${arg.trim()}` : "no changes since the last commit"), "use :inspect <path> for a whole file");
     this.store?.excerpt(arg.trim() || "working tree", 1, shown, by, "saved changes");
     return shown;
+  }
+
+  /**
+   * A small saved-change snapshot for the opt-in wizard, without posting excerpts to dum.
+   * Git names dirty files; normal bounded reads enforce ignored/secret exclusions, and no
+   * symlink component is allowed. Previous paths remain visible after a commit or revert.
+   */
+  async savedChanges(previous: readonly string[] = [], signal?: AbortSignal): Promise<SavedChange[]> {
+    if (!this.git) throw new Error(`${basename(this.root)} isn't a Git repository`);
+    signal?.throwIfAborted();
+    const guard = noFilters(this.root);
+    const base = gitSync(this.root, ["rev-parse", "--verify", "-q", "HEAD^{commit}"]).code === 0 ? "HEAD" : EMPTY_TREE;
+    const dirty = await gitAsync(this.root, [...guard, "diff", "--relative", "--name-only", "-z", "--no-renames", SUBMODULES, base], signal);
+    if (dirty.code !== 0 || dirty.truncated) throw new Error("git couldn't provide a bounded saved-change list");
+    const others = await gitAsync(this.root, ["ls-files", "-z", "--others", "--exclude-standard"], signal);
+    if (others.code !== 0 || others.truncated) throw new Error("git couldn't provide a bounded new-file list");
+    const names = new Set([...nul(dirty.stdout).slice(0, 400), ...nul(others.stdout).slice(0, 200), ...previous.slice(0, SAVED_CHANGE_LIMITS.files)]);
+    const files: SavedChange[] = [];
+    for (const path of names) {
+      signal?.throwIfAborted();
+      if (files.length >= SAVED_CHANGE_LIMITS.files) break;
+      if (denied(path) || path.includes("\0") || outside(relative(this.root, resolve(this.root, path)))) continue;
+      try {
+        const ignored = gitSync(this.root, ["check-ignore", "--no-index", "-q", "--", path]);
+        if (ignored.code !== 1) continue;
+        this.unaliased(path);
+        const artifact = this.file(path);
+        const diff = await gitAsync(this.root, [...guard, "diff", ...DIFF_FLAGS, "-U3", base, "--", ...literal([artifact.path])], signal);
+        if (diff.code !== 0 || diff.truncated) continue;
+        // An untracked file has no Git diff, but its first observed save is still real code.
+        files.push({ ...artifact, diff: bound(diff.stdout || unifiedDiff(artifact.path, null, artifact.text)) });
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        // Secrets, ignored paths, symlinks, missing, oversized and non-text files stay unseen.
+      }
+    }
+    return files;
   }
 
   private async diffText(paths: string[], staged: boolean): Promise<string> {

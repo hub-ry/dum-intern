@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>other subjects — dum</title>
+  <meta name="description" content="Using dum outside coding: what works now, what the current gates are, and concrete examples for math, music, and history.">
+  <link rel="stylesheet" href="/site/site.css">
+  <script defer src="/site/wizard.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">dum</a>
+  <ul class="nav-links">
+    <li><a href="/">home</a></li>
+    <li><a href="/install">installation</a></li>
+    <li><a href="/how-it-works">how it works</a></li>
+    <li><a href="/subjects" aria-current="page">subjects</a></li>
+  </ul>
+</nav>
+
+<main>
+  <h1>Other subjects</h1>
+
+  <p>Dum's conversation isn't limited to code. The skill tree and evidence system
+     are built around programming, but the conversation itself can be about anything
+     you're genuinely working on — a proof, a composition, a research paper.</p>
+
+  <p>We're exploring subject-specific skill trees and evidence. These examples describe
+     that direction, not a shipped assessment system for every subject.</p>
+
+  <h2>What can carry over</h2>
+
+  <p><strong>Conversation</strong> can discuss a proof, a score, or a historical source.
+     The current prompts and verified-source catalog are programming-oriented;
+     a plausible answer isn't a subject-specific assessment.</p>
+
+  <p><strong>Project memory</strong> (<code>:remember</code>) persists across sessions
+     regardless of subject. You can use it to record decisions, open questions,
+     and context for any kind of project.</p>
+
+  <p><strong>Sharing work</strong>: <code>:inspect path/to/file</code> shares a bounded
+     excerpt from project text files, such as LaTeX, LilyPond, or an essay draft.
+     <code>:changes</code> shares saved changes. The screen-aware wizard can see a
+     diagram or application view while screen advice is enabled.</p>
+
+  <h2>What's coding-oriented right now</h2>
+
+  <p>The skill tree (<code>:tree</code>, <code>:skills</code>), the three evidence levels
+     (recognize / build / apply), and <code>:submit</code> are built for programming.
+     They track concepts and tools in specific languages. Subject-specific assessment
+     outside code is not implemented.</p>
+
+  <p>The generic evidence machinery can store custom skills, but there aren't curated
+     math, music, or history tracks or validated assessment standards for them.
+     A custom note doesn't establish that a proof, performance, or historical claim is sound.</p>
+
+  <p>For each subject, the question is what independent work would demonstrate a skill,
+     how prerequisites fit together, and which sources make a review checkable.
+     Memory should shape substantial projects, not turn every topic into a short quiz.</p>
+
+  <hr class="section-divider">
+
+  <h2>Mathematics</h2>
+
+  <p>Working through a proof, a problem set, or a research document? Dum can discuss
+     approaches, follow reasoning steps, and remember context across sessions.
+     The wizard can point out a gap in an argument — its judgment can be wrong,
+     so check its reasoning.</p>
+
+  <h3>What it looks like</h3>
+  <ul>
+    <li>Share a LaTeX excerpt with <code>:inspect</code>; ask about a specific step
+        or ask dum to follow the argument.</li>
+    <li>Describe the structure of a proof; get wizard feedback on whether
+        the cases look complete.</li>
+    <li>Record which approaches you've tried in project memory so dum doesn't
+        repeat suggestions you've already ruled out.</li>
+    <li>Share a plot or diagram with screen sharing and ask what dum sees.</li>
+  </ul>
+
+  <h3>Current limits</h3>
+  <p>There's no curated math track or proof checker. A useful direction is a proof notebook
+     that spans several techniques: completed proofs and counterexamples would be evidence,
+     not a confident explanation alone.</p>
+
+  <hr class="section-divider">
+
+  <h2>Music</h2>
+
+  <p>Composing, arranging, transcribing, or analyzing? Dum can discuss theory
+     questions, arrangement choices, and structural decisions. Share notation in a
+     text format and ask specific questions about it.</p>
+
+  <h3>What it looks like</h3>
+  <ul>
+    <li>Share LilyPond, ABC notation, or a plain-text lead sheet with
+        <code>:inspect</code>; discuss a specific bar or harmonic move.</li>
+    <li>Describe what you're trying to achieve; ask about common approaches
+        in that style or period.</li>
+    <li>Record compositional decisions in project memory — why you chose
+        a particular form, what you've ruled out and why.</li>
+    <li>Use screen sharing to show a score or DAW view and ask for observations.</li>
+  </ul>
+
+  <h3>Current limits</h3>
+  <p>There's no dedicated score or performance assessment. A candidate project is an
+     arrangement with an annotated score and recorded performance, with separate evidence
+     for harmony, voice leading, and interpretation. Current text and screen advice
+     cannot verify a performance or replace a musician's review.</p>
+
+  <hr class="section-divider">
+
+  <h2>History and research</h2>
+
+  <p>Writing a research paper, analyzing primary sources, or building a historical
+     argument? Dum can discuss interpretations, source context, and essay structure.
+     Project memory makes it useful across multiple sessions on the same topic.</p>
+
+  <h3>What it looks like</h3>
+  <ul>
+    <li>Share a draft paragraph with <code>:inspect</code>; ask about clarity
+        or argument structure.</li>
+    <li>Describe a source; discuss its likely provenance, limitations, and
+        how to read it critically.</li>
+    <li>Record research threads, working hypotheses, and sources you've
+        already checked in project memory.</li>
+    <li>Use screen sharing to show an archival image or a dense passage
+        and ask dum to describe what it sees.</li>
+  </ul>
+
+  <h3>Current limits</h3>
+  <p>There's no scholarly-source verification system or curated history track.
+     A substantial direction is a sourced essay or small critical edition: primary-source
+     comparisons, traceable citations, and argued interpretations would be separate evidence.
+     Verify dates and provenance yourself; a model's agreement isn't historical proof.</p>
+
+  <hr class="section-divider">
+
+  <h2>Input and sending</h2>
+
+  <p><strong>Wizard screen advice</strong> is the default source while advice is enabled.
+     It samples the screen for unprompted advice, subject to OS permission. You can pause it
+     or switch to saved project files. This is separate from manually previewing and
+     sending a screenshot with a message.</p>
+
+  <p><strong>Voice dictation</strong> is deliberate input. You initiate recording,
+     review the transcript, and decide when to send the message. It isn't an auto-send channel.
+     If screen advice is enabled, its independent screenshots may include visible drafts.</p>
+
+  <p>The two paths are independent. Screen sampling doesn't record audio.
+     Voice dictation doesn't capture the screen.</p>
+
+</main>
+
+</body>
+</html>

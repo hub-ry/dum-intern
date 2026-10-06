@@ -37,7 +37,7 @@ export function treeText(t: skills.Tree, root: string, arg = ""): string {
   out.push(
     "",
     "● built   ◐ recognized   ○ open: its prerequisites are built   · locked",
-    "AI writes a concept only once you've built it, and uses a tool once you recognize it. The project's core stays yours.",
+    "AI writes a concept once you've built it, and uses a tool once you recognize it. Core algorithms follow the same prerequisites.",
     ":practice <skill> suggests a task for your own editor; :submit it when it's done. :skill x adds what you can already write.",
     `one note per skill in ${`${skills.folder()}/`.replace(homedir(), "~")}`,
   );

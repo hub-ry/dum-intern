@@ -47,35 +47,39 @@ test("classifying an off-track skill uses the named prerequisites without writin
   assert.ok(!existsSync(`${process.env.DUM_HOME}/prereqs.json`), "the gate never writes");
 });
 
-test("the core is never AI's, even when every skill is built, in either mode", () => {
+test("an unlocked core follows the same gate in either mode", () => {
   const t = has(["recursion"], "build", "python", basics);
   const [core, other] = classify(t, [
-    { skill: "recursion", lang: "python", what: "the walk", core: true },
+    { skill: "recursion", lang: "python", what: "the walk", core: true, paths: ["walk.py"] },
     { skill: "functions", lang: "python", what: "helpers" },
   ]);
   for (const mode of ["understand", "anti-vibe"] as const) {
-    assert.equal(aiWrites(core!, mode), false);
+    assert.equal(aiWrites(core!, mode), true);
     assert.equal(aiWrites(other!, mode), true);
+    assert.equal(mayChange(t, mode, [core!, other!], "walk.py", ["recursion"]).ok, true);
+    assert.equal(mayChange(basics, mode, [core!, other!], "walk.py", ["recursion"]).ok, false);
+    assert.equal(mayChange(t, mode, [core!, other!], "walk.py", ["recursion"], new Set([id("return values", "python")])).ok, false);
   }
 });
 
 test("anti-vibe coaching doesn't let recognition stand in for implementation", () => {
   const t = has(["lists"], "recognize", "python", has(["printing", "variables"]));
-  const [lists] = classify(t, [{ skill: "lists", lang: "python", what: "keep items" }], "anti-vibe");
+  const [lists] = classify(t, [{ skill: "lists", lang: "python", what: "keep items", core: true }], "anti-vibe");
   assert.equal(lists!.need, "build");
   assert.equal(aiWrites(lists!, "anti-vibe"), false);
 });
 
 
-test("mayChange: only listed paths, for approved non-core pieces held today", () => {
+test("mayChange: only listed paths, for approved pieces held today", () => {
   const t = has(["recursion"], "build", "python", basics);
   const pieces = classify(t, [
     { skill: "recursion", lang: "python", what: "walk", paths: ["src/walk.py"] },
     { skill: "functions", lang: "python", what: "the heart", core: true, paths: ["src/core.py"] },
   ]);
   assert.deepEqual(mayChange(t, "understand", pieces, "./src/walk.py", ["Recursion"]).ok, true);
-  assert.match(mayChange(t, "understand", pieces, "src/core.py", ["recursion"]).why, /core/);
-  assert.match(mayChange(t, "understand", pieces, "src/walk.py", ["functions"]).why, /core/);
+  assert.equal(mayChange(t, "understand", pieces, "src/core.py", ["functions"]).ok, true);
+  assert.equal(mayChange(t, "understand", pieces, "src/core.py", ["recursion"]).ok, false);
+  assert.equal(mayChange(t, "understand", pieces, "src/walk.py", ["functions"]).ok, false);
   assert.match(mayChange(t, "understand", pieces, "src/other.py", ["recursion"]).why, /isn't a file the approved plan lists/);
   assert.match(mayChange(t, "understand", pieces, "src/walk.py", ["sorting with keys"]).why, /isn't a piece of the approved plan/);
   assert.equal(mayChange(t, "understand", pieces, "src/walk.py", []).ok, false);
@@ -104,8 +108,8 @@ test("mayChange judges a file in its own language", () => {
 test("mayChange keeps a shared file shut while any piece the plan puts there is locked, named or not", () => {
   const raw = [
     { skill: "printing", lang: "python", what: "output", paths: ["support.py"] },
-    { skill: "recursion", lang: "python", what: "walk", paths: ["support.py"] },
-    { skill: "functions", lang: "python", what: "the heart", core: true, paths: ["main.py"] },
+    { skill: "recursion", lang: "python", what: "walk", core: true, paths: ["support.py"] },
+    { skill: "functions", lang: "python", what: "helpers", paths: ["main.py"] },
   ];
   const r = mayChange(basics, "understand", classify(basics, raw), "support.py", ["printing"]);
   assert.equal(r.ok, false, "leaving the locked piece out of the change doesn't open its file");
@@ -115,10 +119,10 @@ test("mayChange keeps a shared file shut while any piece the plan puts there is 
   assert.equal(mayChange(t, "understand", classify(t, raw), "support.py", ["printing"], new Set([id("recursion", "python")])).ok, false);
 });
 
-test("next steps skip the core and start at the lowest open rung", () => {
+test("next steps start at the lowest open rung, including for the core", () => {
   assert.equal(nextStep(has(["printing"]), { skill: "recursion", lang: "python" }), "variables");
   assert.equal(nextStep(basics, { skill: "recursion", path: "a.py" }), "recursion");
-  assert.equal(nextStep(basics, { skill: "recursion", lang: "python", core: true }), "");
+  assert.equal(nextStep(basics, { skill: "recursion", lang: "python", core: true }), "recursion");
 });
 
 test("paths are repo-relative or nothing", () => {

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>how it works — dum</title>
+  <meta name="description" content="Skill tree, evidence gates, the post-build story, wizard advice, and project ideas.">
+  <link rel="stylesheet" href="/site/site.css">
+  <script defer src="/site/wizard.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">dum</a>
+  <ul class="nav-links">
+    <li><a href="/">home</a></li>
+    <li><a href="/install">installation</a></li>
+    <li><a href="/how-it-works" aria-current="page">how it works</a></li>
+    <li><a href="/subjects">subjects</a></li>
+  </ul>
+</nav>
+
+<main>
+  <h1>How it works</h1>
+
+  <p>Dum tracks what you can build and implement only that.
+     The goal: you could take the AI away and still understand
+     the architecture, start implementing, and ask precise questions.</p>
+
+  <p>The corner pair stays out of your way. Choose <em>Write to dum</em> or
+     <em>Tell dum what I built</em> when you're ready; hiding input keeps the draft.</p>
+
+  <p>The thin top strip reads <em>newbie → intern → good → cracked</em> at
+     0 / 8 / 24 / 64 currently usable built skills. Recognition and chat volume don't
+     advance it; revoked prerequisites can lower it. The labels aren't proficiency ratings.</p>
+
+  <h2>Skill tree</h2>
+
+  <p>Your skills are stored locally in <code>~/.dum/skills/</code> as plain Markdown files
+     you can read, edit, or delete. Nothing is inferred from the code in your project.</p>
+
+  <p>Skills come in two categories:</p>
+  <ul>
+    <li><strong>Concepts</strong> — require build evidence before dum may implement them.</li>
+    <li><strong>Tools</strong> — require recognition evidence (no build required,
+        but build still counts).</li>
+  </ul>
+
+  <p>Prerequisites and language scope are enforced in code. Unlocking a skill in Python
+     does not grant it in Go. Revoking a prerequisite locks dependent capability
+     without deleting historical notes.</p>
+
+  <p><code>:tree</code> or <code>:skills</code> shows tracks, levels, prerequisites,
+     and available next steps.</p>
+
+  <h2>Evidence levels</h2>
+
+  <h3>Recognize</h3>
+  <p>Explain what a skill is and why it fits a problem.
+     Tools become available after recognition.
+     Advice, images, and personal context never count as recognition.</p>
+
+  <h3>Build</h3>
+  <p>Implement the skill yourself, without AI assistance, then explicitly say so.
+     Use <code>:submit &lt;task&gt; &lt;file&gt; --unaided</code> to submit an implementation
+     for review. A saved file alone is not proof of unaided authorship — the
+     self-report is required. Concepts become available after build evidence.</p>
+
+  <h3>Apply</h3>
+  <p>Explain when and why to use the skill, citing a real decision, after build evidence
+     is on record. Reasoning without prior build evidence only records recognition.</p>
+
+  <p class="note">A separate model audits implied requirements and prerequisite coverage.
+     Reviews and expected outputs are model judgments — dum can get arithmetic wrong,
+     so check its numbers. The tree is yours to correct with <code>:skill -name</code>.</p>
+
+  <hr class="section-divider">
+
+  <h2>Building and telling</h2>
+
+  <p>Work in your own editor. Run builds, tests, and programs in your own terminal.
+     Dum has no integrated editor, file tree, or embedded shell.</p>
+
+  <p>When you are satisfied with what you built, open <em>Tools → Tell dum what I built</em>.
+     This prepares a draft — the story of what you made, the decisions, and why they fit.
+     The draft never sends automatically. You review it and send it yourself.</p>
+
+  <p>Explaining what you built is not the same as build evidence.
+     A story written with wizard help is AI-assisted and does not establish unaided build.
+     Core algorithms use the same evidence gates as everything else; the gate is checked in
+     code even when a prerequisite is later removed.</p>
+
+  <p><code>:changes</code> shares your current saved diff.
+     <code>:inspect path/to/file</code> shares a bounded excerpt.
+     Dum can also read bounded files in the selected project when needed.
+     It does not watch keystrokes or scan your home directory.</p>
+
+  <hr class="section-divider">
+
+  <h2>The wizard</h2>
+
+  <p>The wizard is the taller character floating beside your IDE.
+     It gives occasional unprompted advice — not on every action, and not as a tutor.</p>
+
+  <p>When the wizard cites a source, the anchor words and link come from a verified catalog.
+     The connecting sentence passes a word-pattern screen for dates, statistics,
+     unsourced names, and causal claims. The screen does not fact-check everything,
+     and the wizard may stay silent when no anchor fits.</p>
+
+  <h2>Screen advice and sharing</h2>
+
+  <p>On a fresh install, the wizard uses periodic screen snapshots for unprompted advice.
+     Pause or resume advice with the one-click button in the companion panel, or switch
+     its source to saved project files in Settings.
+     Screen mode can see anything visible, including private information and unsent drafts.
+     macOS requires Screen Recording permission; denied access pauses advice, not a silent
+     switch to files.</p>
+
+  <p>Manual sharing is separate: pick a screen or window, review the preview, then press
+     <em>Send</em> with a message. An unsent preview expires after five minutes.
+     Neither path writes screenshots to disk.</p>
+
+  <p>When you send, a text description of what Claude sees enters the local conversation
+     and may persist in project memory. That does not mean Claude's service never retains
+     an image on its end.</p>
+
+  <p>No key logging or passive audio recording. Voice uses bundled OpenSuperWhisper
+     on macOS 14+ with Apple Silicon: configure its local model, permissions, and shortcut;
+     focus dum's input, dictate, review the transcript, then Send. Opening voice setup
+     doesn't start recording. OpenSuperWhisper may keep recordings locally in its own storage.</p>
+
+  <hr class="section-divider">
+
+  <h2>Project ideas</h2>
+
+  <p><code>:practice projects in go</code> (or another language) suggests substantial
+     projects sized to your current tree. Suggestions draw on your skill tree,
+     project memory, and — if you have configured it — optional personal context.</p>
+
+  <p>Projects are ordered by estimated active-work hours, then difficulty.
+     Each suggestion shows why it fits and an ordered path through several skill levels,
+     so you have milestones rather than a single finish line.</p>
+
+  <p>Choosing a project does not unlock anything.
+     Cross-language experience informs suggestions but does not grant skill credit
+     in an unfamiliar language. Build evidence is always language-specific.</p>
+
+  <p class="note">Estimates and recommendations are model judgments, not promises.
+     <code>:practice &lt;skill&gt;</code> stays available for focused work on a single
+     skill when a large project is not what you need.</p>
+
+</main>
+
+</body>
+</html>

@@ -24,7 +24,12 @@ test("unknown or unoffered anchors cannot supply a fabricated citation", () => {
   assert.equal(compose('{"anchor":7,"say":"a claim"}', moment, [sorting]), null);
 });
 
-test("unsupported specifics narrow to the sourced mechanism", () => {
+test("a selected source without a concrete surviving observation stays silent", () => {
+  assert.equal(line("python-sorting", ""), null);
+  assert.equal(line("python-sorting", "google discovered this in 2008."), null);
+});
+
+test("unsupported specifics do not trigger an unsolicited catalog lesson", () => {
   for (const claim of [
     "guido invented this in 2002.",
     "it made sorting 3x faster.",
@@ -33,8 +38,7 @@ test("unsupported specifics narrow to the sourced mechanism", () => {
     'a founder called this "move fast".',
     "see https://unverified.example.invalid for proof.",
   ]) {
-    const output = line("python-sorting", claim)!;
-    assert.equal(output, `${sorting.claim}\nsource: ${sorting.url}`);
+    assert.equal(line("python-sorting", claim), null);
   }
 });
 
@@ -63,7 +67,7 @@ test("claims about what engineers usually do narrow to the sourced mechanism", (
     "storing cents is best practice.",
     "cents is pretty much the norm, and it's common for payment code.",
   ]) {
-    assert.equal(say("python-floats", claim), `${floats.claim}\nsource: ${floats.url}`, claim);
+    assert.equal(say("python-floats", claim), null, claim);
     assert.equal(say(null, claim), null, claim);
   }
   const local = "here '12.50' becomes 1250 at load, so the report's totals add up exactly.";
@@ -97,4 +101,19 @@ test("without an anchor unsupported history is silence, not a confident generic 
   assert.equal(line(null, "back when i worked at google we shipped this."), null);
   assert.equal(line(null, "this changed in 2019."), null);
   assert.equal(compose("not valid json", moment, [git]), null);
+});
+
+test("a sourced consequential improvement can speak without inventing an error", () => {
+  const d: Decision = {
+    request: "saved leaderboard changes",
+    paths: ["scores.py"],
+    changes: "+ ordered = sorted(scores, key=lambda row: row.score)\n+ scores = ordered",
+  };
+  const output = compose(JSON.stringify({
+    anchor: sorting.id,
+    say: "sorting scores in place here avoids a second list if nothing needs the previous order.",
+  }), d, [sorting]);
+  assert.match(output!, /if nothing needs the previous order/);
+  assert.match(output!, /source: https:\/\/docs\.python\.org/);
+  assert.equal(compose(JSON.stringify({ anchor: sorting.id, say: "sorting scores in place avoids a second list." }), { ...d, practice: true }, [sorting]), null);
 });

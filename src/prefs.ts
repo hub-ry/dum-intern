@@ -7,12 +7,12 @@ type Prefs = { mode?: Mode; explained?: boolean };
 
 /** What the first anti-vibe start after the gates tightened says, once. Each surface adds how to switch back. */
 export const ANTI_VIBE = [
-  "anti-vibe changes how dum coaches you, not what AI may write.",
+  "anti-vibe uses the approach you give dum, with the same skill gates as understand.",
   "",
   "- Explaining a concept here counts as recognizing it. It no longer lets dum write that concept:",
   "  that needed only an explanation in earlier versions, and now it needs your build evidence",
   "  (your own unaided implementation, submitted with :submit and reviewed) in both modes.",
-  "- Tools still need recognizing, and the project's core stays yours in both modes.",
+  "- Tools still need recognizing. The core algorithm follows the same skill and prerequisite gates.",
   "- Skills already on your tree keep the level they have.",
 ].join("\n");
 

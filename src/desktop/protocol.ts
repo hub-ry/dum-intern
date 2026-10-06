@@ -1,6 +1,7 @@
 import type { State } from "../store.ts";
 import type { Mode } from "../gate.ts";
 import type { View as TreeView } from "../web/view.ts";
+import type { DictationStatus } from "./dictation.ts";
 
 /** Renderer has no Node access. Only this finite, validated request surface crosses IPC. */
 export type Settings = {
@@ -9,6 +10,8 @@ export type Settings = {
   allWorkspaces: boolean;
   launchAtLogin: boolean;
   personalContext: boolean;
+  wizardAdvice: boolean;
+  wizardSource: 'screen' | 'files';
 };
 export type RuntimeStatus = { available: boolean; authenticated: boolean; loginRunning: boolean; loginNeedsCode: boolean; gitAvailable: boolean; message: string };
 export type Snapshot = {
@@ -18,9 +21,11 @@ export type Snapshot = {
   canAttach: boolean;
   recentProjects: { name: string; root: string }[];
   settings: Settings;
+  wizardStatus: string;
   hotkeyError: string;
   runtime: RuntimeStatus;
   screenPermission: string;
+  dictation: DictationStatus;
   platform: string;
   version: string;
 };
@@ -43,6 +48,7 @@ export type Request =
   | { type: "capture-preview"; sourceId: string; inputToken: string }
   | { type: "capture-discard" }
   | { type: "screen-permission" }
+  | { type: "dictation-open" }
   | { type: "runtime-check" }
   | { type: "runtime-login" }
   | { type: "runtime-login-open" }

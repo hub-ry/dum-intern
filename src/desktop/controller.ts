@@ -20,6 +20,8 @@ import { ANTI_VIBE, chooseMode } from "../prefs.ts";
 import { acquire } from "../session-lock.ts";
 import { view, type View } from "../web/view.ts";
 import type { Panel } from "./protocol.ts";
+import { SavedChangeAdvice, type AdviceOptions } from "./saved-change-advice.ts";
+import { ScreenWizardAdvice, type ScreenAdviceOptions } from './screen-wizard-advice.ts';
 
 export type { SharedImage };
 
@@ -34,10 +36,20 @@ const PANELS: Record<Panel, string> = { tree: "tree", memory: "memory", history:
 const COMMANDS: Record<string, true> = { inspect: true, changes: true, practice: true, submit: true, run: true, remember: true };
 const TYPED: Record<string, true> = { ...COMMANDS, share: true, tree: true, skills: true, log: true, context: true, memory: true, boundary: true, evidence: true };
 
+type WizardAdvisor = {
+  readonly status: string;
+  setEnabled(enabled: boolean): void;
+  refresh(): void;
+  interrupt(): void;
+  close(): void;
+  tick(): Promise<void>;
+};
+
 type Open = {
   repo: Repo;
   store: Store;
   personal: context.Context;
+  advice: WizardAdvisor;
   /** Aborted to close: the run, Claude and any helper work stop. */
   stop: AbortController;
   release: () => void;
@@ -52,11 +64,37 @@ export class DesktopController {
   /** Opening, switching and closing happen one at a time, each after the last has finished. */
   private queue: Promise<void> = Promise.resolve();
   private treeView: View | null = null;
+  private adviceEnabled = false;
+  private adviceSource: 'screen' | 'files' = 'screen';
 
-  constructor(private readonly onChange: () => void) {}
+  constructor(
+    private readonly onChange: () => void,
+    private readonly options: { advice?: Omit<AdviceOptions, "blocked" | "publish" | "changed">; screen?: Omit<ScreenAdviceOptions, "blocked" | "publish" | "changed"> } = {},
+  ) {}
 
   get state(): State | null {
     return this.open?.store.getSnapshot() ?? null;
+  }
+
+  get wizardStatus(): string {
+    return this.open?.advice.status ?? (this.adviceEnabled ? "open a project for wizard advice" : "wizard advice is off");
+  }
+
+  setWizardAdvice(enabled: boolean, source: 'screen' | 'files' = 'screen'): void {
+    const prevSource = this.adviceSource;
+    this.adviceEnabled = enabled;
+    this.adviceSource = source;
+    if (this.open && source !== prevSource) {
+      this.switchAdvisor();
+    } else {
+      this.open?.advice.setEnabled(enabled);
+    }
+    this.onChange();
+  }
+
+  /** One observer poll, also the clock boundary used by saved-change lifecycle tests. */
+  pollWizardAdvice(): Promise<void> {
+    return this.open?.advice.tick() ?? Promise.resolve();
   }
 
   /**
@@ -174,6 +212,7 @@ export class DesktopController {
   interrupt(): void {
     const o = this.open;
     if (!o) return;
+    o.advice.interrupt();
     if (o.store.onInterrupt) o.store.onInterrupt();
     else o.store.cancel();
   }
@@ -204,17 +243,26 @@ export class DesktopController {
     const stopMemory = memory.attach(repo.root, store);
     store.setModel("intern", MODELS.dum.model, MODELS.dum.effort);
     store.setModel("wizard", wizard.MODEL, wizard.EFFORT);
-    store.setUnlocked(skills.read().skills.length);
+    const tree = skills.read();
+    store.setUnlocked(tree.skills.length);
+    this.treeView = view(tree);
     store.onMemory = () => memory.describe(repo.root);
     store.onRemember = (note) => store.note(`remembered: ${memory.remember(repo.root, note)}`);
     store.onContext = () => context.describe(personal);
     store.onSkills = (arg) => treeText(skills.read(), repo.root, arg);
     store.onBoundary = () => boundary.lines(boundary.boundary(skills.read(), repo.root, repo.files)).join("\n");
     let unlocked = store.getSnapshot().unlocked;
+    let noteId = -1;
     const unsubscribe = store.subscribe(() => {
-      const now = store.getSnapshot().unlocked;
-      if (now !== unlocked && this.treeView) this.treeView = view(skills.read());
+      const state = store.getSnapshot();
+      const now = state.unlocked;
+      const last = state.transcript.at(-1);
+      if (now !== unlocked || (last?.kind === "note" && last.id !== noteId)) {
+        this.treeView = view(skills.read());
+        if (last?.kind === "note") noteId = last.id;
+      }
       unlocked = now;
+      this.open?.advice.refresh();
       this.onChange();
     });
     const detach = () => {
@@ -247,9 +295,11 @@ export class DesktopController {
       store.command("tree");
     } else if (repo.files.some((f) => skills.langOf(f))) store.command("boundary");
 
-    const o: Open = { repo, store, personal, stop: new AbortController(), release, detach, done: Promise.resolve() };
+    const advisor = this.createAdvisor(repo.root, store);
+    const o: Open = { repo, store, personal, advice: advisor, stop: new AbortController(), release, detach, done: Promise.resolve() };
     this.open = o;
     o.done = this.converse(o);
+    advisor.setEnabled(this.adviceEnabled);
   }
 
   /**
@@ -285,6 +335,7 @@ export class DesktopController {
   private async shutdown(keepLock: boolean) {
     const o = this.open!;
     this.open = null;
+    o.advice.close();
     o.stop.abort();
     o.store.close();
     try {
@@ -300,5 +351,47 @@ export class DesktopController {
     await Promise.race([Promise.all([o.done, o.store.settled()]), late]);
     clearTimeout(timer);
     if (!keepLock) o.release();
+  }
+
+  private createAdvisor(root: string, store: Store): WizardAdvisor {
+    const commonBlocked = (): string | null => {
+      const state = store.getSnapshot();
+      if (state.prompt?.type === "course") return "wizard advice is paused for the optional course";
+      if (state.prompt?.type === "question" && state.prompt.purpose === "attest") return "wizard advice is paused for your unaided evidence";
+      if (state.busy || !store.canAttach) return "wizard advice is paused while dum or a command is active";
+      if (course.active(root)) return "wizard advice is paused for the optional course";
+      return null;
+    };
+    const commonPublish = (text: string) => { if (this.open?.store === store) store.quip(text); };
+    if (this.adviceSource === "screen") {
+      return new ScreenWizardAdvice({
+        ...(this.options.screen ?? {}),
+        capture: this.options.screen?.capture ?? (async () => null),
+        blocked: commonBlocked,
+        publish: commonPublish,
+        changed: () => this.onChange(),
+        check: (moment, signal) => store.helper((stop) => (this.options.screen?.check ?? wizard.screenDecision)(moment, AbortSignal.any([signal, stop]))),
+      });
+    }
+    return new SavedChangeAdvice(root, {
+      ...this.options.advice,
+      blocked: commonBlocked,
+      check: (moment, signal) => store.helper((stop) => (this.options.advice?.check ?? wizard.decision)(moment, AbortSignal.any([signal, stop]))),
+      publish: commonPublish,
+      changed: () => this.onChange(),
+    });
+  }
+
+  private switchAdvisor(): void {
+    const o = this.open;
+    if (!o) return;
+    o.advice.close();
+    const advisor = this.createAdvisor(o.repo.root, o.store);
+    o.advice = advisor;
+    advisor.setEnabled(this.adviceEnabled);
+  }
+
+  publishQuip(text: string): void {
+    this.open?.store.quip(text);
   }
 }

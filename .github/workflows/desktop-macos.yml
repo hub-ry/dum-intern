@@ -61,6 +61,12 @@ jobs:
           test "$(lipo -archs "$APP/Contents/MacOS/Dum")" = "$MACHINE"
           test "$(lipo -archs "$claude")" = "$MACHINE"
           test "$("$claude" --version | awk '{print $1}')" = "$expected"
+          if [ "$ARCH" = "arm64" ]; then
+            osw="$APP/Contents/Resources/OpenSuperWhisper.app"
+            test -x "$osw/Contents/MacOS/OpenSuperWhisper"
+            test -s "$APP/Contents/Resources/OpenSuperWhisper-LICENSE.txt"
+            lipo "$osw/Contents/MacOS/OpenSuperWhisper" -verify_arch arm64
+          fi
           hdiutil verify release/*.dmg
           mkdir -p "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/dmg-app" "$RUNNER_TEMP/zip-app"
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" release/*.dmg

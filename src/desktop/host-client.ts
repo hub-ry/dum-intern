@@ -9,6 +9,8 @@ import type { View } from "../web/view.ts";
 import type { Panel } from "./protocol.ts";
 import type { SharedImage } from "./controller.ts";
 import { HostRequestSchema, type HostEvent } from "./host-protocol.ts";
+import { ScreenWizardAdvice } from './screen-wizard-advice.ts';
+import type { Capturer } from './capture.ts';
 
 /** OS broker sees snapshots only. All teaching and model work stays in a supervised host. */
 export class HostController {
@@ -20,13 +22,25 @@ export class HostController {
   private treeView: View | null = null;
   private sequence = 0;
   private changing = false;
+  private adviceEnabled = false;
+  private adviceSource: 'screen' | 'files' = 'screen';
+  private adviceStatus = "wizard advice is off";
+  private screenAdvice: ScreenWizardAdvice | null = null;
   private pending = new Map<string, { resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
 
-  constructor(private readonly changed: () => void, private readonly options: { executable: string }) {}
+  constructor(private readonly changed: () => void, private readonly options: { executable: string; capturer?: Capturer }) {}
   get state(): State | null { return this.current; }
   get inputToken(): string { return this.token; }
   get canAttach(): boolean { return this.attachable; }
   get tree(): View | null { return this.treeView; }
+  get wizardStatus(): string {
+    if (this.adviceSource === 'screen') {
+      if (this.screenAdvice) return this.screenAdvice.status;
+      if (!this.adviceEnabled) return 'screen wizard is off';
+      return this.options.capturer ? 'open a project for screen wizard' : 'screen wizard unavailable on this system';
+    }
+    return this.adviceStatus;
+  }
 
   async choose(root: string, personal: Context, mode?: Mode): Promise<void> {
     if (this.changing) throw new Error("a project is already opening");
@@ -56,6 +70,8 @@ export class HostController {
           this.token = message.inputToken;
           this.attachable = message.canAttach;
           this.treeView = message.tree;
+          this.adviceStatus = message.wizardStatus;
+          this.screenAdvice?.refresh();
           this.changed();
         } else if (message.type === "reply") {
           const waiting = this.pending.get(message.id);
@@ -73,11 +89,19 @@ export class HostController {
         this.rejectPending("the teaching host stopped - reopen the project to continue");
         this.token = "";
         this.attachable = false;
+        this.adviceStatus = "wizard stopped - reopen this project to continue";
+        this.screenAdvice?.close();
+        this.screenAdvice = null;
         if (this.current) this.current = { ...this.current, busy: false, prompt: null, status: "dum stopped - reopen this project to continue" };
         this.changed();
       });
       try { await ready.promise; } finally { clearTimeout(timer); }
-      await this.request({ op: "open", root, personal, ...(mode ? { mode } : {}) });
+      await this.request({ op: "open", root, personal, wizardAdvice: this.adviceEnabled && this.adviceSource === 'files', ...(mode ? { mode } : {}) });
+      // Re-enable screen wizard for the new project
+      if (this.adviceEnabled && this.adviceSource === 'screen' && this.options.capturer) {
+        if (!this.screenAdvice) this.screenAdvice = this.makeScreenAdvisor();
+        this.screenAdvice.setEnabled(true);
+      }
     } catch (error) {
       await this.close();
       throw error;
@@ -93,7 +117,30 @@ export class HostController {
   panel(panel: Panel): Promise<void> { return this.request({ op: "panel", panel }); }
   interrupt(): Promise<void> { return this.request({ op: "interrupt" }); }
 
+  async setWizardAdvice(enabled: boolean, source: 'screen' | 'files' = 'screen'): Promise<void> {
+    const prevSource = this.adviceSource;
+    this.adviceEnabled = enabled;
+    this.adviceSource = source;
+    const fileEnabled = enabled && source === 'files';
+    if (this.child) await this.request({ op: 'wizard-advice', enabled: fileEnabled });
+    if (!this.child) this.adviceStatus = fileEnabled ? 'open a project for wizard advice' : 'wizard advice is off';
+    // Screen wizard in main
+    if (source === 'screen' && this.options.capturer) {
+      if (!this.screenAdvice || prevSource !== 'screen') {
+        this.screenAdvice?.close();
+        this.screenAdvice = this.makeScreenAdvisor();
+      }
+      this.screenAdvice.setEnabled(enabled);
+    } else {
+      this.screenAdvice?.close();
+      this.screenAdvice = null;
+    }
+    this.changed();
+  }
+
   async close(): Promise<void> {
+    this.screenAdvice?.close();
+    this.screenAdvice = null;
     const child = this.child;
     if (child) {
       try { await this.request({ op: "close" }, 5_000); } catch { /* forced exit below */ }
@@ -108,7 +155,32 @@ export class HostController {
     this.token = "";
     this.attachable = false;
     this.treeView = null;
+    this.adviceStatus = this.adviceEnabled ? "open a project for wizard advice" : "wizard advice is off";
     this.changed();
+  }
+
+  private makeScreenAdvisor(): ScreenWizardAdvice {
+    const capturer = this.options.capturer!;
+    return new ScreenWizardAdvice({
+      blocked: () => {
+        if (!this.child || !this.current) return 'open a project for wizard advice';
+        const state = this.current;
+        if (state.prompt?.type === 'course') return 'wizard advice is paused for the optional course';
+        if (state.prompt?.type === 'question' && 'purpose' in state.prompt && state.prompt.purpose === 'attest') return 'wizard advice is paused for your unaided evidence';
+        if (state.busy || !this.attachable) return 'wizard advice is paused while dum or a command is active';
+        return null;
+      },
+      capture: async () => {
+        const sources = await capturer.list();
+        const primary = sources.find(s => s.kind === 'screen');
+        if (!primary) return null;
+        return capturer.grab(primary);
+      },
+      publish: (text) => {
+        if (this.child) void this.request({ op: 'quip', text }, 5_000).catch(() => {});
+      },
+      changed: () => this.changed(),
+    });
   }
 
   private request(value: unknown, ms = 15 * 60_000): Promise<void> {

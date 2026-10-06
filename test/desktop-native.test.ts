@@ -13,6 +13,7 @@ import type { State } from "../src/store.ts";
 import type { SharedImage } from "../src/desktop/controller.ts";
 import type { CaptureSource, Settings } from "../src/desktop/protocol.ts";
 import { Captures, type Capturer } from "../src/desktop/capture.ts";
+import { DictationHelper } from "../src/desktop/dictation.ts";
 import { Router, ownedPage, type Controller, type Native } from "../src/desktop/ipc.ts";
 import { DesktopSettings, placeOnScreen } from "../src/desktop/settings.ts";
 import { RuntimeSetup, bundledCandidates, resolveBundled, type Probe } from "../src/desktop/runtime-setup.ts";
@@ -166,6 +167,12 @@ class FakeController implements Controller {
   inputToken = "";
   canAttach = false;
   tree = null;
+  wizardStatus = "wizard advice is off";
+  adviceEnabled = false;
+  async setWizardAdvice(enabled: boolean, _source?: 'screen' | 'files') {
+    this.adviceEnabled = enabled;
+    this.wizardStatus = enabled ? "wizard is watching" : "wizard advice is off";
+  }
   sent: { text: string; inputToken: string; image?: SharedImage }[] = [];
   chosen: { root: string; personal: Context; mode?: Mode }[] = [];
   hold: Promise<void> | null = null;
@@ -220,6 +227,7 @@ function desktop(dir = temp()) {
   const personalAsked: boolean[] = [];
   const router = new Router({
     controller, captures, settings, runtime, native, platform: "linux", version: "0.0.1",
+    dictation: new DictationHelper({ platform: "linux", arch: "x64", systemVersion: "6.8.0", resourcesPath: () => dir, spawnOpen: () => { throw new Error("unsupported helper must not launch"); } }),
     personal: (enabled) => { personalAsked.push(enabled); return { path: "", text: "", warning: "" }; },
   });
   return {
@@ -360,6 +368,34 @@ test("settings are applied before they are saved, and a hotkey conflict leaves t
   assert.deepEqual(DesktopSettings.load(d.dir).settings, next, "the saved settings didn't change");
   const raw = readFileSync(join(d.dir, "settings.json"), "utf8");
   assert.doesNotMatch(raw, /token|transcript|data:image|email/i);
+});
+
+test("legacy settings keep their preferences and advice remains opt-in", () => {
+  const dir = temp();
+  const old = { hotkey: "Alt+Shift+K", alwaysOnTop: false, allWorkspaces: false, launchAtLogin: false, personalContext: true };
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ version: 1, settings: old, recent: [], companion: { x: 12, y: 34 } }));
+  const migrated = DesktopSettings.load(dir);
+  assert.equal(migrated.warning, "");
+  assert.deepEqual(migrated.settings, { ...old, wizardAdvice: false, wizardSource: 'screen' });
+  assert.deepEqual(migrated.companion, { x: 12, y: 34 });
+  const fresh = DesktopSettings.load(temp());
+  assert.equal(fresh.settings.wizardAdvice, true, "fresh install defaults to wizard enabled");
+  assert.equal(fresh.settings.wizardSource, 'screen', "fresh install defaults to screen source");
+});
+
+test("the advice toggle reaches the project controller and survives reopening", async () => {
+  const d = desktop();
+  assert.equal(d.router.snapshot().settings.wizardAdvice, true);
+  const next = { ...d.settings.settings, wizardAdvice: false };
+  assert.equal((await d.router.handle({ type: "settings", settings: next })).ok, true);
+  assert.equal(d.controller.adviceEnabled, false);
+  assert.equal(DesktopSettings.load(d.dir).settings.wizardAdvice, false);
+  assert.equal(d.router.snapshot().wizardStatus, d.controller.wizardStatus);
+  d.pick(d.dir);
+  assert.equal((await d.router.handle({ type: "choose-project" })).ok, true);
+  assert.equal(d.controller.adviceEnabled, false);
+  assert.equal((await d.router.handle({ type: "settings", settings: { ...next, wizardAdvice: true } })).ok, true);
+  assert.equal(d.controller.adviceEnabled, true);
 });
 
 test("a corrupt settings file is set aside rather than overwritten, and the companion stays on a screen", () => {

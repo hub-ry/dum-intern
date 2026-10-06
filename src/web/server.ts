@@ -37,6 +37,22 @@ type Stored = { version: number; snapshot: sync.Snapshot; created: string; updat
 
 const STATIC: Record<string, string> = { "page.js": "text/javascript", "page.css": "text/css" };
 
+const SITE_PAGES: Record<string, string> = { "/": "index.html", "/install": "install.html", "/how-it-works": "how-it-works.html", "/subjects": "subjects.html" };
+const SITE_ASSETS: Record<string, string> = {
+  "site.css": "text/css; charset=utf-8",
+  "game.js": "text/javascript; charset=utf-8",
+  "wizard.js": "text/javascript; charset=utf-8",
+  "hack-regular.woff2": "font/woff2",
+  "hack-bold.woff2": "font/woff2",
+  "hack-LICENSE.md": "text/plain; charset=utf-8",
+};
+const SITE_HEADERS = {
+  "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "referrer-policy": "no-referrer",
+  "cache-control": "public, max-age=300",
+  "x-content-type-options": "nosniff",
+};
+
 const HEADERS = {
   "content-security-policy":
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -56,6 +72,9 @@ export function createServer(o: Options): Server {
   const here = new URL(".", import.meta.url).pathname;
   const page = readFileSync(`${here}page.html`, "utf8");
   const statics = Object.fromEntries(Object.keys(STATIC).map((f) => [f, readFileSync(`${here}${f}`, "utf8")]));
+  const site = new URL("../site/", import.meta.url);
+  const sitePages = Object.fromEntries(Object.entries(SITE_PAGES).map(([route, file]) => [route, readFileSync(new URL(file, site))]));
+  const siteAssets = Object.fromEntries(Object.keys(SITE_ASSETS).map((file) => [`/site/${file}`, { body: readFileSync(new URL(file, site)), type: SITE_ASSETS[file]! }]));
   const file = (id: string) => `${o.data}/${id}.json`;
   const locks = new Map<string, Promise<unknown>>();
   const creates = new Map<string, number[]>();
@@ -116,8 +135,17 @@ export function createServer(o: Options): Server {
     const url = new URL(req.url ?? "/", "http://x");
     const parts = url.pathname.split("/").filter(Boolean);
     const m = req.method ?? "GET";
+    const sitePage = sitePages[url.pathname];
+    if ((m === "GET" || m === "HEAD") && sitePage) {
+      res.writeHead(200, { ...SITE_HEADERS, "content-type": "text/html; charset=utf-8" });
+      return res.end(m === "HEAD" ? undefined : sitePage);
+    }
+    const siteAsset = siteAssets[url.pathname];
+    if ((m === "GET" || m === "HEAD") && siteAsset) {
+      res.writeHead(200, { ...SITE_HEADERS, "content-type": siteAsset.type });
+      return res.end(m === "HEAD" ? undefined : siteAsset.body);
+    }
 
-    if (m === "GET" && parts.length === 0) return send(res, 200, LANDING, "text/html");
     if (m === "GET" && url.pathname === "/api/health") return send(res, 200, { ok: true });
     if (m === "GET" && parts[0] === "static" && parts[1] && STATIC[parts[1]]) return send(res, 200, statics[parts[1]]!, STATIC[parts[1]]);
     if (m === "GET" && parts.length === 1 && ID.test(parts[0]!)) return send(res, 200, page, "text/html");
@@ -199,13 +227,11 @@ export function createServer(o: Options): Server {
   });
 }
 
-const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>dum trees</title><link rel="stylesheet" href="/static/page.css"></head>
-<body><main class="landing"><h1>dum</h1><p>This is where dum keeps web copies of skill trees. Each one lives at its own private link, and nothing here lists them.</p><p>Get yours from the terminal: <code>dum --web</code></p></main></body></html>`;
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT) || 8787;
   const data = process.env.DUM_WEB_DATA || "./web-data";
   createServer({ data, trustProxy: process.env.TRUST_PROXY === "1" }).listen(port, process.env.HOST || "127.0.0.1", () => {
-    console.log(`dum trees on http://${process.env.HOST || "127.0.0.1"}:${port}, data in ${data}`);
+    console.log(`dum docs and trees on http://${process.env.HOST || "127.0.0.1"}:${port}, data in ${data}`);
   });
 }

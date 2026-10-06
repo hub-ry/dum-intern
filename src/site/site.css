@@ -1,0 +1,354 @@
+/* site.css — dum public site · rose pine moon palette · hack font */
+
+/* ── fonts ──────────────────────────────────────────────────────────────────
+   Self-hosted Hack v3.003 (source-foundry/Hack, MIT + OFL).
+   License: /site/hack-LICENSE.md
+   ──────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Hack';
+  src: url('/site/hack-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Hack';
+  src: url('/site/hack-bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── rose pine moon palette ─────────────────────────────────────────────── */
+:root {
+  --bg:      #232136;
+  --surface: #2a273f;
+  --overlay: #393552;
+  --muted:   #6e6a86;
+  --subtle:  #908caa;
+  --text:    #e0def4;
+  --love:    #eb6f92;
+  --gold:    #f6c177;
+  --rose:    #ea9a97;
+  --pine:    #3e8fb0;
+  --foam:    #9ccfd8;
+  --iris:    #c4a7e7;
+  --hl-high: #56526e;
+  --hl-med:  #44415a;
+}
+
+/* ── reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── base ────────────────────────────────────────────────────────────────── */
+html {
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Hack', 'Courier New', monospace;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* ── navigation ──────────────────────────────────────────────────────────── */
+nav {
+  border-bottom: 1px solid var(--overlay);
+  padding: 0.65rem 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.nav-logo {
+  color: var(--iris);
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.nav-logo:hover {
+  color: var(--text);
+}
+
+.nav-links {
+  list-style: none;
+  display: flex;
+  gap: 1.4rem;
+}
+
+.nav-links a {
+  color: var(--subtle);
+  text-decoration: none;
+}
+
+.nav-links a:hover,
+.nav-links a[aria-current="page"] {
+  color: var(--text);
+}
+
+.nav-links a:focus-visible {
+  outline: 1px solid var(--pine);
+  outline-offset: 2px;
+}
+
+/* ── game section (index.html only) ─────────────────────────────────────── */
+.game-section {
+  position: relative;
+  height: 70vh;
+  min-height: 220px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--overlay);
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.game-controls {
+  position: absolute;
+  bottom: 0.9rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1.2rem;
+  pointer-events: none;
+}
+
+.game-jump-btn {
+  pointer-events: auto;
+  background: none;
+  border: 1px solid var(--overlay);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.3rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.game-jump-btn:hover {
+  border-color: var(--hl-high);
+  color: var(--subtle);
+}
+
+.game-jump-btn:focus-visible {
+  outline: 1px solid var(--pine);
+  outline-offset: 2px;
+}
+
+.motion-notice {
+  pointer-events: none;
+  display: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-notice {
+    display: block;
+  }
+}
+
+/* ── screen-reader only ──────────────────────────────────────────────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── page intro (below game fold on home) ────────────────────────────────── */
+.page-intro {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 2rem 1.8rem 1.5rem;
+  border-bottom: 1px solid var(--overlay);
+}
+
+.page-intro p {
+  color: var(--subtle);
+  max-width: 62ch;
+  margin-bottom: 0.5rem;
+}
+
+.page-intro p + p {
+  margin-top: 0.4rem;
+}
+
+/* ── main content ────────────────────────────────────────────────────────── */
+main {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 2.8rem 1.8rem 5rem;
+}
+
+h1 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 1.5rem;
+}
+
+h2 {
+  font-size: 1.0rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 3rem;
+  margin-bottom: 0.7rem;
+}
+
+h3 {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--subtle);
+  margin-top: 1.8rem;
+  margin-bottom: 0.5rem;
+}
+
+p {
+  margin-bottom: 0.9rem;
+  max-width: 68ch;
+}
+
+a {
+  color: var(--pine);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:focus-visible {
+  outline: 1px solid var(--pine);
+  outline-offset: 2px;
+}
+
+code {
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--foam);
+  padding: 0.08em 0.32em;
+  font-size: 0.95em;
+}
+
+pre {
+  background: var(--surface);
+  border-left: 2px solid var(--overlay);
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+  margin-bottom: 1.2rem;
+}
+
+pre code {
+  background: none;
+  color: var(--text);
+  padding: 0;
+  font-size: 1em;
+}
+
+ul,
+ol {
+  padding-left: 1.6rem;
+  margin-bottom: 1rem;
+}
+
+li {
+  margin-bottom: 0.28rem;
+  max-width: 66ch;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 0.9rem;
+  max-width: 66ch;
+}
+
+hr.section-divider {
+  border: none;
+  border-top: 1px solid var(--overlay);
+  margin: 2.8rem 0;
+}
+
+/* ── download links ──────────────────────────────────────────────────────── */
+.dl-block {
+  margin-bottom: 1.1rem;
+}
+
+.dl-block a {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.dl-block a:hover {
+  color: var(--foam);
+}
+
+.dl-meta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.87rem;
+  margin-top: 0.2rem;
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 580px) {
+  nav {
+    padding: 0.6rem 1rem;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .nav-links {
+    gap: 1rem;
+  }
+
+  .game-section {
+    height: 60vh;
+    min-height: 200px;
+  }
+
+  main,
+  .page-intro {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+/* ── wandering wizard ───────────────────────────────────────────────────────
+   Fixed decoration at viewport bottom; pointer-events none so it never
+   blocks links or mobile controls. z-index keeps it above page content
+   but below any future modals. No layout impact (fixed positioning).
+   ──────────────────────────────────────────────────────────────────────── */
+canvas[data-wizard-state] {
+  /* Crisp pixel art — browser prefix for broader support */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  canvas[data-wizard-state] {
+    /* No transition on position when motion is reduced; JS handles opacity */
+    transition: none !important;
+  }
+}

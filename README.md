@@ -1,13 +1,14 @@
 # dum-intern
 
-- Dum is a Mac companion that floats beside your IDE or browser. You teach it your reasoning while you build, and it keeps a skill tree of what you've shown.
-- Dum plays a capable beginner, not an examiner. It asks at real decisions and remembers what you tell it.
+- Dum is a Mac companion that floats beside your IDE or browser. Its implementation capability follows your unlocked skill tree.
+- Build in your own editor. When you're satisfied, tell dum what you built and why. The wizard offers occasional advice; dum isn't a live tutor.
 
 ## Download
 
 - Apple Silicon: [Dum-0.0.1-mac-arm64.dmg](https://github.com/hub-ry/dum-intern/releases/download/desktop-macos-c37b371-test/Dum-0.0.1-mac-arm64.dmg)
 - Intel: [Dum-0.0.1-mac-x64.dmg](https://github.com/hub-ry/dum-intern/releases/download/desktop-macos-c37b371-test/Dum-0.0.1-mac-x64.dmg)
 - Test prerelease. ZIPs and `SHA256SUMS.txt` are on the [release page](https://github.com/hub-ry/dum-intern/releases/tag/desktop-macos-c37b371-test).
+- These download artifacts predate the current companion redesign. Build the current checkout to try the changes below.
 - Needs macOS 13+, Git, and a Claude subscription with Opus 5.5 and Fable 5.1. No API key.
 - Git comes with Apple's Command Line Tools, and Dum offers to install them if it's missing.
 - The app carries its own Node and Claude Code, so no terminal is needed.
@@ -19,13 +20,18 @@
 - If asked, click Sign in. Claude's page opens in your browser. If it shows a code, paste it into Dum's code box. Dum never sees your password.
 - Click Choose folder… and pick a Git project.
 - Click the characters or press Cmd+Shift+D to open the conversation. Enter sends, Shift+Enter adds a line, and Esc backs out or hides Dum.
+- Skills opens the tree. Tools holds project ideas, your notes, settings, and the post-build story action. “Tell dum what I built” prepares a draft; it never sends automatically.
+- Input stays closed until you choose Write to dum, Tell dum what I built, or Voice. Hiding it preserves the draft. A question needing typed input opens it; approvals and permission controls remain visible.
+- The thin top strip shows newbie → intern → good → cracked at 0 / 8 / 24 / 64 currently usable built skills. Recognition alone and message counts don't advance it; revoked prerequisites reduce it. These are playful labels, not proficiency ratings.
 - Dum lives in the menu bar and a small floating pair. There's no Dock icon.
 
-## Privacy and teaching
+## Privacy and skills
 
-- Your project's core stays yours. Dum only writes the parts your skill tree allows, and it proposes changes to existing files as diffs you apply yourself.
-- Screen sharing is opt-in. Pick a screen or window, check the preview, then press Send with message. No screenshot is written to disk.
-- No microphone, key logging, or background screenshots.
+- Dum only writes what your skill tree allows, including core algorithms when their skills and prerequisites are unlocked. Existing-file changes are diffs you apply yourself.
+- On fresh desktop installs, the wizard takes periodic screen snapshots for unprompted advice. Existing off settings stay off. Pause or resume it from the companion panel in one click, or switch its source to saved project files in Settings. Screen mode can see anything visible, including private information and unsent drafts. macOS requires Screen Recording permission; denied access does not silently fall back to files.
+- Manual sharing is separate from wizard advice: pick a screen or window, review the preview, then press Send with a message. An unsent preview expires after five minutes. Neither path writes screenshots to disk.
+- Voice input on macOS 14 or later with Apple Silicon uses bundled OpenSuperWhisper: configure its local model, microphone permissions, Accessibility access, and a global shortcut, then focus dum's input and dictate. It doesn't send automatically. OpenSuperWhisper may keep recordings locally in its own storage.
+- No key logging. Background audio is not recorded outside voice input.
 - Chats go to Claude over your subscription. Project memory and evidence stay in `<project>/.dum/` and your skill tree in `~/.dum/`, as plain files you can edit or delete.
 
 <details>
@@ -42,15 +48,15 @@ Checksums for `desktop-macos-c37b371-test`:
 
 - App: Electron 44.5.1, native Claude Code 2.1.290 from Agent SDK 0.3.290, for your chip. It doesn't use a global Node or a separately installed `claude`.
 - Exact models: the Claude subscription must include `claude-opus-5-5` and `claude-fable-5-1`. There's no API-key setup, paid-usage route, or provider fallback. Dum needs macOS 13 or later and Git.
-- The goal: you could take the LLM away and still understand the architecture, start implementing, and ask precise questions. The wizard beside Dum gives short engineering tips from a verified source catalog, with links.
-- Esc closes the open sheet, or hides the conversation window if none is open. Stop interrupts a reply.
+- The goal: you could take the LLM away and still understand the architecture, start implementing, and ask precise questions. The wizard checks mistakes and relevant tradeoffs; external claims use a verified source catalog with links.
+- Esc closes an open sheet, then collapses open input, then hides the conversation window. Stop interrupts a reply.
 - A screen preview you don't send is discarded and expires after five minutes. On macOS, sharing a screen needs Screen Recording permission for Dum.
 - Dum can only write what the skill tree allows. Tools need recognition and concepts need build evidence before it may implement them. Advice, images, and personal context never unlock skills. Evidence kinds are recognize, build (unaided, self-reported), and apply; see the terminal reference below.
 - Newer test builds are artifacts of the [desktop macOS workflow](https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml). GitHub only lets signed-in users download those.
 - A signed, notarized release needs an Apple Developer ID certificate and notarization credentials. The build config has the hooks off until those exist.
 - The Mac build was produced on GitHub's macOS runners, Apple Silicon (`macos-15`) and Intel (`macos-15-intel`). [Run 37399518331](https://github.com/hub-ry/dum-intern/actions/runs/37399518331) passed typecheck and 216 tests, built the app, checked the ad-hoc signature, chip architecture, and bundled Claude version, verified the DMG, extracted the ZIP, and ran the smoke check against the app copied out of the DMG.
 - On Linux under Xvfb, the real Electron app and packaged build passed the same scripted checks (`npm run desktop:smoke`). Real conversations with Claude Opus 5.5 and Fable 5.1 ran from the same source there. Treat those as qualitative observations.
-- Not verified on a physical Mac: focus over full-screen apps and Spaces, the Screen Recording prompt, global-shortcut permission, launch at login, tray rendering, first-launch Gatekeeper, native interactive sign-in, and any Keychain prompts.
+- Not verified on a physical Mac: focus over full-screen apps and Spaces, the Screen Recording prompt, global-shortcut permission, OpenSuperWhisper's Accessibility permission and voice dictation, launch at login, tray rendering, first-launch Gatekeeper, native interactive sign-in, and any Keychain prompts.
 - Screenshots from verification stay private and are never published.
 - Settings: always on top, all desktops, launch at login, the shortcut (needs a non-Shift modifier; one another app owns is refused), the project's coaching mode, and an opt-in personal context file.
 - App settings are one `settings.json` in Electron's per-user data folder (`~/Library/Application Support/Dum` on a Mac by convention). It holds the hotkey, window toggles, the eight most recent projects, and the companion position. It holds no tokens, transcripts, captures, or account data.
@@ -60,7 +66,6 @@ Checksums for `desktop-macos-c37b371-test`:
 - Reviews, hints, and expected outputs are model judgments. Dum can get arithmetic wrong in a hint, so check its numbers. A self-report can be wrong, and the tree is yours to correct.
 - The wizard's anchor words and link come from a verified catalog. The model's connecting sentence passes a word-pattern screen for dates, statistics, quotes, unsourced names, and claims about what engineers usually do. The screen doesn't fact-check, so it can pass a wrong local claim or cut a sound one. The wizard may stay silent when no anchor fits.
 - Model availability can change. A subscription alone doesn't guarantee a given model or a compatible runtime. Closed-runtime checks may need an app update when Claude adds a new built-in plugin.
-- The chess-player story behind the teaching relationship is Ryan's recollection. It isn't verified research and not a claim that dum improves learning.
 - Code, build, and product rules are in [CONTRIBUTING.md](CONTRIBUTING.md). `npm test` and `npm run typecheck` are the deterministic checks.
 
 </details>
@@ -85,15 +90,18 @@ dum
 - `dum --help` lists startup flags. `:help` lists conversational commands.
 - Build the desktop app from source with `npm run desktop` (compile and launch), `npm run desktop:pack` (unpacked app for this OS), or `npm run desktop:mac` (DMG and ZIP, run on a Mac). `npm run desktop:smoke` drives a built app. See CONTRIBUTING.md.
 
-Build and teach:
+Build, then tell dum:
 
 - Work in your usual editor and save ordinary project files. Dum has no integrated editor, code pane, file-tree sidebar, or embedded shell.
-- Describe what you're building. At a meaningful decision, teach dum why an approach fits or demonstrate your implementation. It can challenge an explanation when the code contradicts it.
+- Build until you're satisfied, then tell dum the story: what you made, the decisions, and why they fit. Dum remembers useful reasoning. Explanations alone don't establish build evidence.
 - `:inspect counter.py` or `:inspect counter.py:1-30` shares a saved excerpt. `:changes` shares bounded current changes. Nothing watches your keystrokes or scans your home directory.
-- Dum names the skills a proposed implementation needs. Approving a plan once doesn't unlock skills or make the core AI-owned.
-- Permitted changes to existing files appear as focused diff proposals, with a patch artifact for your IDE. Dum can create permitted new support files exclusively and refuses if a saved file already exists.
+- Dum names the skills a requested implementation needs. Approving a plan doesn't unlock them. In anti-vibe, an approach you've already supplied is enough to start planning; dum asks only for missing material reasoning.
+- Permitted changes to existing files appear as focused diff proposals, with a patch artifact for your IDE. Dum can create permitted new files exclusively and refuses if a saved file already exists.
 - Run builds, tests, and interactive programs in your own terminal. Dum's command access is a bounded read-only catalog, not a general shell.
-- When a skill is missing, ask for practice or a project idea. Suggestions use your tree, prerequisites, working language, current project, and configured interests. A separate model call then lists every skill each suggestion needs, and one needing anything not on your tree (apart from the skill being practiced) is dropped with the reason. That check is model judgment, and choosing an idea never unlocks it.
+- `:practice projects in go` suggests substantial projects using project memory, opted-in personal context, and demonstrated experience in other languages. Estimates sort by midpoint active-work hours, then difficulty. Each project shows why it fits and an ordered path through several skill levels; unfamiliar goals aren't assumed unlocked.
+- A separate model audits implied requirements and prerequisite coverage. Recommendations and estimates are model judgments, not promises. Choosing a project doesn't unlock anything.
+- `:submit p1 main.go --unaided` reviews a saved project's targets separately. Partial passes are kept; a dependent target isn't recorded until its prerequisites pass. Experience in Python doesn't grant Go skill credit.
+- Skill-scoped `:practice <skill>` remains available for focused work. Small drills and courses are optional, not the default project size.
 
 Skill evidence:
 
@@ -101,11 +109,11 @@ Skill evidence:
 - Build: submit an implementation for review and explicitly report you wrote it without AI. A saved file alone is a demonstration artifact, not proof of unaided authorship.
 - Apply: explain when and why to use a skill after prior build evidence. Reasoning without build records only counts as recognition.
 - Concepts require build before dum may implement them. Tools require recognition. Curated-track skills stay concepts even if the model labels them tools.
-- The current project's core stays yours in both modes. Prerequisites and language scope are checked in code, including when a held prerequisite is taken back.
+- Core algorithms use the same gates in both modes. Prerequisites and language scope are checked in code, including when a held prerequisite is taken back.
 - `course <skill> in <language>` gives a guided explanation and scratch exercise. Completing a small guided gap records recognition. Show an independent implementation separately for build.
 - Historical skill levels, old notes, course results, language distinctions, and prerequisite mappings are preserved.
 - `:skill printing, variables in python` adds skills you can write from a blank file without AI. `:skill -variables in python` removes one. `not yet` disputes recent evidence.
-- `-a` / `--anti-vibe` changes coaching, not the build-evidence rule. The mode persists per project, and both enforce the same implementation boundary.
+- `-a` / `--anti-vibe` asks you to choose the approach before dum implements it, without re-quizzing an approach you've supplied. The mode persists per project; both enforce the same implementation boundary.
 
 | Command | Action |
 | :--- | :--- |
@@ -175,6 +183,7 @@ Optional web tree:
 - Anyone with the link can see and edit that tree. Web edits follow the same prerequisite and self-report rules as terminal tree edits. Removals have tombstones so synchronization doesn't bring them back.
 - Trees merge skill by skill. Personal context, project evidence ledgers, memory, and sessions aren't synchronized.
 - To run the optional server: `PORT=8787 DUM_WEB_DATA=/srv/dum-trees npm run web`. It listens on localhost by default. Use a TLS reverse proxy or tunnel for remote access.
+- The same server serves public docs at `/`, `/install`, `/how-it-works`, and `/subjects`, including the intern runner and wandering wizard. Private tree links keep their separate capability checks, no-index, and no-store headers.
 - Existing hosting scripts are in `deploy/`. They aren't part of ordinary terminal startup and don't run automatically.
 
 </details>

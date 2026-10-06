@@ -5,11 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { Practice, parseSubmit, parseTarget, toTask, MAX_TASKS } from "../src/practice.ts";
+import { Practice, parseSubmit, parseTarget, toTask, toProject, checkedProject, MAX_TASKS, type ProjectPlan } from "../src/practice.ts";
 import { Evidence } from "../src/evidence.ts";
 import { Workspace } from "../src/workspace.ts";
 import * as skills from "../src/skills.ts";
 import { Store, Cancelled } from "../src/store.ts";
+import * as curriculum from "../src/curriculum.ts";
 
 const BASICS = ["printing", "variables", "functions", "conditionals", "return values"];
 
@@ -78,7 +79,6 @@ test("suggestions keep only valid tasks, persist them, and unlock nothing", asyn
   try {
     const out = await practice.suggest("recursion in python");
     assert.match(out, /p1  implement: count down/);
-    assert.match(out, /p2  project: folder sizes[\s\S]*the core of it is yours to implement/);
     assert.doesNotMatch(out, /class tree/);
     const s = saved();
     assert.deepEqual(s.tasks.map((t: { id: string; skill: string; state: string }) => [t.id, t.skill, t.state]), [["p1", "recursion", "open"], ["p2", "recursion", "open"]]);
@@ -339,5 +339,295 @@ test("a review or generation that returns after Stop or close records and saves 
     await b.store.settled();
   } finally {
     b.done();
+  }
+});
+
+const project = (over: Record<string, unknown> = {}) => ({
+  title: "pickup-match scheduler",
+  task: "Build a scheduler that prints match rosters using named player variables.",
+  done: "a useful roster is printed",
+  uses: [],
+  duration: { minHours: 20, maxHours: 40 },
+  difficulty: "intermediate",
+  fit: "Your project notes mention pickup-match scheduling and waiting lists.",
+  targets: [
+    { skill: "variables", requires: ["printing"], milestone: "Represent named players in the roster.", done: "player variables meaningfully determine roster output" },
+    { skill: "printing", requires: [], milestone: "Show the scheduled roster.", done: "the roster is printed from working code" },
+  ],
+  ...over,
+});
+
+function projectCheck(raw: Pick<ProjectPlan, "targets">, n = 1, requires: string[] = []) {
+  return { n, requires, targets: raw.targets.map((t) => ({ skill: t.skill, requires: t.requires })) };
+}
+
+test("project recommendations include multiple new-language levels, stable size order, context and no credit", async () => {
+  const larger = project({ title: "season scheduler", duration: { minHours: 100, maxHours: 180 }, difficulty: "advanced",
+    task: "Manage a season's pickup rosters with eligibility conditions and lists of players, showing match assignments.",
+    targets: [
+      { skill: "range", requires: ["slices"], milestone: "Show each roster assignment.", done: "range meaningfully visits the roster" },
+      { skill: "slices", requires: ["for loops"], milestone: "Keep rosters and waiting players together.", done: "slices hold real roster values" },
+      { skill: "for loops", requires: ["conditionals"], milestone: "Build the match rosters.", done: "a bounded loop handles players" },
+      { skill: "conditionals", requires: ["variables"], milestone: "Decide player eligibility.", done: "eligibility branches affect assignments" },
+      ...project().targets,
+    ],
+  });
+  const harder = project({ title: "league scheduler", difficulty: "advanced" });
+  const smaller = project();
+  const { root, store, practice, saved, done } = setup(BASICS, () => JSON.stringify({ tasks: [larger, harder, smaller] }),
+    () => JSON.stringify({ tasks: [projectCheck(larger, 1), projectCheck(harder, 2), projectCheck(smaller, 3)] }));
+  try {
+    mkdirSync(`${root}/.dum`, { recursive: true });
+    writeFileSync(`${root}/.dum/memory.md`, "I'm an experienced Python programmer. I want pickup-match scheduling with waiting lists.");
+    store.restoreTranscript([{ kind: "user", id: 1, text: "I want to learn Go with one connected project." }]);
+    const out = await practice.suggest("projects in go");
+    assert.deepEqual(saved().tasks.map((t: { title: string }) => t.title), ["pickup-match scheduler", "league scheduler", "season scheduler"]);
+    const plan = saved().tasks[0].project;
+    assert.deepEqual(plan.targets.map((t: { skill: string }) => t.skill), ["printing", "variables"]);
+    assert.deepEqual(plan.targets[1].requires, ["printing"]);
+    assert.deepEqual(saved().tasks[2].project.targets.map((t: { skill: string }) => t.skill),
+      ["printing", "variables", "conditionals", "for loops", "slices", "range"]);
+    assert.match(out, /20-40 active hours · difficulty: intermediate/);
+    assert.match(out, /100-180 active hours/);
+    assert.match(out, /why it fits: .*waiting lists/);
+    assert.match(await practice.suggest("p1"), /1\. printing:[\s\S]*2\. variables:/);
+    assert.match(practice.describe(), /printing, variables/);
+    assert.equal(skills.find(skills.read(), "printing", "go"), undefined);
+    assert.equal(skills.find(skills.read(), "variables", "go"), undefined);
+    assert.equal(level("variables"), "build");
+    assert.equal(saved().tasks[0].state, "open");
+  } finally {
+    done();
+  }
+});
+
+test("project generation carries bounded memory, personal opt-in and foreign experience into the recommendation call", async () => {
+  const { root, store, practice, done } = setup(BASICS);
+  try {
+    mkdirSync(`${root}/.dum`, { recursive: true });
+    writeFileSync(`${root}/.dum/memory.md`, "waiting lists for pickup matches");
+    store.restoreTranscript([{ kind: "user", id: 1, text: "I write Python at work and want to learn Go." }]);
+    let input = "";
+    const personal = { path: "personal.txt", text: "I organize a local football group.", warning: "" };
+    const contextual = new Practice(root, store, practice.workspace, practice.evidence, personal, async (prompt) => {
+      if (prompt.startsWith("You check practice tasks")) return JSON.stringify({ tasks: [projectCheck(project())] });
+      input = prompt;
+      return JSON.stringify({ tasks: [project()] });
+    });
+    await contextual.suggest("projects in go");
+    assert.match(input, /waiting lists for pickup matches/);
+    assert.match(input, /I write Python at work and want to learn Go/);
+    assert.match(input, /I organize a local football group/);
+    assert.match(input, /"lang":"python","level":"build"/);
+    assert.match(input, /"lang":"go"/);
+  } finally {
+    done();
+  }
+});
+
+test("project coverage rejects undeclared implied skills, target prerequisites, cycles and foreign-language assumptions", () => {
+  const empty = () => false;
+  const p = toProject(project(), "go", empty)!;
+  assert.ok(p);
+  assert.equal(toProject(project({ targets: [project().targets[0]] }), "go", empty), null, "printing prerequisite is not grandfathered");
+  assert.equal(toProject(project({ uses: ["functions"] }), "go", empty), null, "Python functions don't establish Go functions");
+  assert.equal(checkedProject(projectCheck(project(), 1, ["input"]), p, empty), null, "undeclared input is an uncovered learning goal");
+  const prerequisite = projectCheck(project());
+  prerequisite.targets[0]!.requires.push("strings");
+  assert.equal(checkedProject(prerequisite, p, empty), null, "audited target prerequisites must be covered too");
+  assert.equal(checkedProject({ n: 1, requires: [], targets: [] }, p, empty), null, "all target prerequisites must be audited");
+  const cyclic = project({ targets: [
+    { skill: "one", requires: ["two"], milestone: "one", done: "one works" },
+    { skill: "two", requires: ["one"], milestone: "two", done: "two works" },
+  ] });
+  assert.equal(toProject(cyclic, "go", empty), null);
+  const unfamiliar = project({ targets: [
+    { skill: "match fairness", requires: ["variables"], milestone: "Compare roster fairness.", done: "fairness is calculated meaningfully" },
+    ...project().targets,
+  ] });
+  const unknown = toProject(unfamiliar, "go", empty)!;
+  assert.deepEqual(unknown.project!.targets.map((t) => t.skill), ["printing", "variables", "match fairness"]);
+  assert.ok(checkedProject(projectCheck(unfamiliar), unknown, empty));
+  assert.equal(curriculum.mapped("match fairness", "go"), undefined, "suggestions don't establish off-track prerequisites or ability");
+});
+
+test("an audited missing requirement becomes an explicit learning milestone, never assumed ability", async () => {
+  const goal = { skill: "arithmetic", requires: ["variables"], milestone: "Calculate remaining roster places.",
+    done: "the number of open places changes correctly as players join" };
+  const checked = { ...projectCheck(project(), 1, ["arithmetic"]), targets: [...projectCheck(project()).targets, goal] };
+  const { practice, saved, done } = setup([], () => JSON.stringify({ tasks: [project({
+    task: "Show a pickup roster and calculate its remaining places.",
+  })] }), () => JSON.stringify({ tasks: [checked] }));
+  try {
+    await practice.suggest("projects in go");
+    const targets = saved().tasks[0].project.targets;
+    assert.deepEqual(targets.map((t: { skill: string }) => t.skill), ["printing", "variables", "arithmetic"]);
+    assert.equal(targets[2].milestone, goal.milestone);
+    assert.deepEqual(targets[2].requires, ["variables"]);
+    assert.equal(skills.find(skills.read(), "arithmetic", "go"), undefined);
+    const offered = toProject(project(), "go", () => false)!;
+    assert.equal(checkedProject({ ...checked, requires: [] }, offered, () => false), null, "an unrelated additional goal is refused");
+    assert.equal(checkedProject({ ...checked, targets: [...projectCheck(project()).targets, { ...goal, done: "" }] }, offered, () => false), null,
+      "an additional required goal needs its own passing-evidence criterion");
+  } finally { done(); }
+});
+
+test("project submission awards only individually passing unaided targets in prerequisite order and can finish later", async () => {
+  let passes: Record<string, boolean> = { printing: true, variables: false };
+  const { practice, root, saved, done } = setup(BASICS, (prompt) => prompt.startsWith("You review a project")
+    ? JSON.stringify({ targets: ["variables", "printing"].map((skill) => ({ skill, passed: passes[skill], feedback: passes[skill] ? `${skill} drives real roster output` : "where are the player values stored?" })) })
+    : JSON.stringify({ tasks: [project()] }), () => JSON.stringify({ tasks: [projectCheck(project())] }));
+  try {
+    await practice.suggest("projects in go");
+    writeFileSync(`${root}/main.go`, 'package main\nimport "fmt"\nfunc main() { player := "Ada"; fmt.Println(player) }\n');
+    assert.match(await practice.submit("p1 main.go"), /0 recorded/);
+    assert.equal(skills.find(skills.read(), "printing", "go"), undefined);
+    const partial = await practice.submit("p1 main.go --unaided");
+    assert.match(partial, /1\/2 targets passed review; 1 recorded/);
+    assert.equal(skills.find(skills.read(), "printing", "go")?.level, "build");
+    assert.equal(skills.find(skills.read(), "variables", "go"), undefined);
+    assert.equal(saved().tasks[0].state, "open");
+    assert.deepEqual(saved().tasks[0].submissions.at(-1).targets.map((t: { skill: string; built: boolean }) => [t.skill, t.built]), [["printing", true], ["variables", false]]);
+    assert.match(await practice.suggest("p1"), /last review · variables: not yet/);
+    passes = { printing: true, variables: true };
+    assert.match(await practice.submit("p1 main.go --unaided"), /2\/2 targets passed review; 2 recorded/);
+    assert.equal(skills.find(skills.read(), "variables", "go")?.level, "build");
+    assert.equal(saved().tasks[0].state, "passed");
+    assert.equal(skills.find(skills.read(), "functions", "go"), undefined, "no blanket advancement");
+    assert.equal(level("functions"), "build", "other languages remain unchanged");
+  } finally {
+    done();
+  }
+});
+
+test("a failed project prerequisite blocks a higher passing target and malformed reviews record nothing", async () => {
+  let response: unknown = { targets: [
+    { skill: "printing", passed: false, feedback: "where is the roster shown?" },
+    { skill: "variables", passed: true, feedback: "named player variables drive the roster" },
+  ] };
+  const { practice, root, saved, done } = setup([], (prompt) => prompt.startsWith("You review a project")
+    ? JSON.stringify(response) : JSON.stringify({ tasks: [project()] }),
+  () => JSON.stringify({ tasks: [projectCheck(project())] }));
+  try {
+    await practice.suggest("projects in go");
+    writeFileSync(`${root}/main.go`, "package main\nfunc main() {}\n");
+    assert.match(await practice.submit("p1 main.go --unaided"), /variables:[\s\S]*not recorded: prerequisites not built: printing/);
+    assert.equal(skills.find(skills.read(), "printing", "go"), undefined);
+    assert.equal(skills.find(skills.read(), "variables", "go"), undefined);
+    assert.equal(saved().tasks[0].state, "open");
+    const before = saved().tasks[0].submissions.length;
+    response = { targets: [{ skill: "printing", passed: true, feedback: "roster output works" }] };
+    await assert.rejects(practice.submit("p1 main.go --unaided"), /nothing recorded/);
+    assert.equal(saved().tasks[0].submissions.length, before);
+    response = { targets: [
+      { skill: "printing", passed: true, feedback: "roster output works" },
+      { skill: "printing", passed: true, feedback: "roster output works" },
+    ] };
+    await assert.rejects(practice.submit("p1 main.go --unaided"), /nothing recorded/);
+    assert.equal(skills.find(skills.read(), "printing", "go"), undefined);
+  } finally {
+    done();
+  }
+});
+
+test("old saved single-skill tasks retain their metadata and review behavior", async () => {
+  const { root, practice, saved, done } = setup(BASICS, () => JSON.stringify({ passed: true, feedback: "the base case and recursive call work" }));
+  try {
+    mkdirSync(`${root}/.dum`, { recursive: true });
+    const legacy = { ...toTask(task(), { skill: "recursion", lang: "python", exercise: "python" }, () => true)!,
+      id: "p7", at: "2026-01-01T00:00:00.000Z", state: "open", submissions: [] };
+    writeFileSync(`${root}/.dum/practice.json`, JSON.stringify({ version: 1, next: 8, tasks: [legacy] }));
+    assert.match(await practice.suggest("p7"), /implement: count down/);
+    assert.deepEqual(saved().tasks[0], legacy);
+    writeFileSync(`${root}/walk.py`, "def countdown(n):\n    return [] if n == 0 else [n] + countdown(n - 1)\n");
+    await practice.submit("p7 walk.py --unaided");
+    assert.equal(level("recursion"), "build");
+    assert.equal(saved().tasks[0].project, undefined);
+    assert.equal(saved().tasks[0].submissions[0].targets, undefined);
+  } finally {
+    done();
+  }
+});
+
+test("project review does not grandfather a named prerequisite that fails its own review", async () => {
+  const { root, practice, done } = setup([], (prompt) => prompt.startsWith("You review a project")
+    ? JSON.stringify({ targets: [
+      { skill: "printing", passed: false, feedback: "where is the actual roster printed?" },
+      { skill: "variables", passed: true, feedback: "player variables drive real assignments" },
+    ] }) : JSON.stringify({ tasks: [project()] }), () => JSON.stringify({ tasks: [projectCheck(project())] }));
+  try {
+    await practice.suggest("projects in go");
+    skills.write(skills.unlock(skills.read(), { name: "printing", lang: "go", how: "typed", level: "build", why: "earlier project" }));
+    writeFileSync(`${root}/main.go`, "package main\nfunc main() { player := 1; _ = player }\n");
+    assert.match(await practice.submit("p1 main.go --unaided"), /not recorded: prerequisites not built: printing/);
+    assert.equal(skills.find(skills.read(), "variables", "go"), undefined);
+    assert.equal(skills.find(skills.read(), "printing", "go")?.level, "build", "failed review doesn't revoke earlier evidence");
+  } finally {
+    done();
+  }
+});
+
+test("an unfamiliar project learning goal stays a goal until its own passing unaided review", async () => {
+  const unfamiliar = project({ targets: [
+    { skill: "match fairness", requires: ["variables"], milestone: "Compare roster fairness.", done: "fairness is calculated meaningfully" },
+    ...project().targets,
+  ] });
+  const { practice, root, done } = setup([], (prompt) => prompt.startsWith("You review a project")
+    ? JSON.stringify({ targets: unfamiliar.targets.map((t) => ({ skill: t.skill, passed: true, feedback: `${t.skill} is demonstrated in roster calculations` })) })
+    : JSON.stringify({ tasks: [unfamiliar] }), () => JSON.stringify({ tasks: [projectCheck(unfamiliar)] }));
+  try {
+    await practice.suggest("projects in go");
+    assert.equal(curriculum.mapped("match fairness", "go"), undefined);
+    assert.equal(skills.find(skills.read(), "match fairness", "go"), undefined);
+    writeFileSync(`${root}/main.go`, 'package main\nimport "fmt"\nfunc main() { fairness := 2; fmt.Println(fairness) }\n');
+    await practice.submit("p1 main.go --unaided");
+    assert.equal(skills.find(skills.read(), "match fairness", "go")?.level, "build");
+    assert.deepEqual(curriculum.mapped("match fairness", "go"), ["variables"]);
+    assert.equal(skills.find(skills.read(), "match fairness", "python"), undefined);
+  } finally {
+    done();
+  }
+});
+
+test("large project metadata stays inside the readable saved-state byte bound", async () => {
+  const large = project({ targets: Array.from({ length: 40 }, (_, i) => ({
+    skill: `goal ${i}`, requires: [], milestone: "m".repeat(600), done: "d".repeat(600),
+  })) });
+  let count = 0;
+  const { root, practice, saved, done } = setup([], () => JSON.stringify({ tasks: [{ ...large, title: `large project ${++count}` }] }),
+    () => JSON.stringify({ tasks: [projectCheck(large)] }));
+  try {
+    for (let i = 0; i < 12; i++) await practice.suggest("projects in go");
+    assert.ok(Buffer.byteLength(readFileSync(`${root}/.dum/practice.json`, "utf8")) <= 512 * 1024);
+    assert.ok(saved().tasks.length < 12, "old projects are evicted before the file becomes unreadable");
+    assert.match(await practice.suggest("p12"), /large project 12/);
+  } finally {
+    done();
+  }
+});
+
+test("a stopped per-target project review records none of its passing targets", async () => {
+  const review = Promise.withResolvers<string>();
+  const started = Promise.withResolvers<void>();
+  const { root, store, practice, done } = setup([], (prompt) => {
+    if (prompt.startsWith("You review a project")) {
+      started.resolve();
+      return review.promise;
+    }
+    return JSON.stringify({ tasks: [project()] });
+  }, () => JSON.stringify({ tasks: [projectCheck(project())] }));
+  try {
+    await practice.suggest("projects in go");
+    writeFileSync(`${root}/main.go`, 'package main\nimport "fmt"\nfunc main() { player := "Ada"; fmt.Println(player) }\n');
+    const pending = practice.submit("p1 main.go --unaided");
+    await started.promise;
+    store.cancel();
+    review.resolve(JSON.stringify({ targets: project().targets.map((t) => ({ skill: t.skill, passed: true, feedback: `${t.skill} drives roster output` })) }));
+    await assert.rejects(pending, Cancelled);
+    assert.equal(skills.find(skills.read(), "printing", "go"), undefined);
+    assert.equal(skills.find(skills.read(), "variables", "go"), undefined);
+    await store.settled();
+  } finally {
+    done();
   }
 });

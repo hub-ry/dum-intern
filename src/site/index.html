@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dum</title>
+  <meta name="description" content="A Mac companion whose implementation capability follows your unlocked skill tree.">
+  <link rel="stylesheet" href="/site/site.css">
+  <script type="module" src="/site/game.js"></script>
+  <script defer src="/site/wizard.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">dum</a>
+  <ul class="nav-links">
+    <li><a href="/" aria-current="page">home</a></li>
+    <li><a href="/install">installation</a></li>
+    <li><a href="/how-it-works">how it works</a></li>
+    <li><a href="/subjects">subjects</a></li>
+  </ul>
+</nav>
+
+<section class="game-section" aria-label="Dum intern endless runner">
+  <div id="game-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <canvas id="game-canvas" tabindex="-1" aria-hidden="true"></canvas>
+  <div class="game-controls">
+    <button id="game-jump" class="game-jump-btn" type="button">start</button>
+    <span class="motion-notice">motion reduced</span>
+  </div>
+</section>
+
+<div class="page-intro">
+  <p>A Mac companion that floats beside your IDE or browser.
+     It implements only what your skill tree allows — which grows
+     as you build and explain your own work.</p>
+  <p>The wizard offers occasional advice. Dum is not a live tutor.</p>
+</div>
+
+</body>
+</html>

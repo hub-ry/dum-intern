@@ -2,7 +2,7 @@
   "name": "dum-skill-tree",
   "private": true,
   "type": "module",
-  "description": "The web copy of dum skill trees. Only what src/web/server.ts needs at runtime; versions match the root package-lock.json (a test checks).",
+  "description": "Dum's public docs and private skill-tree copies. Only what src/web/server.ts needs at runtime; versions match the root package-lock.json (a test checks).",
   "dependencies": {
     "yaml": "2.9.1",
     "zod": "4.4.3"

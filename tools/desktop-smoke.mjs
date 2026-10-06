@@ -12,12 +12,23 @@ import { inflateSync } from 'node:zlib';
 const fixture = await realpath(await mkdtemp(join(tmpdir(), 'dum-desktop-smoke-')));
 const project = join(fixture, 'sample-project');
 const profile = join(fixture, 'desktop');
+const skillHome = join(fixture, 'tree');
 const output = resolve(process.env.DUM_SMOKE_OUTPUT || 'release/desktop-smoke');
-await Promise.all([mkdir(project), mkdir(profile), mkdir(join(fixture, 'home')), mkdir(output, { recursive: true })]);
+await Promise.all([mkdir(project), mkdir(profile), mkdir(join(fixture, 'home')), mkdir(skillHome), mkdir(output, { recursive: true })]);
 execFileSync('git', ['init', '-q', project]);
 await writeFile(join(project, 'counter.py'), 'counter = 0\nprint(counter)\n');
+// Legacy settings file: omits wizardAdvice and wizardSource intentionally so the schema migration
+// to defaults (wizardAdvice → false, wizardSource → 'screen') is exercised on the first launch.
 const settings = { hotkey: 'CommandOrControl+Shift+D', alwaysOnTop: true, allWorkspaces: true, launchAtLogin: false, personalContext: false };
 await writeFile(join(profile, 'settings.json'), JSON.stringify({ version: 1, settings, recent: [project], companion: null }), { mode: 0o600 });
+
+// Write two built skills into the isolated skill home so the tier strip has a non-zero count.
+// Skill notes are plain markdown; writing them directly avoids a TypeScript import in this harness.
+const skillsDir = join(skillHome, 'skills');
+await mkdir(skillsDir, { recursive: true });
+await writeFile(join(skillsDir, 'variable (python).md'), `---\nname: variable\nlang: python\nhow: typed\nlevel: build\ntags:\n  - dum/build\n---\n\nassigned counter in counter.py\n`);
+await writeFile(join(skillsDir, 'printing (python).md'), `---\nname: printing\nlang: python\nhow: typed\nlevel: build\ntags:\n  - dum/build\n---\n\ncalled print in counter.py\n`);
+
 const executable = process.env.DUM_SMOKE_EXECUTABLE
   ? resolve(process.env.DUM_SMOKE_EXECUTABLE)
   : (await import('electron')).default;
@@ -75,7 +86,7 @@ async function shoot(page, name, options = {}) {
 let active;
 
 async function launch() {
-  const env = { ...process.env, HOME: join(fixture, 'home'), DUM_DESKTOP_DATA: profile, DUM_HOME: join(fixture, 'tree'), DUM_CONTEXT: 'off', CLAUDE_CONFIG_DIR: join(fixture, 'claude'), XDG_CONFIG_HOME: join(fixture, 'config') };
+  const env = { ...process.env, HOME: join(fixture, 'home'), DUM_DESKTOP_DATA: profile, DUM_HOME: skillHome, DUM_CONTEXT: 'off', CLAUDE_CONFIG_DIR: join(fixture, 'claude'), XDG_CONFIG_HOME: join(fixture, 'config') };
   for (const key of Object.keys(env)) if (/(?:API_KEY|TOKEN|PASSWORD|SECRET)|^(?:ANTHROPIC_|GOOGLE_|GEMINI_|VERTEX_|ANTIGRAVITY_|CLAUDE_CODE_USE_)/i.test(key)) delete env[key];
   delete env.DUM_CLAUDE_BIN;
   delete env.NODE_OPTIONS;
@@ -165,6 +176,36 @@ try {
   assert.equal(initial.canAttach, true);
   record('real utility host opens an explicitly chosen project');
 
+  // Tier strip: visible once a project is open and the tree is loaded. Skill home has 2 built skills.
+  const tierBar = await active.page.waitForSelector('.tier-bar:not([hidden])', { timeout: 5_000 });
+  assert.ok(tierBar, 'tier progress strip is visible before opening Skills panel');
+  const tierNow = (await snapshot()).tree;
+  assert.ok(tierNow && tierNow.usableBuilt >= 2, `tier strip reports at least 2 usable built skills, got ${tierNow?.usableBuilt}`);
+  record('tier strip visible before opening Skills; counts match fixture built skills');
+
+  // First Escape closes the auto-opened question input without hiding the panel.
+  await active.page.keyboard.press('Escape');
+  await active.page.waitForFunction(() => !!document.querySelector('#dum-input[hidden]'), { timeout: 3_000 });
+  assert.equal(await active.page.evaluate(() => document.visibilityState), 'visible', 'panel stays visible when Escape collapses auto-opened input');
+  const beforeStory = (await snapshot()).state.transcript.length;
+  await active.page.click('.dock [data-action="tell-story"]');
+  // Correct aria-label: "Story, request or message to dum"
+  const storyDraft = await active.page.$eval('textarea[aria-label="Story, request or message to dum"]', el => el.value);
+  assert.ok(storyDraft.includes('what I built'), 'story action prepares a post-build draft');
+  assert.equal((await snapshot()).state.transcript.length, beforeStory, 'drafting a story never sends it');
+  await active.page.$eval('textarea[aria-label="Story, request or message to dum"]', el => { el.value = 'my unfinished draft'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await active.page.click('.dock [data-action="tell-story"]');
+  assert.equal(await active.page.$eval('textarea[aria-label="Story, request or message to dum"]', el => el.value), 'my unfinished draft');
+  // tell-story leaves inputOpen=true. Set a new draft, then Escape: input collapses but panel stays.
+  await active.page.$eval('textarea[aria-label="Story, request or message to dum"]', el => { el.value = 'draft to preserve'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await active.page.keyboard.press('Escape');
+  await active.page.waitForFunction(() => !!document.querySelector('#dum-input[hidden]'), { timeout: 3_000 });
+  assert.equal(await active.page.evaluate(() => document.visibilityState), 'visible', 'panel stays visible after Escape collapses open input');
+  const collapsedDraft = await active.page.$eval('textarea[aria-label="Story, request or message to dum"]', el => el.value);
+  assert.equal(collapsedDraft, 'draft to preserve', 'draft preserved when input collapses via Escape');
+  await active.page.$eval('textarea[aria-label="Story, request or message to dum"]', el => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  record('post-build story drafts locally, preserves existing text, never sends; Escape collapses input before hiding panel, draft preserved');
+
   const stale = await invoke({ type: 'send', text: 'unsafe stale reply', inputToken: 'old-prompt-token' });
   assert.equal(stale.ok, false);
   assert.equal((await snapshot()).state.transcript.some(entry => entry.kind === 'user' && entry.text === 'unsafe stale reply'), false);
@@ -172,22 +213,107 @@ try {
   assert.equal(shell.ok, false);
   record('stale prompt and out-of-catalog commands refused without submission');
 
-  assert.equal((await invoke({ type: 'panel', panel: 'tree' })).ok, true);
+  await active.page.click('.tree-btn');
   const tree = await until(value => value.tree?.tracks.length && value.state?.stage.kind === 'info', 'skill tree');
   const python = tree.tree.tracks.find(track => track.lang === 'python');
   assert.ok(python, 'bundled curriculum is available');
   assert.equal(python.nodes.find(node => node.name === 'recursion').state, 'locked');
+  // 'printing' is in the fixture tree and should show as built/unlocked; 'recognize' nodes excluded from count.
+  const printingNode = python.nodes.find(node => node.name === 'printing');
+  assert.ok(printingNode && (printingNode.state === 'unlocked' || printingNode.level === 'build'), 'printing skill appears built in tree');
   await shoot(active.page, 'tree.png');
+  await active.page.setViewport({ width: 380, height: 640 });
+  await shoot(active.page, 'tree-narrow.png');
+  assert.equal(await active.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'narrow skill view has no horizontal overflow');
+  await active.page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+  await shoot(active.page, 'tree-dark.png');
+  await active.page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+  await active.page.setViewport({ width: 520, height: 740 });
   record('bundled skill tree preserves prerequisite locks');
+
+  // Refresh through the real Skills action after revoking the isolated fixture's prerequisite.
+  await rm(join(skillsDir, 'printing (python).md'));
+  assert.equal((await invoke({ type: 'panel', panel: 'tree' })).ok, true);
+  const afterRevoke = await until(value => value.tree && value.tree.usableBuilt < tierNow.usableBuilt, 'tier count drop after skill removal');
+  assert.equal(afterRevoke.tree.usableBuilt, 0, 'revoking printing also re-locks the dependent variable skill');
+  // The variable skill note must still be present — no collateral deletion.
+  const remainingFiles = await readFile(join(skillsDir, 'variable (python).md'), 'utf8');
+  assert.ok(remainingFiles.includes('variable'), 'variable note persists after printing removed');
+  record('revoking printing skill drops tier count; variable note untouched');
 
   const note = 'Use integer cents for money in this smoke project.';
   assert.equal((await invoke({ type: 'command', name: 'remember', argument: note })).ok, true);
   await until(value => value.state?.transcript.some(entry => entry.kind === 'note' && entry.text.includes(note)), 'remembered note');
   assert.ok((await readFile(join(project, '.dum', 'memory.md'), 'utf8')).includes(note));
-  assert.equal((await invoke({ type: 'panel', panel: 'memory' })).ok, true);
+  await active.page.click('.top button[aria-label="Tools and project notes"]');
+  await active.page.waitForSelector('.project-panels .panel-link');
+  await active.page.evaluate(() => {
+    const memory = [...document.querySelectorAll('.project-panels .panel-link')].find(button => button.textContent.trim() === 'Memory');
+    if (!memory) throw new Error('Memory navigation is missing');
+    memory.click();
+  });
   await until(value => value.state?.stage.kind === 'info' && value.state.stage.body.includes(note), 'memory panel');
   await shoot(active.page, 'memory.png');
-  const changed = { ...settings, alwaysOnTop: false, allWorkspaces: false };
+  record('Skills and project notes open through visible UI controls; narrow and dark frames paint');
+  await active.page.keyboard.press('Escape');
+  await active.page.click('.top button[aria-label="Tools and project notes"]');
+  await active.page.evaluate(() => {
+    const settingsButton = [...document.querySelectorAll('.tools button')].find(button => button.textContent.trim() === 'Settings');
+    if (!settingsButton) throw new Error('Settings navigation is missing');
+    settingsButton.click();
+  });
+  await active.page.waitForSelector('#wizard-advice');
+  // Legacy settings file omitted wizardAdvice → migrated to false by schema default.
+  assert.equal(await active.page.$eval('#wizard-advice', el => el.checked), false, 'legacy settings leave saved-change advice off');
+  // wizardSource defaults to "screen" even when absent from legacy file.
+  assert.equal(await active.page.$eval('#wizard-source', el => el.value), 'screen', 'legacy settings default wizard source to screen');
+  await active.page.click('#wizard-advice');
+  await until(value => value.settings.wizardAdvice === true, 'wizard advice opt-in');
+  await active.page.select('#wizard-source', 'files');
+  await until(value => value.settings.wizardSource === 'files', 'wizard switches to saved files through UI');
+  await active.page.select('#wizard-source', 'screen');
+  await until(value => value.settings.wizardSource === 'screen', 'wizard switches back to screen through UI');
+  await active.page.click('#wizard-advice');
+  await until(value => value.settings.wizardAdvice === false, 'wizard advice opt-out');
+  await shoot(active.page, 'settings.png');
+  await active.page.keyboard.press('Escape');
+  record('legacy wizard off choice preserved; visible source control switches files/screen and advice can be paused');
+
+  // One-click Pause/Resume: dock button toggles wizardAdvice without opening Settings.
+  // Enable wizard advice first so the Pause button is present.
+  const withAdvice = { ...settings, wizardAdvice: true, wizardSource: 'screen' };
+  assert.equal((await invoke({ type: 'settings', settings: withAdvice })).ok, true);
+  await until(value => value.settings.wizardAdvice === true, 'wizard advice on for pause test');
+  await active.page.waitForSelector('.dock [data-action="wizard-pause"]');
+  assert.equal(await active.page.$eval('.dock [data-action="wizard-pause"]', el => el.textContent.trim()), 'Pause', 'dock shows Pause when wizard advice is on');
+  await active.page.click('.dock [data-action="wizard-pause"]');
+  await until(value => value.settings.wizardAdvice === false, 'wizard paused via dock button');
+  assert.equal(await active.page.$eval('.dock [data-action="wizard-pause"]', el => el.textContent.trim()), 'Resume', 'dock shows Resume after pause');
+  await active.page.click('.dock [data-action="wizard-pause"]');
+  await until(value => value.settings.wizardAdvice === true, 'wizard resumed via dock button');
+  assert.equal(await active.page.$eval('.dock [data-action="wizard-pause"]', el => el.textContent.trim()), 'Pause', 'dock shows Pause again after resume');
+  // Leave wizard advice off for the remainder of the run.
+  await active.page.click('.dock [data-action="wizard-pause"]');
+  await until(value => value.settings.wizardAdvice === false, 'wizard advice off after pause');
+  record('one-click Pause/Resume toggles wizard advice from the dock without opening Settings');
+
+  // Voice button: opens Settings sheet scrolled to the voice section. On Linux, dictation is not supported.
+  // openInput() is also called first, so the textarea opens. Clicking while sheet may already be open is safe.
+  await active.page.click('.dock [data-action="voice-setup"]');
+  // Wait for the settings sheet to actually open (sheetEl gets data-sheet="settings" and loses hidden).
+  await active.page.waitForSelector('section.sheet:not([hidden])[data-sheet="settings"]', { timeout: 5_000 });
+  assert.ok(await active.page.$('#voice-settings'), 'voice section element exists inside open settings sheet');
+  const dictationSnap = await snapshot();
+  if (process.platform === 'linux') {
+    assert.equal(dictationSnap.dictation.supported, false, 'dictation truthfully unsupported on Linux');
+    assert.match(dictationSnap.dictation.message, /macOS/, 'dictation message names macOS requirement');
+    const dictationOpenDisabled = await active.page.$eval('[data-action="dictation-open"]', el => el.disabled);
+    assert.equal(dictationOpenDisabled, true, 'Open voice setup disabled on Linux');
+  }
+  await active.page.keyboard.press('Escape');
+  record(`voice setup button opens Settings voice section; dictation truthfully ${process.platform === 'linux' ? 'unsupported on Linux' : 'reported'}`);
+
+  const changed = { ...settings, alwaysOnTop: false, allWorkspaces: false, wizardAdvice: false, wizardSource: 'screen' };
   const saved = await invoke({ type: 'settings', settings: changed });
   assert.equal(saved.ok, true, saved.error);
   assert.equal(JSON.parse(await readFile(join(profile, 'settings.json'), 'utf8')).settings.alwaysOnTop, false);
@@ -210,6 +336,16 @@ try {
     const persisted = await readFile(join(project, '.dum', 'transcript.json'), 'utf8');
     assert.equal(persisted.includes(preview.preview.dataUrl), false);
     record('real Xvfb capture preview discarded; consumed token cannot upload');
+
+    // Xvfb screenshot→screenDecision smoke recipe (no live model; documents wiring for manual runs):
+    // 1. xvfb-run --auto-servernum node --experimental-strip-types tools/desktop-smoke.mjs
+    //    The smoke already runs under Xvfb on CI. No extra wrapper needed.
+    // 2. For a live screenDecision model smoke with a real signed-in Claude subscription:
+    //    ANTHROPIC_API_KEY=<key> xvfb-run node --experimental-strip-types tools/desktop-smoke.mjs
+    //    Expected: capture-preview returns a valid PNG; the wizard status in snapshot() cycles from
+    //    "wizard is taking a screen frame" → "wizard is checking the screen" → "wizard is watching your screen"
+    //    (or "wizard couldn't check the screen" on auth/provider failure — status persists through cooldown).
+    // 3. selector recipe to observe status: await until(s => /watching|couldn't/.test(s.wizardStatus), 'screen check');
   }
   const buddyTarget = await active.browser.waitForTarget(target => target.url().includes('view=companion'));
   await shoot(await buddyTarget.page(), 'companion.png', { omitBackground: true });
@@ -234,7 +370,7 @@ try {
   assert.notEqual(restored.inputToken, initial.inputToken);
   record('quit/relaunch restores history and settings, but creates a fresh prompt');
   await stop();
-  await writeFile(join(output, 'report.json'), JSON.stringify({ platform: process.platform, architecture: process.arch, appVersion: setup.version, checks, windows, macScreen, nativePermissionLimit: 'This run does not establish macOS Screen Recording, full-screen focus, global-hotkey permission or login-item behavior.' }, null, 2));
+  await writeFile(join(output, 'report.json'), JSON.stringify({ platform: process.platform, architecture: process.arch, appVersion: setup.version, checks, windows, macScreen, nativePermissionLimit: 'This run does not establish macOS Screen Recording, full-screen focus, global-hotkey permission or login-item behavior. Native Mac microphone/transcription is not tested on Linux.' }, null, 2));
   console.log(`Desktop smoke passed on ${process.platform}-${process.arch}: ${checks.join('; ')}.`);
 } finally {
   if (active) { active.child.kill(); await active.exit; active.browser.disconnect(); }

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>installation — dum</title>
+  <meta name="description" content="How to install dum: download the Mac app or build from source.">
+  <link rel="stylesheet" href="/site/site.css">
+  <script defer src="/site/wizard.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">dum</a>
+  <ul class="nav-links">
+    <li><a href="/">home</a></li>
+    <li><a href="/install" aria-current="page">installation</a></li>
+    <li><a href="/how-it-works">how it works</a></li>
+    <li><a href="/subjects">subjects</a></li>
+  </ul>
+</nav>
+
+<main>
+  <h1>Installation</h1>
+
+  <h2>Mac app</h2>
+
+  <h3>Prerequisites</h3>
+  <ul>
+    <li>macOS 13 or later</li>
+    <li>Git — comes with Apple's Command Line Tools; dum offers to install them if missing</li>
+    <li>A Claude subscription that includes <code>claude-opus-5-5</code> and <code>claude-fable-5-1</code>.
+        No API key or paid-usage route. The subscription must grant access to both models.</li>
+  </ul>
+  <p class="note">The app carries its own Node and Claude Code runtime. No terminal is needed.</p>
+  <p>Optional bundled voice dictation needs macOS 14 or later on Apple Silicon.
+     It uses OpenSuperWhisper's local model and your configured recording shortcut;
+     microphone and Accessibility permissions are required.</p>
+
+  <h3>Download</h3>
+  <p class="note">Test prerelease — these artifacts predate the current companion redesign.
+     Build from source to try the current version.</p>
+
+  <div class="dl-block">
+    <a href="https://github.com/hub-ry/dum-intern/releases/download/desktop-macos-c37b371-test/Dum-0.0.1-mac-arm64.dmg">
+      Dum-0.0.1-mac-arm64.dmg
+    </a>
+    <span class="dl-meta">Apple Silicon</span>
+  </div>
+
+  <div class="dl-block">
+    <a href="https://github.com/hub-ry/dum-intern/releases/download/desktop-macos-c37b371-test/Dum-0.0.1-mac-x64.dmg">
+      Dum-0.0.1-mac-x64.dmg
+    </a>
+    <span class="dl-meta">Intel</span>
+  </div>
+
+  <p>ZIPs and <code>SHA256SUMS.txt</code> are on the
+    <a href="https://github.com/hub-ry/dum-intern/releases/tag/desktop-macos-c37b371-test">release page</a>.
+  </p>
+
+  <pre><code>2941c6724c442dbca50c24b732cfdfb22940605c9e26103b569b052a29ce66bd  Dum-0.0.1-mac-arm64.dmg
+79c13ce09abddcd8cea3588b1fe49167119ba616f1a181b4c16aec1035f27178  Dum-0.0.1-mac-x64.dmg
+04ee99ed13e0cb5fea1f35020abb61c46b91ceac6ab2ab1e2d864a54d0f392f2  Dum-0.0.1-mac-arm64.zip
+869351dc471645ea22e1ee8187e68f7d87e2063d1eb321df3387e26f78653397  Dum-0.0.1-mac-x64.zip</code></pre>
+
+  <h3>First run</h3>
+  <ol>
+    <li>Open the DMG, drag Dum into Applications, and launch it.</li>
+    <li>If macOS blocks it: open System Settings → Privacy &amp; Security → Security → Open Anyway.</li>
+    <li>Sign in to Claude when prompted. Dum never sees your password.</li>
+    <li>Choose a Git project folder.</li>
+    <li>Click the characters or press <code>Cmd+Shift+D</code> to open the conversation.</li>
+  </ol>
+  <p class="note">Dum lives in the menu bar and a small floating pair. There is no Dock icon.</p>
+
+  <hr class="section-divider">
+
+  <h2>Source install</h2>
+
+  <h3>Prerequisites</h3>
+  <ul>
+    <li>Node 22.6 or later</li>
+    <li>Git</li>
+    <li>The <code>claude</code> CLI, logged into a Claude subscription with
+        <code>claude-opus-5-5</code> and <code>claude-fable-5-1</code></li>
+  </ul>
+
+  <h3>Terminal edition</h3>
+  <pre><code>claude auth login
+npm install
+npm link
+cd your-project
+dum</code></pre>
+
+  <h3>Desktop app from source</h3>
+  <pre><code>npm run desktop        # compile and launch
+npm run desktop:pack   # unpacked app for this OS
+npm run desktop:mac    # DMG and ZIP (run on a Mac)</code></pre>
+
+  <p class="note">Linux and Windows: the terminal edition works on any platform Node supports.
+     The packaged desktop app is macOS only.</p>
+
+  <p>Newer test builds are artifacts of the
+    <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>.
+    Signed-in GitHub accounts can download them directly.</p>
+
+</main>
+
+</body>
+</html>

@@ -1,10 +1,27 @@
-# dum-intern overhaul goal
+# dum-intern product direction
+
+## Current intent
+
+- Keep the two characters in the corner. The interface should stay out of the user's way, like a desktop companion, not a tutoring dashboard.
+- The user builds independently. The wizard gives selective unprompted advice using the screen by default, with a toggle to saved project files and a visible pause control. Screen access remains subject to OS permission. No passive audio capture or keystroke watching.
+- When the user is satisfied, they tell dum the story of what they built and why. Dum remembers reasoning; a story alone isn't unaided build evidence.
+- Dum's implementation capability follows the user's unlocked skill tree, including core algorithms. Anti-vibe accepts an approach already supplied rather than asking for it again.
+- Project recommendations use project memory and configured personal context. Show estimated duration and difficulty, with substantial projects spanning several ordered skill milestones for experienced programmers learning a new language.
+- Keep prerequisites, language scope, explicit unaided evidence, editor-safe proposals, and independent workspace permissions.
+- Feynman Slides is not a visual reference. The user named heyclicky as the desktop-companion reference and explicitly requested default screen-aware advice; don't copy its branding or imply unrelated capabilities.
+- Keep typing on demand and deliberate local voice dictation through bundled OpenSuperWhisper on supported Macs. A transcript fills a draft; it never sends automatically. Disclose native permissions, local audio retention, and the screen wizard's independent view of visible drafts.
+- Show a thin bright skill-backed progress strip with newbie → intern → good → cracked, without treating conversation volume as evidence.
+- The public site is sparse documentation with small Hack text and Rose Pine Moon colors, an intern runner, and a short legless wizard wandering in and out from alternating bottom edges. Non-coding subjects are an exploration of projects and evidence, not a claimed validated assessment system.
+
+## Historical overhaul brief
+
+The brief below records the earlier teaching-first direction. Where it conflicts with the current intent above, the current intent wins.
 
 Overhaul dum-intern in /home/ryanhubbart/code2/dum-intern into a simple terminal coding partner that helps Ryan learn by teaching an AI intern while building real software. Implement and verify the complete experience, not just a plan or scaffold.
 
 ## Product intent
 
-The inspiration is a Reddit story Ryan recalls: a chess player plateaued around 1800, then reached roughly 2000 after spending a few months teaching a beginner friend around 400. Treat this as inspiration, not verified research or proof of a learning effect. The desired relationship is a friend Ryan is responsible for helping, not an examiner checking whether he deserves AI assistance.
+The desired relationship is a friend Ryan is responsible for helping, not an examiner checking whether he deserves AI assistance. The design prioritizes the user's independent progress over providing direct answers.
 
 Keep the original outcome: Ryan can take the LLM away and still make progress, understand the architecture, start implementing, and ask precise questions. Teaching dum is the main interaction. The skill tree remains essential and persistent.
 
