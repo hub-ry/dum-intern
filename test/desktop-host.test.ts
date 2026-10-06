@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fork, execFileSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 test("a real teaching host isolates prompt epochs, excludes concurrent writers, and releases on close", { timeout: 30_000 }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), "dum-desktop-host-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "dum-desktop-host-")));
   const root = join(dir, "project");
   mkdirSync(root);
   execFileSync("git", ["init", "-q", root]);

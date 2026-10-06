@@ -36,6 +36,12 @@ jobs:
           cache: npm
       - name: Verify native architecture
         run: node -e 'if (process.arch !== "${{ matrix.arch }}") throw new Error("runner architecture mismatch")'
+      - name: Record the runner toolchain
+        run: |
+          sw_vers
+          git --version
+          which git
+          node --version
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -48,7 +54,7 @@ jobs:
           MACHINE: ${{ matrix.machine }}
         run: |
           set -euo pipefail
-          expected="$(node -p 'require("@anthropic-ai/claude-agent-sdk/package.json").claudeCodeVersion')"
+          expected="$(node -p 'JSON.parse(require("node:fs").readFileSync("node_modules/@anthropic-ai/claude-agent-sdk/package.json", "utf8")).claudeCodeVersion')"
           claude="$APP/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-$ARCH/claude"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature|flags'

@@ -349,10 +349,11 @@ test("status and changes never run a clean or process filter that .gitattributes
     assert.equal(existsSync(processed), false, "the process filter never ran");
 
     // Plain Git runs each for its own file, so the fixture really selects them. The stub process
-    // filter speaks no protocol, so Git gives up on notes.txt.
+    // filter speaks no protocol; whether Git then fails or carries on depends on its version, so
+    // only that the filter ran is asserted.
     git(p.root, "diff", "HEAD", "--", "src/main.py");
     assert.ok(existsSync(cleaned));
-    assert.throws(() => git(p.root, "diff", "HEAD", "--", "notes.txt"), { status: 128 });
+    try { git(p.root, "diff", "HEAD", "--", "notes.txt"); } catch { /* a stub that speaks no protocol may fail it */ }
     assert.ok(existsSync(processed));
   } finally { p.done(); }
 });
