@@ -162,9 +162,7 @@ function onKey(e) {
   const el  = document.activeElement;
   const tag = el ? el.tagName : '';
   // Let links and form controls keep their default Space behaviour
-  if (tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  // Jump button handles its own Space/Enter via click event
-  if (el === jumpBtn) return;
+  if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   e.preventDefault();
   act();
 }
