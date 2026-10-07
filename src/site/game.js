@@ -122,6 +122,7 @@ function init() {
   ctx      = canvas.getContext('2d');
   statusEl = document.getElementById('game-status');
   jumpBtn  = document.getElementById('game-jump');
+  drawPortrait();
 
   resize();
   new ResizeObserver(resize).observe(canvas);
@@ -292,6 +293,25 @@ function drawSprite(name, x, y) {
       if (!col) continue;
       ctx.fillStyle = col;
       ctx.fillRect(x + c * scale, y + r * scale, scale, scale);
+    }
+  }
+}
+
+function drawPortrait() {
+  const portrait = document.getElementById('hero-dum');
+  if (!portrait) return;
+  const pixel = 8;
+  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  portrait.width = SW * pixel * dpr;
+  portrait.height = SH * pixel * dpr;
+  const portraitCtx = portrait.getContext('2d');
+  portraitCtx.scale(dpr, dpr);
+  for (let r = 0; r < SH; r++) {
+    for (let c = 0; c < SW; c++) {
+      const color = F.idle[r][c];
+      if (!color) continue;
+      portraitCtx.fillStyle = color;
+      portraitCtx.fillRect(c * pixel, r * pixel, pixel, pixel);
     }
   }
 }

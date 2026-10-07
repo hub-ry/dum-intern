@@ -42,6 +42,7 @@ const SITE_ASSETS: Record<string, string> = {
   "site.css": "text/css; charset=utf-8",
   "game.js": "text/javascript; charset=utf-8",
   "demo.js": "text/javascript; charset=utf-8",
+  "setup.js": "text/javascript; charset=utf-8",
   "wizard.js": "text/javascript; charset=utf-8",
   "hack-regular.woff2": "font/woff2",
   "hack-bold.woff2": "font/woff2",
