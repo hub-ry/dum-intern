@@ -116,7 +116,8 @@ npm run desktop:mac    # DMG and ZIP (run on a Mac)</code></pre>
 
 Work one step at a time. Check the result before continuing. Ask me before:
 - using sudo or installing anything system-wide
-- opening a browser for Claude login
+- opening a browser for Claude login or completing 2FA
+- entering, copying, storing, or relaying passwords, one-time codes, recovery codes, or security keys
 - writing outside the folder I give you
 - changing an existing project or deleting anything
 
@@ -124,10 +125,10 @@ Work one step at a time. Check the result before continuing. Ask me before:
 2. If this is a Mac, use the source install. If it is Linux or Windows, explain that the terminal edition is the supported path.
 3. Ask where I want the repository. Clone it there if it is not already present.
 4. In the repository, run `npm install` and then `npm link`.
-5. Check Claude authentication. If I am not logged in, ask before running `claude auth login`.
+5. Check Claude authentication. If I am not logged in, ask before running `claude auth login`. If Claude asks for browser login, 2FA, a passkey, an OTP, or a recovery code, stop and tell me to complete it myself. Never request, enter, store, or relay those secrets. Wait for me to confirm, then check authentication again.
 6. Ask which Git project I want to use, then run `dum` from that project.
 7. If a step fails, stop and show the exact next command. At the end, print the remaining setup steps and wait for me.</code></pre>
-    <p class="note">The prompt asks the agent to stop before auth, system changes, or project edits. Review its commands like any other shell command.</p>
+    <p class="note">The prompt asks the agent to stop before auth, 2FA, system changes, or project edits. Never give an agent your password, one-time code, recovery code, or security key. Review its commands like any other shell command.</p>
   </section>
 </main>
 
