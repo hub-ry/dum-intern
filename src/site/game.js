@@ -122,6 +122,7 @@ function init() {
   ctx      = canvas.getContext('2d');
   statusEl = document.getElementById('game-status');
   jumpBtn  = document.getElementById('game-jump');
+  drawPortrait();
 
   resize();
   new ResizeObserver(resize).observe(canvas);
@@ -141,9 +142,9 @@ function init() {
 function resize() {
   const r = canvas.getBoundingClientRect();
   canvas.width  = Math.max(Math.floor(r.width),  200);
-  canvas.height = Math.max(Math.floor(r.height), 160);
+  canvas.height = Math.max(Math.floor(r.height), 1);
 
-  scale       = Math.max(4, Math.min(10, Math.floor(canvas.height / 85)));
+  scale       = Math.max(2, Math.min(10, Math.floor(canvas.height / 85)));
   groundY     = Math.floor(canvas.height * 0.83);
   internX     = SW * scale * 2;
   const newBase = groundY - SH * scale;
@@ -161,9 +162,7 @@ function onKey(e) {
   const el  = document.activeElement;
   const tag = el ? el.tagName : '';
   // Let links and form controls keep their default Space behaviour
-  if (tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  // Jump button handles its own Space/Enter via click event
-  if (el === jumpBtn) return;
+  if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   e.preventDefault();
   act();
 }
@@ -199,7 +198,7 @@ function startGame() {
 function doJump() {
   if (!jumping) {
     jumping = true;
-    vy      = -800; // px/s, negative = upward in canvas coords
+    vy      = -80 * scale; // px/s, negative = upward in canvas coords
   }
 }
 
@@ -244,7 +243,7 @@ function update(dt) {
 
   // Jump physics — gravity unchanged even under reduced motion (keeps it playable)
   if (jumping) {
-    vy      += 2200 * dt;          // gravity, px/s²
+    vy      += 220 * scale * dt;   // gravity, px/s², scaled with the sprite
     internY += vy * dt;
     if (internY >= internBaseY) {  // landed
       internY = internBaseY;
@@ -256,7 +255,7 @@ function update(dt) {
   // Obstacle generation
   nextObsIn -= dt;
   if (nextObsIn <= 0) {
-    // Height: 1× – 1.5× sprite (peak jump ~145 px, max obstacle ~120 px at scale 10)
+    // Height: 1× - 1.5× sprite (peak jump ~1.8× sprite height at every scale)
     const h = Math.floor(SH * scale * (1 + Math.random() * 0.5));
     const w = Math.floor(SW * scale * (0.75 + Math.random() * 0.45));
     obstacles.push({ x: canvas.width + 4, y: groundY - h, w, h });
@@ -292,6 +291,25 @@ function drawSprite(name, x, y) {
       if (!col) continue;
       ctx.fillStyle = col;
       ctx.fillRect(x + c * scale, y + r * scale, scale, scale);
+    }
+  }
+}
+
+function drawPortrait() {
+  const portrait = document.getElementById('hero-dum');
+  if (!portrait) return;
+  const pixel = 8;
+  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  portrait.width = SW * pixel * dpr;
+  portrait.height = SH * pixel * dpr;
+  const portraitCtx = portrait.getContext('2d');
+  portraitCtx.scale(dpr, dpr);
+  for (let r = 0; r < SH; r++) {
+    for (let c = 0; c < SW; c++) {
+      const color = F.idle[r][c];
+      if (!color) continue;
+      portraitCtx.fillStyle = color;
+      portraitCtx.fillRect(c * pixel, r * pixel, pixel, pixel);
     }
   }
 }

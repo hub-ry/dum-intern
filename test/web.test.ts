@@ -127,9 +127,12 @@ test("public docs serve typed assets without making private trees cacheable or e
     const font = await fetch(`${s.base}/site/hack-regular.woff2`);
     assert.equal(font.headers.get("content-type"), "font/woff2");
     assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString("ascii"), "wOF2", "the browser receives binary font bytes, not JSON");
-    const script = await fetch(`${s.base}/site/game.js`);
-    assert.equal(script.headers.get("content-type"), "text/javascript; charset=utf-8");
-    for (const path of ["/site/server.ts", "/site/..%2fweb%2fserver.ts", "/site/game.js/extra"]) {
+    for (const asset of ["/site/game.js", "/site/demo.js", "/site/wizard.js", "/site/setup.js"]) {
+      const script = await fetch(`${s.base}${asset}`);
+      assert.equal(script.status, 200);
+      assert.equal(script.headers.get("content-type"), "text/javascript; charset=utf-8");
+    }
+    for (const path of ["/site/server.ts", "/site/..%2fweb%2fserver.ts", "/site/game.js/extra", "/site/demo.js/extra", "/site/setup.js/extra"]) {
       assert.equal((await fetch(`${s.base}${path}`)).status, 404);
     }
     assert.equal((await fetch(`${s.base}/install`, { method: "POST" })).status, 404);
