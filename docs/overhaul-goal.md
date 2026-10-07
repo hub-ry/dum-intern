@@ -11,7 +11,7 @@
 - Feynman Slides is not a visual reference. The user named heyclicky as the desktop-companion reference and explicitly requested default screen-aware advice; don't copy its branding or imply unrelated capabilities.
 - Keep typing on demand and deliberate local voice dictation through bundled OpenSuperWhisper on supported Macs. A transcript fills a draft; it never sends automatically. Disclose native permissions, local audio retention, and the screen wizard's independent view of visible drafts.
 - Show a thin bright skill-backed progress strip with newbie → intern → good → cracked, without treating conversation volume as evidence.
-- The public site is sparse documentation with small Hack text and Rose Pine Moon colors, an intern runner, and a short legless wizard wandering in and out from alternating bottom edges. Non-coding subjects are an exploration of projects and evidence, not a claimed validated assessment system.
+- Public-site behavior and routes are described in [README.md](../README.md). Non-coding subjects are an exploration of projects and evidence, not a claimed validated assessment system.
 
 ## Historical overhaul brief
 
