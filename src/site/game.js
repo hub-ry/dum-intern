@@ -83,6 +83,7 @@ const F = {
 };
 
 const SW = 7, SH = 8; // sprite cell size in art pixels
+const DIFFICULTY_SCORE = 6000;  // full difficulty after one minute of play (100 pts/s)
 
 // DOM refs (set during init)
 let canvas, ctx, statusEl, jumpBtn;
@@ -243,9 +244,10 @@ function update(dt) {
   // Honour prefers-reduced-motion: slow obstacles and animation, keep jump feel
   const ms = rmq.matches ? 0.35 : 1.0;
 
-  // Score (100 pts/s at full speed) and progressive speed increase
+  // Score (100 pts/s) drives difficulty from 0 to 1 over the first minute of play.
   score += dt * 100;
-  speed  = Math.min(520, 200 + Math.floor(score / 65) * 14);
+  const d = Math.min(1, score / DIFFICULTY_SCORE);
+  speed  = 200 + 360 * d;            // 200 → 560 px/s
 
   // Run frame animation — slower under reduced motion
   runTimer += dt;
@@ -265,11 +267,13 @@ function update(dt) {
   // Obstacle generation
   nextObsIn -= dt;
   if (nextObsIn <= 0) {
-    // Height: 1× - 1.5× sprite (peak jump ~1.8× sprite height at every scale)
-    const h = Math.floor(SH * scale * (1 + Math.random() * 0.5));
-    const w = Math.floor(SW * scale * (0.75 + Math.random() * 0.45));
+    // Obstacles start small and grow taller and wider with difficulty. The tallest (1.5× sprite)
+    // stays under the jump's ~1.8× peak, and the shortest gap (0.9 s) stays longer than the
+    // ~0.73 s airtime, so every obstacle can be cleared.
+    const h = Math.floor(SH * scale * (0.8 + Math.random() * (0.3 + 0.4 * d)));
+    const w = Math.floor(SW * scale * (0.75 + Math.random() * (0.3 + 0.5 * d)));
     obstacles.push({ x: cw + 4, y: groundY - h, w, h });
-    nextObsIn = (1.2 + Math.random() * 2.0) / ms;
+    nextObsIn = ((1.3 - 0.4 * d) + Math.random() * (2.0 - 1.2 * d)) / ms;
   }
 
   // Move and prune off-screen obstacles
