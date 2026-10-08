@@ -113,7 +113,7 @@ export class Store {
   }
 
   /**
-   * Helper-model work (a look, suggested projects, the wizard) that Stop and close abort. Work
+   * Helper-model work (a look, suggested projects, decision help) that Stop and close abort. Work
    * aborted while it ran ends in Cancelled even if it happened to finish, so nothing after it
    * records evidence or memory for something they stopped. Inside an `operation` it is that
    * operation's Stop that counts, however late in it the call is made.
@@ -295,11 +295,6 @@ export class Store {
     this.append({ kind: "note", text });
   }
 
-  /** The wizard's line. */
-  quip(text: string) {
-    this.append({ kind: "quip", text });
-  }
-
   /** Busy on something that isn't a person. A prompt someone is answering stays up. */
   working(status: string) {
     if (this.waits.length) this.patch({ status });
@@ -359,7 +354,7 @@ export class Store {
     return this.park({ type: "next" }, null, true);
   }
 
-  /** The conversation as plain text, for the history panel. */
+  /** The conversation as plain text, for the history view. */
   logText(): string {
     const out: string[] = [];
     for (const e of this.state.transcript) {
@@ -417,7 +412,7 @@ export class Store {
 
   private park(prompt: Prompt, entryId: number | null, ahead: boolean): Promise<string> {
     if (this.closed) return Promise.reject(new Cancelled(true));
-    // dum asking something takes the conversation back from a help panel.
+    // dum asking something takes the conversation back from a help view.
     if (prompt?.type === "question" && prompt.intern) this.closeBoard();
     if (ahead && this.typedAhead.length) {
       // Already in the transcript as a `user` entry from when it was typed.

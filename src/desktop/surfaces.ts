@@ -1,7 +1,8 @@
-// Where Dum's windows go and how long the cursor bubble stays (docs/revamp-design.md §4). Pure logic
-// with injected clocks and focus, so placement, display removal, TTLs and focus return are tested
-// without Electron. Coordinates are DIP in Electron's global screen space: origins can be negative,
-// and nothing here multiplies by a scale factor.
+// Where Dum's surfaces go, how the circle tells a click from a drag, and how long the cursor bubble
+// stays (docs/circle-design.md §2, §3, §7). Pure logic with injected clocks and focus, so placement,
+// gestures, display changes, TTLs and focus return are tested without Electron. Coordinates are DIP
+// in Electron's global screen space: origins can be negative, and nothing here multiplies by a scale
+// factor.
 
 import type { FocusBridge } from "./native-protocol.ts";
 import type { BubbleView } from "./protocol.ts";
@@ -9,13 +10,46 @@ import type { BubbleView } from "./protocol.ts";
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
 export type Rect = Point & Size;
+/** One Electron display: its id as a string (a matching hint, not a hardware identity), work area and full bounds. */
+export type DisplayArea = { id: string; workArea: Rect; bounds: Rect; primary: boolean };
 
 export const MARGIN = 8;
 export const BUBBLE_MAX: Size = { width: 360, height: 220 };
-export const COMMAND_SIZE: Size = { width: 640, height: 360 };
-export const PANEL_SIZE: Size = { width: 420, height: 640 };
 /** Offset of the bubble from the cursor, before flipping. */
 const CURSOR_GAP = { x: 16, y: 20 };
+
+/** The persistent circle: its window, visible disk, face and gesture thresholds. */
+export const CIRCLE = {
+  /** The BrowserWindow is this square; the disk is centered with 4 DIP of transparent padding. */
+  window: 64,
+  disk: 56,
+  /** Only this radius from the window's center takes the pointer. */
+  radius: 28,
+  /** Whole device pixels per art pixel: the 7×8 face draws at 28×32. */
+  faceScale: 4,
+  /** The whole window stays this far inside a display's work area. */
+  inset: 8,
+  /** Movement this far from the press, at any point, makes the whole gesture a drag. */
+  dragDip: 6,
+  /** A release below the drag threshold within this long toggles the working window. */
+  toggleMs: 500,
+  /** A second click this soon after a toggle does nothing. */
+  debounceMs: 250,
+  /** Main samples the pointer and moves the window at most once per frame. */
+  frameMs: 16,
+  /** A press with no release after this long is cancelled. */
+  releaseMs: 10_000,
+  /** The default placement: 35% down the usable vertical range. */
+  defaultV: 0.35,
+  /** Saved placements, one per display, at most. */
+  placements: 16,
+} as const;
+
+/** The working window: fixed size, shrunk to the work area; its narrow layout works down to WINDOW_MIN. */
+export const WINDOW_SIZE: Size = { width: 640, height: 720 };
+export const WINDOW_MIN: Size = { width: 360, height: 480 };
+/** Gap between the circle and the working window beside it. */
+export const WINDOW_GAP = 12;
 
 /** A ready voice draft stays this long; a finished reply this long. */
 export const BUBBLE_TTL = { ready: 20_000, reply: 8_000, error: 8_000 } as const;
@@ -32,7 +66,7 @@ function fit(size: Size, area: Rect): Size {
   };
 }
 
-/** The rect moved (not resized) to lie inside `area` with the margin. */
+/** The rect moved (not resized, unless it is bigger than the area) to lie inside `area` with the margin. */
 export function clampInto(rect: Rect, area: Rect): Rect {
   const { width, height } = fit(rect, area);
   const x = Math.min(Math.max(rect.x, area.x + MARGIN), area.x + area.width - MARGIN - width);
@@ -40,20 +74,35 @@ export function clampInto(rect: Rect, area: Rect): Rect {
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
 
-/** Below-right of the cursor, flipped left or up when it would overflow, then clamped; at most 360×220. */
-export function placeBubble(cursor: Point, area: Rect, wanted: Size = BUBBLE_MAX): Rect {
-  const size = fit({ width: Math.min(wanted.width, BUBBLE_MAX.width), height: Math.min(wanted.height, BUBBLE_MAX.height) }, area);
-  let x = cursor.x + CURSOR_GAP.x;
-  let y = cursor.y + CURSOR_GAP.y;
-  if (x + size.width > area.x + area.width - MARGIN) x = cursor.x - CURSOR_GAP.x - size.width;
-  if (y + size.height > area.y + area.height - MARGIN) y = cursor.y - CURSOR_GAP.y - size.height;
-  return clampInto({ x, y, ...size }, area);
+function overlaps(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-/** Centered in the work area of the display nearest the cursor; clamped on small displays. */
-export function placeCentered(area: Rect, wanted: Size): Rect {
-  const size = fit(wanted, area);
-  return clampInto({ x: area.x + (area.width - size.width) / 2, y: area.y + (area.height - size.height) / 2, ...size }, area);
+function within(rect: Rect, area: Rect): boolean {
+  return rect.x >= area.x + MARGIN && rect.y >= area.y + MARGIN
+    && rect.x + rect.width <= area.x + area.width - MARGIN && rect.y + rect.height <= area.y + area.height - MARGIN;
+}
+
+/**
+ * Below-right of the cursor, flipped left or up when it would overflow, then clamped; at most 360×220.
+ * When that would cover `avoid` (the circle), the other cursor quadrants are tried before clamping.
+ */
+export function placeBubble(cursor: Point, area: Rect, wanted: Size = BUBBLE_MAX, avoid: Rect | null = null): Rect {
+  const size = fit({ width: Math.min(wanted.width, BUBBLE_MAX.width), height: Math.min(wanted.height, BUBBLE_MAX.height) }, area);
+  const right = cursor.x + CURSOR_GAP.x;
+  const left = cursor.x - CURSOR_GAP.x - size.width;
+  const below = cursor.y + CURSOR_GAP.y;
+  const above = cursor.y - CURSOR_GAP.y - size.height;
+  const x = right + size.width > area.x + area.width - MARGIN ? left : right;
+  const y = below + size.height > area.y + area.height - MARGIN ? above : below;
+  const first = clampInto({ x, y, ...size }, area);
+  if (!avoid || !overlaps(first, avoid)) return first;
+  const other = (v: number, a: number, b: number) => (v === a ? b : a);
+  for (const [cx, cy] of [[other(x, right, left), y], [x, other(y, below, above)], [other(x, right, left), other(y, below, above)]] as const) {
+    const rect = { x: cx, y: cy, ...size };
+    if (within(rect, area) && !overlaps(rect, avoid)) return rect;
+  }
+  return first;
 }
 
 function distance(rect: Rect, area: Rect): number {
@@ -71,6 +120,156 @@ export function reclamp(rect: Rect, areas: readonly Rect[]): Rect {
   for (const area of areas) if (distance(rect, area) < distance(rect, best)) best = area;
   return clampInto(rect, best);
 }
+
+// -- the circle ---------------------------------------------------------------------------------
+
+/** How far the circle's top-left can travel inside `area`, after the inset and its own size. */
+function travel(area: Rect): { x0: number; y0: number; dx: number; dy: number } {
+  return {
+    x0: area.x + CIRCLE.inset,
+    y0: area.y + CIRCLE.inset,
+    dx: Math.max(0, area.width - 2 * CIRCLE.inset - CIRCLE.window),
+    dy: Math.max(0, area.height - 2 * CIRCLE.inset - CIRCLE.window),
+  };
+}
+
+/** The whole 64×64 rect inside `area`, 8 DIP inset. A work area too small for it keeps the top-left inset. */
+export function clampCircle(rect: Rect, area: Rect): Rect {
+  const t = travel(area);
+  return {
+    x: Math.round(Math.max(t.x0, Math.min(rect.x, t.x0 + t.dx))),
+    y: Math.round(Math.max(t.y0, Math.min(rect.y, t.y0 + t.dy))),
+    width: CIRCLE.window,
+    height: CIRCLE.window,
+  };
+}
+
+/** Normalized top-left fractions over the travel range, so a placement survives resolution changes. */
+export function toPlacement(rect: Rect, area: Rect): { u: number; v: number } {
+  const t = travel(area);
+  const unit = (at: number, from: number, range: number) => (range > 0 ? Math.min(1, Math.max(0, (at - from) / range)) : 0);
+  return { u: unit(rect.x, t.x0, t.dx), v: unit(rect.y, t.y0, t.dy) };
+}
+
+export function fromPlacement(p: { u: number; v: number }, area: Rect): Rect {
+  const t = travel(area);
+  const unit = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
+  return clampCircle({ x: t.x0 + unit(p.u) * t.dx, y: t.y0 + unit(p.v) * t.dy, width: CIRCLE.window, height: CIRCLE.window }, area);
+}
+
+/** 8 DIP from the right work-area edge, 35% down the usable vertical range. */
+export function defaultCircle(area: Rect): Rect {
+  return fromPlacement({ u: 1, v: CIRCLE.defaultV }, area);
+}
+
+/** The display containing `point`, else the one whose bounds are nearest it. Null with no displays. */
+export function nearestDisplay(point: Point, displays: readonly DisplayArea[]): DisplayArea | null {
+  let best: DisplayArea | null = null;
+  let bestDistance = Infinity;
+  for (const d of displays) {
+    const b = d.bounds;
+    const dx = Math.max(b.x - point.x, 0, point.x - (b.x + b.width - 1));
+    const dy = Math.max(b.y - point.y, 0, point.y - (b.y + b.height - 1));
+    const far = dx * dx + dy * dy;
+    if (far < bestDistance) {
+      best = d;
+      bestDistance = far;
+    }
+  }
+  return best;
+}
+
+/** The pointer is on the visible disk, not the transparent padding around it. */
+export function insideDisk(point: Point, circle: Rect): boolean {
+  const dx = point.x - (circle.x + circle.width / 2);
+  const dy = point.y - (circle.y + circle.height / 2);
+  return dx * dx + dy * dy <= CIRCLE.radius * CIRCLE.radius;
+}
+
+/**
+ * The working window beside the circle: right of it with a 12 DIP gap, vertically centered on it;
+ * left when the right doesn't fit; otherwise the side with more room, clamped (it may then overlap
+ * the circle). Shrunk to the work area with 8 DIP margins.
+ */
+export function placeWindow(circle: Rect, area: Rect, wanted: Size): Rect {
+  const size = fit(wanted, area);
+  const y = circle.y + circle.height / 2 - size.height / 2;
+  const right = circle.x + circle.width + WINDOW_GAP;
+  const left = circle.x - WINDOW_GAP - size.width;
+  const roomRight = area.x + area.width - MARGIN - right;
+  const roomLeft = circle.x - WINDOW_GAP - (area.x + MARGIN);
+  const x = roomRight >= size.width ? right : roomLeft >= size.width ? left : roomRight >= roomLeft ? right : left;
+  return clampInto({ x, y, ...size }, area);
+}
+
+type Live = { id: string; start: Point; bounds: Rect; at: number; dragging: boolean; onDisk: boolean };
+
+/**
+ * Main-issued pointer gestures on the circle. Positions are main's global DIP samples, never
+ * renderer coordinates. One gesture at a time: a new press replaces an unfinished one.
+ */
+export class CircleGesture {
+  private live: Live | null = null;
+  private lastToggle = -Infinity;
+
+  constructor(private readonly now: () => number) {}
+
+  /** The live gesture's id, or null. */
+  get active(): string | null {
+    return this.live?.id ?? null;
+  }
+
+  /** A primary press. One on the transparent padding never toggles or drags. */
+  begin(pointer: Point, bounds: Rect): string {
+    const id = crypto.randomUUID();
+    this.live = { id, start: { ...pointer }, bounds: { ...bounds }, at: this.now(), dragging: false, onDisk: insideDisk(pointer, bounds) };
+    return id;
+  }
+
+  /** Where the circle goes for this pointer sample, unclamped; null until movement proves a drag. */
+  move(gestureId: string, pointer: Point): Rect | null {
+    const g = this.current(gestureId);
+    if (!g || !g.onDisk) return null;
+    const dx = pointer.x - g.start.x;
+    const dy = pointer.y - g.start.y;
+    if (!g.dragging && dx * dx + dy * dy >= CIRCLE.dragDip * CIRCLE.dragDip) g.dragging = true;
+    return g.dragging ? { x: g.bounds.x + dx, y: g.bounds.y + dy, width: g.bounds.width, height: g.bounds.height } : null;
+  }
+
+  /** The release. A drag ends as one; a short, still press toggles unless one just did; anything else does nothing. */
+  end(gestureId: string, pointer: Point): "toggle" | "drag" | "none" {
+    const g = this.current(gestureId);
+    if (!g) return "none";
+    this.move(gestureId, pointer);
+    this.live = null;
+    if (!g.onDisk) return "none";
+    if (g.dragging) return "drag";
+    const at = this.now();
+    if (at - g.at > CIRCLE.toggleMs || at - this.lastToggle < CIRCLE.debounceMs) return "none";
+    this.lastToggle = at;
+    return "toggle";
+  }
+
+  /** Lost capture, pointer cancel or the release ceiling: the starting bounds to restore, or null when not live. */
+  cancel(gestureId: string): Rect | null {
+    const g = this.current(gestureId);
+    if (!g) return null;
+    this.live = null;
+    return { ...g.bounds };
+  }
+
+  /** Live past the 10-second missing-release ceiling. */
+  overdue(gestureId: string): boolean {
+    const g = this.current(gestureId);
+    return g !== null && this.now() - g.at >= CIRCLE.releaseMs;
+  }
+
+  private current(gestureId: string): Live | null {
+    return this.live && this.live.id === gestureId ? this.live : null;
+  }
+}
+
+// -- the bubble ---------------------------------------------------------------------------------
 
 /** At most eight lines and 600 characters of what Dum and the Wizard actually said; never a summary. */
 export function bubbleLines(dum: readonly string[], wizard: string | null): string[] {
@@ -95,7 +294,7 @@ export function bubbleLines(dum: readonly string[], wizard: string | null): stri
     const line = `Wizard: ${wizard.replace(/\s+/g, " ").trim()}`;
     out.push(line.length > budget ? `${line.slice(0, Math.max(0, budget - 1))}…` : line);
   }
-  if (cut) out.push("Open the command bar for the full reply");
+  if (cut) out.push("Open Dum for the full reply");
   return out;
 }
 
@@ -163,39 +362,42 @@ export class Bubble {
   }
 }
 
+// -- focus --------------------------------------------------------------------------------------
+
 /**
- * Where focus goes back to when the command bar is dismissed: the app that was frontmost when it was
- * summoned, or, when Dum's panel had focus, the panel. Handles are opaque and live for one summon.
+ * The external application to give focus back to when the working window is dismissed: the app that
+ * was frontmost when Dum was summoned. Handles are opaque and live for one summon. Never Dum itself:
+ * main summons only while no Dum window has focus.
  */
 export class FocusReturn {
-  private target: { kind: "app"; handle: string } | { kind: "panel" } | null = null;
+  private handle: string | null = null;
 
   constructor(private readonly focus: Pick<FocusBridge, "capture" | "restore">) {}
 
-  /** Remember what had focus before the command bar takes it. A failed capture leaves nothing to restore. */
-  async summon(panelFocused: boolean): Promise<void> {
-    if (panelFocused) {
-      this.target = { kind: "panel" };
-      return;
-    }
-    this.target = null;
+  /** Remember the frontmost app before Dum activates. A failed capture leaves nothing to restore. */
+  async summon(): Promise<void> {
+    this.handle = null;
     try {
-      this.target = { kind: "app", handle: await this.focus.capture() };
+      this.handle = await this.focus.capture();
     } catch {
-      this.target = null;
+      this.handle = null;
     }
   }
 
-  /** Give focus back once. Returns "panel" when Dum's panel should take it, else whether the app came back. */
-  async dismiss(): Promise<"panel" | boolean> {
-    const target = this.target;
-    this.target = null;
-    if (!target) return false;
-    if (target.kind === "panel") return "panel";
+  /** Give focus back once; whether the app came back. No capture means nothing is activated. */
+  async dismiss(): Promise<boolean> {
+    const handle = this.handle;
+    this.handle = null;
+    if (!handle) return false;
     try {
-      return await this.focus.restore(target.handle);
+      return await this.focus.restore(handle);
     } catch {
       return false;
     }
+  }
+
+  /** The user moved to another app themselves: nothing goes back. */
+  forget(): void {
+    this.handle = null;
   }
 }

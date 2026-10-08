@@ -68,8 +68,6 @@ async function deadBase() {
 function options(model: string, extra: Partial<OpenOptions> = {}): OpenOptions {
   return {
     cwd: "/tmp",
-    zone: { id: "z1", revision: 1, breadcrumb: [], goal: "", ancestorGoals: [], language: "", focusSkills: [], notes: [] },
-    binding: { zoneId: "z1", zoneEpoch: "e", inputToken: "t", requestId: "r" },
     systemPrompt: "sys",
     selector: { backend: "local", model, effort: null },
     login: "none",

@@ -34,7 +34,7 @@ export function revertButton(client: Client, change: ChangeReceipt | undefined, 
   );
 }
 
-/** The Changes pane: this zone's changes, newest first, each with its diff and Revert. */
+/** Records → Changes: this zone's changes, newest first, each with its diff, Revert and its record. */
 export class ChangesPane {
   readonly el = h("div", { class: "changes" });
   private key = "";

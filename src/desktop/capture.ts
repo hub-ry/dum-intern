@@ -82,8 +82,8 @@ export class Captures {
   }
 
   /**
-   * Hand the held image over for a confirmed Send, exactly once. The token must be the current
-   * one, unexpired, and bound to this zone, prompt and request; a stale token releases the bytes.
+   * Hand the held image over for a confirmed Send or Do this, exactly once. The token must be the
+   * current one, unexpired, and bound to this zone, prompt and request; a stale token releases the bytes.
    */
   take(token: string, binding: RequestBinding): SharedImage {
     const held = this.held;

@@ -1,14 +1,15 @@
-// Renderer entry: `?view=panel` is the full panel, `?view=command` the command bar, `?view=bubble` the cursor bubble.
+// Renderer entry: `?view=window` is the one working window, `?view=circle` the floating circle,
+// `?view=bubble` the cursor bubble. Anything else is the working window.
 
-import { panel } from "./panel.ts";
-import { command } from "./command.ts";
+import { windowView } from "./window.ts";
+import { circle } from "./circle.ts";
 import { bubble } from "./bubble.ts";
 
-const VIEWS = { panel, command, bubble } as const;
-const TITLES: Record<keyof typeof VIEWS, string> = { panel: "Dum", command: "Dum - command bar", bubble: "Dum" };
+const VIEWS = { window: windowView, circle, bubble } as const;
+type View = keyof typeof VIEWS;
 
 const asked = new URLSearchParams(location.search).get("view");
-const view = asked === "command" || asked === "bubble" ? asked : "panel";
+const view: View = asked === "circle" || asked === "bubble" ? asked : "window";
 document.documentElement.dataset.view = view;
-document.title = TITLES[view];
+document.title = "Dum";
 VIEWS[view]();

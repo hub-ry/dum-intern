@@ -1,39 +1,77 @@
+// The Wizard's decision cards: host-issued ids, only supplied context, canonical candidate skills
+// and offered catalog anchors, and model words screened for unsupported external claims.
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { byId, candidates } from "../src/anchors.ts";
 import { createRegistry } from "../src/agent/registry.ts";
-import { compose, decision, prompt, screen, type Decision } from "../src/wizard.ts";
-import type { AgentBackend, AgentEvent, OpenOptions, Picture, Selector } from "../src/agent/types.ts";
-import type { ZoneContext } from "../src/zone-types.ts";
+import { help, parseDecision } from "../src/wizard.ts";
+import type { AgentBackend, AgentEvent, OpenOptions, Selector, UserTurn } from "../src/agent/types.ts";
+import type { ContextRef, DecisionInput, DecisionResult } from "../src/delegation-types.ts";
 
+process.env.DUM_HOME = mkdtempSync(join(tmpdir(), "dum-wizard-"));
 process.env.DUM_CONTEXT = "off";
 
-const zoneId = randomUUID();
-const zone: ZoneContext = {
-  id: zoneId, revision: 2, breadcrumb: [{ id: zoneId, name: "Leaderboard" }], goal: "Learn Python by building our club leaderboard",
-  ancestorGoals: [], language: "python", focusSkills: [{ name: "sorting with keys", lang: "python" }], notes: [],
+const sha = "a".repeat(64);
+const note: ContextRef = {
+  id: randomUUID(), kind: "zone-note", label: "Club notes", revision: sha, at: null,
+  excerpt: "Scores arrive as a CSV export from the club app every Friday.",
 };
-const binding = { zoneId, zoneEpoch: "epoch1", inputToken: "token1", requestId: "request1" };
+const look: ContextRef = {
+  id: randomUUID(), kind: "look", label: "Editor", revision: sha, at: null,
+  excerpt: "leaderboard.py sorts rows with a lambda key.",
+};
+const alignment: DecisionInput = {
+  moment: "alignment",
+  goal: "Learn Python by building our club leaderboard",
+  outcome: null,
+  language: "python",
+  direction: null,
+  answers: [],
+  context: [note, look],
+  candidates: [{ name: "sorting with keys", lang: "python" }, { name: "reading CSV files", lang: "python" }],
+};
+const delegation: DecisionInput = { ...alignment, moment: "delegation", outcome: "Import this week's CSV into the leaderboard" };
 const sorting = byId("python-sorting")!;
-const git = byId("git-diff")!;
-const moment: Decision = { zone, request: "sort our leaderboard by score", lang: "python" };
+const offered = [sorting];
 
-function line(anchor: string | null, say: string, d = moment) {
-  return compose(JSON.stringify({ anchor, say }), d, [sorting]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function project(over: Record<string, unknown> = {}) {
+  return {
+    id: "model-id-1", kind: "project", title: "Rank members by score",
+    builds: [{ name: "sorting with keys", lang: "python" }],
+    advancesGoal: "Ranking the rows exercises key functions on real club data.",
+    contextIds: [look.id], tradeoff: "Ties need a rule before the board is fair.", anchor: null, ...over,
+  };
 }
+function task(over: Record<string, unknown> = {}) {
+  return {
+    id: "model-id-2", task: "Write the CSV import for the leaderboard.", expectedResult: "A function that loads the export into rows.",
+    review: "Load last Friday's file and compare the totals.", skills: [{ name: "reading CSV files", lang: "python" }],
+    advancesOutcome: "The board can show this week's scores.", contextIds: [note.id],
+    tradeoff: "You would read the import rather than write it.", needs: null, anchor: null, ...over,
+  };
+}
+function reply(options: unknown[], over: Record<string, unknown> = {}) {
+  return JSON.stringify({ reflection: "Here's what I think you want to become able to do: rank the club by score.", questions: [], options, ...over });
+}
+const parse = (raw: string, input: DecisionInput = alignment, anchors = offered) => parseDecision(raw, input, anchors);
+const options = (r: DecisionResult | null) => r!.options as Record<string, unknown>[];
 
-/** A helper backend that answers every one-shot with the next scripted reply and keeps what it was sent. */
-function helper(replies: (string | Error)[], images = true) {
+/** A helper backend answering each one-shot with the next scripted reply, recording what it was sent. */
+function helper(replies: (string | Error)[]) {
   const opened: OpenOptions[] = [];
-  const turns: { text: string; images?: readonly Picture[] }[] = [];
+  const turns: UserTurn[] = [];
   const backend: AgentBackend = {
     id: "claude",
     label: "Claude",
     models: async () => [],
-    capabilities: async (selector) => ({
-      model: selector.model, images, noImages: images ? "" : `${selector.model} can't see pictures`, interrupt: true, runtimeActionCheck: true,
-    }),
+    capabilities: async (selector) => ({ model: selector.model, images: true, noImages: "", interrupt: true, runtimeActionCheck: true }),
     open: async (o) => {
       opened.push(o);
       return {
@@ -52,135 +90,226 @@ function helper(replies: (string | Error)[], images = true) {
     },
   };
   const agent = createRegistry([backend], new Set(["claude"]));
-  const selector: Selector = { backend: "claude", model: "helper-model", effort: null };
-  agent.set({ backend: "claude", login: "anthropic-key", intern: selector, helper: selector, look: selector });
+  const intern: Selector = { backend: "claude", model: "intern-model", effort: "high" };
+  const small: Selector = { backend: "claude", model: "helper-model", effort: null };
+  agent.set({ backend: "claude", login: "anthropic-key", intern, helper: small, look: intern });
   return { agent, opened, turns };
 }
 
-test("a supported anchor retains its primary-source link and relevant connection", () => {
-  const output = line("python-sorting", "ties retain their previous order here.");
-  assert.match(output!, /ties retain their previous order here/);
-  assert.match(output!, /source: https:\/\/docs\.python\.org\/3\/howto\/sorting\.html$/);
-  assert.match(output!, /stable/);
+test("alignment help runs on the action-free helper and returns host-issued cards from what it was given", async () => {
+  const h = helper([reply([project({ anchor: "python-sorting", builds: [{ name: "Sorting with key", lang: "python" }] })], {
+    questions: [{ id: "model-q", text: "Do ties share a rank?", changesPlan: "Shared ranks change what the first project must build." }],
+  })]);
+  const out = await help(alignment, { agent: h.agent, cwd: "/h/zones/z/runtime", signal: new AbortController().signal });
+  const o = h.opened[0]!;
+  assert.deepEqual(o.actions, []);
+  assert.equal(o.selector.model, "helper-model");
+  assert.equal(o.cwd, "/h/zones/z/runtime");
+  assert.equal(o.maxTurns, 1);
+  const sent = h.turns[0]!.text;
+  assert.ok(sent.includes(note.excerpt) && sent.includes(look.id), "context excerpts and ids reach the prompt");
+  assert.ok(sent.includes("reading CSV files") && sent.includes("sorting with keys"), "candidates reach the prompt");
+  assert.ok(sent.includes("python-sorting"), "the offered anchor reaches the prompt by id");
+
+  assert.equal(out.moment, "alignment");
+  assert.match(out.reflection, /become able to do/);
+  assert.equal(out.questions.length, 1);
+  assert.match(out.questions[0]!.id, UUID);
+  assert.notEqual(out.questions[0]!.id, "model-q");
+  const [card] = options(out);
+  assert.match(card!.id as string, UUID);
+  assert.notEqual(card!.id, "model-id-1");
+  assert.equal(card!.kind, "project");
+  assert.deepEqual(card!.builds, [{ name: "sorting with keys", lang: "python" }], "the candidate's canonical spelling");
+  assert.deepEqual(card!.contextIds, [look.id]);
+  assert.equal(card!.tradeoff, `Ties need a rule before the board is fair. Source: ${sorting.claim} (${sorting.url})`);
+  assert.equal("anchor" in card!, false);
 });
 
-test("unknown or unoffered anchors cannot supply a fabricated citation", () => {
-  assert.equal(line("invented-team-history", "a plausible sounding explanation."), null);
-  assert.equal(line("git-diff", "a plausible sounding explanation."), null);
-  assert.equal(compose('{"anchor":7,"say":"a claim"}', moment, [sorting]), null);
+test("delegation proposals carry a named missing detail and never an eligibility", () => {
+  const out = parse(reply([
+    task(),
+    task({ task: "Add a weekly totals column.", needs: "Which column holds the attendance bonus." }),
+  ]), delegation);
+  assert.equal(out!.moment, "delegation");
+  const [first, second] = options(out);
+  assert.equal(first!.needs, null);
+  assert.equal(second!.needs, "Which column holds the attendance bonus.");
+  assert.deepEqual(first!.skills, [{ name: "reading CSV files", lang: "python" }]);
+  for (const o of [first!, second!]) {
+    assert.equal("eligibility" in o, false);
+    assert.equal("blockers" in o, false);
+    assert.match(o.id as string, UUID);
+  }
+  // A shape from the other moment never passes as a proposal.
+  assert.deepEqual(options(parse(reply([project()]), delegation)), []);
+  assert.deepEqual(options(parse(reply([task()]), alignment)), []);
 });
 
-test("a selected source without a concrete surviving observation stays silent", () => {
-  assert.equal(line("python-sorting", ""), null);
-  assert.equal(line("python-sorting", "google discovered this in 2008."), null);
+test("a needed detail with a link drops the proposal rather than reading as none", () => {
+  assert.deepEqual(options(parse(reply([task({ needs: "The format at https://club.example.invalid/export." })]), delegation)), []);
 });
 
-test("unsupported specifics do not trigger an unsolicited catalog lesson", () => {
-  for (const claim of [
-    "guido invented this in 2002.",
-    "it made sorting 3x faster.",
-    "ninety percent of teams do this.",
-    "my team used this in production.",
-    'a founder called this "move fast".',
-    "see https://unverified.example.invalid for proof.",
-  ]) {
-    assert.equal(line("python-sorting", claim), null);
+test("descriptions of the work are only tidied; world claims in the same card are screened", () => {
+  const sorter = task({
+    task: "Write a sorter that uses a key function \u2014 for the 2024 season export.",
+    expectedResult: "The function sorts 1000 rows by score, as \"rank\" in Leaderboard.",
+    review: "Check that Postgres rows come out in the same order.",
+  });
+  const [card] = options(parse(reply([sorter]), delegation));
+  assert.equal(card!.task, "Write a sorter that uses a key function - for the 2024 season export.");
+  assert.equal(card!.expectedResult, "The function sorts 1000 rows by score, as \"rank\" in Leaderboard.");
+  assert.equal(card!.review, "Check that Postgres rows come out in the same order.");
+  assert.deepEqual(options(parse(reply([task({ tradeoff: "Most teams use a key function here." })]), delegation)), []);
+  assert.deepEqual(options(parse(reply([task({ advancesOutcome: "Engineers typically sort this way." })]), delegation)), []);
+  for (const link of ["See https://example.invalid.", "Read www.example.invalid first.", "Follow [the guide](x)."]) {
+    assert.deepEqual(options(parse(reply([task({ review: link })]), delegation)), [], link);
+    assert.deepEqual(options(parse(reply([project({ title: link })]))), [], link);
   }
 });
 
-test("user-mentioned companies are not evidence for their engineering decisions", () => {
-  const d: Decision = { zone, request: "how Netflix uses sorting, and what Acme adopted", lang: "python", paths: ["netflix.py"] };
-  assert.equal(screen("netflix sorts all live events this way.", d, sorting), "");
-  assert.equal(screen("acme adopted stable sorting for its architecture.", d, sorting), "");
-  assert.equal(screen("since postgres already orders rows, sorting is cheap.", { ...d, request: "we use postgres" }, sorting), "");
-});
-
-test("unsupported sentences are dropped without losing a supported connection", () => {
-  const output = line("python-sorting", "google discovered this in 2008. ties retain their order here.");
-  assert.match(output!, /ties retain their order here/);
-  assert.doesNotMatch(output!, /google|2008/);
-});
-
-test("claims about what engineers usually do narrow to the sourced mechanism", () => {
-  const floats = byId("python-floats")!;
-  const money: Decision = { zone, request: "is cents-everywhere how engineers usually handle money?", lang: "python", paths: ["money.py"] };
-  const say = (anchor: string | null, text: string) => compose(JSON.stringify({ anchor, say: text }), money, [floats]);
+test("unsupported specifics are cut from card text, and a card whose required words don't survive is dropped", () => {
   for (const claim of [
-    "yeah, integer cents or decimal are the two usual routes - same reason.",
-    "most teams keep money as integer cents.",
-    "engineers typically reach for decimal here.",
-    "integer cents is the industry standard for money.",
-    "storing cents is best practice.",
-    "cents is pretty much the norm, and it's common for payment code.",
+    "Guido invented this in 2002.",
+    "It made sorting 3x faster.",
+    "Ninety percent of teams do this.",
+    "My team used this in production.",
+    'A founder called this "move fast".',
+    "See https://unverified.example.invalid for proof.",
+    "Read [the guide](https://example.invalid).",
   ]) {
-    assert.equal(say("python-floats", claim), null, claim);
-    assert.equal(say(null, claim), null, claim);
+    assert.deepEqual(options(parse(reply([project({ tradeoff: claim })]))), [], claim);
   }
-  const local = "here '12.50' becomes 1250 at load, so the report's totals add up exactly.";
-  assert.equal(say("python-floats", local), `${floats.claim} ${local}\nsource: ${floats.url}`);
-  assert.equal(say(null, local), local);
+  const kept = options(parse(reply([project({ tradeoff: "Google discovered this in 2008. Ties need a rule before the board is fair." })])));
+  assert.equal(kept[0]!.tradeoff, "Ties need a rule before the board is fair.");
+  const q = parse(reply([], { questions: [
+    { text: "Is this the format at https://example.invalid?", changesPlan: "It changes the parser." },
+    { text: "Do ties share a rank?", changesPlan: "" },
+  ] }));
+  assert.deepEqual(q!.questions, []);
 });
 
-test("a convention the selected anchor itself verifies is not screened as a broad claim", () => {
+test("claims about what everyone does are cut unless the chosen anchor's own words say it", () => {
+  for (const claim of [
+    "Integer cents or decimal are the two usual routes.",
+    "Most teams keep money as integer cents.",
+    "Engineers typically reach for decimal here.",
+    "Integer cents is the industry standard for money.",
+    "Storing cents is best practice.",
+  ]) {
+    assert.deepEqual(options(parse(reply([project({ tradeoff: claim })]))), [], claim);
+  }
   const errors = byId("go-errors")!;
-  const d: Decision = { zone, request: "should load return an error or panic on a bad row?", lang: "go" };
-  const output = compose(JSON.stringify({ anchor: "go-errors", say: "conventionally returning one here lets load report the bad row." }), d, [errors]);
-  assert.match(output!, /lets load report the bad row/);
-  assert.match(output!, /source: https:\/\//);
+  const go: DecisionInput = { ...alignment, language: "go", candidates: [] };
+  const out = parse(reply([project({ builds: [], anchor: "go-errors", tradeoff: "Conventionally returning one here lets load report the bad row." })]), go, [errors]);
+  assert.match(options(out)[0]!.tradeoff as string, /^Conventionally returning one here lets load report the bad row\. Source: /);
 });
 
-test("language scope excludes unrelated product anchors", () => {
-  const offered = candidates({ request: "sort the leaderboard", skills: ["sorting with keys"], lang: "py" });
-  assert.ok(offered.some((a) => a.id === "python-sorting"));
-  assert.ok(offered.every((a) => a.id !== "js-array-sort"));
-  assert.ok(candidates({ request: "sort the leaderboard", paths: ["scores.rs"] }).every((a) => a.id !== "python-sorting"));
-  assert.deepEqual(candidates({ request: "rename this function" }), []);
-});
-
-test("without an anchor unsupported history is silence, not a confident generic fallback", () => {
-  assert.equal(line(null, "back when i worked at google we shipped this."), null);
-  assert.equal(line(null, "this changed in 2019."), null);
-  assert.equal(compose("not valid json", moment, [git]), null);
-});
-
-test("a decision's prompt carries the zone as background, and the call goes to the chosen helper in the zone's runtime", async () => {
-  const text = prompt(moment, [sorting]);
-  assert.match(text, /ZONE BACKGROUND/);
-  assert.match(text, /club leaderboard/);
-  assert.match(text, /- python-sorting: /);
-  const h = helper([JSON.stringify({ anchor: "python-sorting", say: "ties keep their earlier order here." })]);
-  const out = await decision(moment, { agent: h.agent, cwd: "/h/zones/z/runtime", binding });
-  assert.match(out!, /ties keep their earlier order here[\s\S]*source: https:\/\/docs\.python\.org/);
-  assert.equal(h.opened[0]!.zone, zone);
-  assert.equal(h.opened[0]!.cwd, "/h/zones/z/runtime");
-  assert.equal(h.opened[0]!.binding, binding);
-  assert.equal(h.opened[0]!.selector.model, "helper-model");
-  assert.deepEqual(h.opened[0]!.actions, []);
-  assert.match(h.turns[0]!.text, /ZONE BACKGROUND/);
-});
-
-test("the Wizard stays silent while they build a suggested project, and a failed call is quiet", async () => {
-  const h = helper([]);
-  assert.equal(await decision({ ...moment, practice: true }, { agent: h.agent, cwd: "/tmp", binding }), null);
-  assert.equal(h.opened.length, 0, "no call is made at all");
-  assert.equal(screen("the answer is a tuple key.", { ...moment, practice: true }, sorting), "");
-  assert.equal(screen("just write `sorted(rows, key=lambda r: (-r.score, r.name))`.", { ...moment, practice: true }, sorting), "");
-  const failing = helper([new Error("signed out")]);
-  assert.equal(await decision(moment, { agent: failing.agent, cwd: "/tmp", binding }), null);
-});
-
-test("a sourced consequential improvement can speak without inventing an error", () => {
-  const d: Decision = {
-    zone,
-    request: "saved leaderboard changes",
-    paths: ["scores.py"],
-    changes: "+ ordered = sorted(scores, key=lambda row: row.score)\n+ scores = ordered",
+test("organizations need the chosen anchor or the user's own words; context and candidates don't vouch for them", () => {
+  const mentioned: DecisionInput = {
+    ...alignment,
+    context: [{ ...note, excerpt: "Netflix sorts its rows this way, and we use Postgres." }],
+    candidates: [...alignment.candidates, { name: "docker basics", lang: "" }],
   };
-  const output = compose(JSON.stringify({
-    anchor: sorting.id,
-    say: "sorting scores in place here avoids a second list if nothing needs the previous order.",
-  }), d, [sorting]);
-  assert.match(output!, /if nothing needs the previous order/);
-  assert.match(output!, /source: https:\/\/docs\.python\.org/);
-  assert.equal(compose(JSON.stringify({ anchor: sorting.id, say: "sorting scores in place avoids a second list." }), { ...d, practice: true }, [sorting]), null);
+  for (const claim of [
+    "Netflix sorts all live events this way.",
+    "Acme adopted stable sorting for its architecture.",
+    "Since postgres already orders rows, sorting is cheap.",
+    "Package the board as a Docker image first.",
+  ]) {
+    assert.deepEqual(options(parse(reply([project({ contextIds: [], tradeoff: claim })]), mentioned)), [], claim);
+  }
+  const docker = "Package the board as a Docker image first.";
+  const goal: DecisionInput = { ...alignment, goal: "Learn Docker by shipping our club leaderboard" };
+  assert.equal(options(parse(reply([project({ tradeoff: docker })]), goal))[0]!.tradeoff, docker);
+  const outcome: DecisionInput = { ...delegation, outcome: "Run the leaderboard in docker on the club server" };
+  assert.equal(options(parse(reply([task({ tradeoff: docker })]), outcome))[0]!.tradeoff, docker);
+  const answered: DecisionInput = { ...alignment, answers: [{ question: "Where will it run?", answer: "In Docker on the club server." }] };
+  assert.equal(options(parse(reply([project({ tradeoff: docker })]), answered))[0]!.tradeoff, docker);
+  // An unexplained capitalized name is an outside name; the anchor's or the user's own terms are not.
+  assert.deepEqual(options(parse(reply([project({ tradeoff: "Ties matter, as Raymond showed." })]))), []);
+  const named = options(parse(reply([project({ anchor: "python-sorting", tradeoff: "Ties keep their order because Python sorts are stable." })])));
+  assert.match(named[0]!.tradeoff as string, /^Ties keep their order because Python sorts are stable\. Source: /);
+  const own = options(parse(reply([project({ title: "Rank the club in Python" })])));
+  assert.equal(own[0]!.title, "Rank the club in Python");
+});
+
+test("an unknown or unoffered anchor rejects the option; a model-written URL never passes", () => {
+  const git = byId("git-diff")!;
+  assert.deepEqual(options(parse(reply([project({ anchor: "invented-team-history" })]))), []);
+  assert.deepEqual(options(parse(reply([project({ anchor: git.id })]))), [], "a real catalog id that wasn't offered");
+  assert.deepEqual(options(parse(reply([project({ anchor: 7 })]))), []);
+  const out = options(parse(reply([project({ anchor: "python-sorting", url: "https://evil.invalid", tradeoff: "See www.evil.invalid. Ties need a rule." })])));
+  assert.equal(out[0]!.tradeoff, `Ties need a rule. Source: ${sorting.claim} (${sorting.url})`);
+  assert.equal("url" in out[0]!, false);
+});
+
+test("context ids the input didn't supply, or skills outside the candidates, reject the option", () => {
+  assert.deepEqual(options(parse(reply([project({ contextIds: [randomUUID()] })]))), []);
+  assert.deepEqual(options(parse(reply([project({ contextIds: [look.id, "not-an-id"] })]))), []);
+  assert.deepEqual(options(parse(reply([project({ builds: [{ name: "Async IO", lang: "python" }] })]))), []);
+  assert.deepEqual(options(parse(reply([project({ builds: [{ name: "sorting with keys", lang: "rust" }] })]))), []);
+  assert.deepEqual(options(parse(reply([task({ skills: [{ name: "regex", lang: "python" }] })]), delegation)), []);
+  // Duplicates collapse to one canonical ref and one id.
+  const dup = options(parse(reply([project({
+    builds: [{ name: "sorting with keys", lang: "python" }, { name: "Sorting With Keys", lang: "python" }], contextIds: [look.id, look.id],
+  })])));
+  assert.deepEqual(dup[0]!.builds, [{ name: "sorting with keys", lang: "python" }]);
+  assert.deepEqual(dup[0]!.contextIds, [look.id]);
+});
+
+test("cards stay within bounds: two questions, three options, clipped title and text", () => {
+  const q = { text: "Do ties share a rank?", changesPlan: "Shared ranks change the first project." };
+  const long = "Ties need a rule before the board is fair. ".repeat(80);
+  const out = parse(reply([1, 2, 3, 4, 5].map(() => project({ title: `Rank${" the club by score".repeat(20)}`, tradeoff: long, anchor: "python-sorting" })), {
+    questions: [q, q, q, q],
+  }));
+  assert.equal(out!.questions.length, 2);
+  assert.equal(options(out).length, 3);
+  const ids = new Set(options(out).map((o) => o.id));
+  assert.equal(ids.size, 3);
+  for (const o of options(out)) {
+    assert.ok((o.title as string).length <= 160);
+    const t = o.tradeoff as string;
+    assert.ok(Buffer.byteLength(t) <= 2048);
+    assert.ok(t.endsWith(`(${sorting.url})`), "the source survives clipping");
+  }
+  const needs = options(parse(reply([task({ needs: "Which column holds the bonus? ".repeat(40) })]), delegation));
+  assert.ok(Buffer.byteLength(needs[0]!.needs as string) <= 512);
+});
+
+test("zero surviving options is a valid result", () => {
+  const out = parse(reply([project({ anchor: "nope" })]));
+  assert.equal(out!.moment, "alignment");
+  assert.deepEqual(out!.options, []);
+});
+
+test("an unreadable reply or an empty reflection throws; nothing is fabricated", async () => {
+  assert.equal(parse("not valid json"), null);
+  assert.equal(parse("[1, 2]"), null);
+  assert.equal(parse(reply([project()], { reflection: "Back when I worked at Google we shipped this in 2019." })), null);
+  for (const raw of ["no json here", reply([project()], { reflection: "" })]) {
+    const h = helper([raw]);
+    await assert.rejects(help(alignment, { agent: h.agent, cwd: "/tmp", signal: new AbortController().signal }), /^Error: decision help came back unreadable$/);
+  }
+});
+
+test("a backend failure propagates as an error, and an invalid input never reaches the model", async () => {
+  const failing = helper([new Error("signed out")]);
+  await assert.rejects(help(delegation, { agent: failing.agent, cwd: "/tmp", signal: new AbortController().signal }), /signed out/);
+  const none = createRegistry([], new Set());
+  await assert.rejects(help(alignment, { agent: none, cwd: "/tmp", signal: new AbortController().signal }));
+  const h = helper([reply([project()])]);
+  await assert.rejects(help({ ...alignment, outcome: "Import the CSV" }, { agent: h.agent, cwd: "/tmp", signal: new AbortController().signal }));
+  await assert.rejects(help({ ...alignment, context: [{ ...note, id: "model-made" }] }, { agent: h.agent, cwd: "/tmp", signal: new AbortController().signal }));
+  assert.equal(h.opened.length, 0);
+});
+
+test("the anchors offered come from the goal, outcome and candidates, scoped to the language", async () => {
+  assert.ok(candidates({ request: alignment.goal, skills: ["sorting with keys"], lang: "python" }).some((a) => a.id === "python-sorting"));
+  const h = helper([reply([project({ builds: [], anchor: "python-sorting" })])]);
+  const rust: DecisionInput = { ...alignment, language: "rust", candidates: [{ name: "sorting with keys", lang: "rust" }] };
+  const out = await help(rust, { agent: h.agent, cwd: "/tmp", signal: new AbortController().signal });
+  assert.deepEqual(out.options, [], "a python anchor isn't offered for a rust goal");
+  assert.ok(!h.turns[0]!.text.includes("python-sorting"));
 });

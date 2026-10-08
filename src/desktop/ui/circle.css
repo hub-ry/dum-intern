@@ -1,0 +1,114 @@
+/* The persistent circle: a blackish 56 DIP disk centered in its transparent 64 DIP window, Dum's
+   face inside, and one non-color indicator per state. Scoped to the circle page only. */
+
+html[data-view="circle"],
+html[data-view="circle"] body {
+  margin: 0;
+  padding: 0;
+  width: 64px;
+  height: 64px;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html[data-view="circle"] .circle {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #151419;
+  display: grid;
+  place-items: center;
+  cursor: default;
+  touch-action: none;
+  outline: none;
+}
+
+html[data-view="circle"] .circle .sprite {
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+html[data-view="circle"] .circle:focus-visible {
+  box-shadow: 0 0 0 2px #f1eefb;
+}
+
+/* Indicators sit on the disk's rim; none of them is color only. */
+html[data-view="circle"] .circle-ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  pointer-events: none;
+}
+
+/* Look paused: a static broken ring. */
+html[data-view="circle"] .circle[data-state="idle"][data-paused="true"] .circle-ring {
+  border-color: #8d87a3;
+  border-style: dashed;
+}
+
+/* Looking: a thin dotted ring. */
+html[data-view="circle"] .circle[data-state="looking"] .circle-ring {
+  border-width: 1px;
+  border-style: dotted;
+  border-color: #b9b2d6;
+}
+
+/* Thinking: a solid moving arc. */
+html[data-view="circle"] .circle[data-state="thinking"] .circle-ring {
+  border-top-color: #b9b2d6;
+  animation: circle-spin 1.1s linear infinite;
+}
+
+/* Listening: a microphone-shaped notch at the bottom of the rim. */
+html[data-view="circle"] .circle[data-state="listening"] .circle-ring::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  width: 8px;
+  height: 12px;
+  transform: translateX(-50%);
+  border-radius: 4px 4px 4px 4px;
+  background: #f1eefb;
+  box-shadow: 0 0 0 2px #151419;
+}
+
+/* Needs attention: a persistent "!" badge. */
+html[data-view="circle"] .circle-badge {
+  display: none;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f4c152;
+  color: #151419;
+  font: 700 12px/16px -apple-system, system-ui, sans-serif;
+  text-align: center;
+  pointer-events: none;
+}
+
+html[data-view="circle"] .circle[data-state="attention"] .circle-badge {
+  display: block;
+}
+
+@keyframes circle-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Reduced motion: the first sprite frame (sprites.ts) and static indicators. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-view="circle"] .circle[data-state="thinking"] .circle-ring {
+    animation: none;
+  }
+}

@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Ambient, MAX_NOTE, nearDuplicate, observationPrompt, observe, parseObservation, type AmbientOptions, type LookView } from "../src/ambient.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Ambient, MAX_NOTE, lookCandidates, nearDuplicate, observationPrompt, observe, parseObservation, type AmbientOptions, type AmbientView } from "../src/ambient.ts";
 import { createRegistry } from "../src/agent/registry.ts";
 import { LOOK } from "../src/observe-types.ts";
 import type { AgentBackend, AgentEvent, OpenOptions, Picture, Selector, UserTurn } from "../src/agent/types.ts";
 import type { AmbientInput, AmbientResult, AppSignal, FileSignal, Tick } from "../src/observe-types.ts";
-import type { ZoneContext } from "../src/zone-types.ts";
+import type { SkillRef, ZoneContext } from "../src/zone-types.ts";
+
+// The look reads the skill tree for its candidates: an empty, isolated one.
+process.env.DUM_HOME = mkdtempSync(join(tmpdir(), "dum-ambient-"));
+process.env.DUM_CONTEXT = "off";
 
 const ZONE = "11111111-1111-4111-8111-111111111111";
 const EPOCH = "epoch-1";
@@ -30,18 +37,19 @@ function rig(over: Partial<AmbientOptions> & { auto?: boolean } = {}) {
   let captured = 0;
   const calls: Pending[] = [];
   const records: { result: AmbientResult; input: AmbientInput }[] = [];
-  const views: LookView[] = [];
+  const views: AmbientView[] = [];
+  const observed: { result: AmbientResult; at: number }[] = [];
   const frames: number[] = [];
   const notes: string[] = [];
   const state = {
     blocked: false, advised: true,
     pictures: { ok: true, why: "" },
-    reply: { note: "note" } as AmbientResult,
+    reply: { note: "note", topics: [] } as AmbientResult,
   };
   const auto = over.auto ?? true;
   const ambient = new Ambient({
     now: () => now,
-    blocked: () => state.blocked,
+    blocked: () => (state.blocked ? "busy" : null),
     advised: () => state.advised,
     scan: async () => scans.shift() ?? [],
     diff: async (paths) => paths.map((path) => ({ path, diff: `diff of ${path}` })),
@@ -60,6 +68,7 @@ function rig(over: Partial<AmbientOptions> & { auto?: boolean } = {}) {
         calls.push({ input, signal, resolve, reject });
         if (auto) resolve(state.reply);
       }),
+    observed: (result, _input, at) => observed.push({ result, at }),
     notes: () => notes,
     record: async (result, input) => {
       records.push({ result, input });
@@ -79,7 +88,7 @@ function rig(over: Partial<AmbientOptions> & { auto?: boolean } = {}) {
     for (let i = 0; i < n; i++) await tick(t);
   }
   return {
-    ambient, calls, records, views, frames, notes, state, tick, ticks, settle,
+    ambient, calls, records, views, observed, frames, notes, state, tick, ticks, settle,
     statuses: () => views.map((v) => v.status),
     advance: (ms: number) => { now += ms; },
     setFrame: (d: string | null) => { pinned = d; },
@@ -213,7 +222,7 @@ test("screen calls are at least LOOK.tickMs apart, one at a time, and coalesce w
   await r.tick({ app: a, screen: still });
   assert.equal(r.calls.length, 1, "nothing else starts while a call is in flight");
   assert.equal(r.frames.length, 1, "and no frame is taken for it");
-  r.calls[0]!.resolve({ note: "editing main.ts" });
+  r.calls[0]!.resolve({ note: "editing main.ts", topics: [] });
   await r.settle();
   await r.tick({ app: a, screen: still });
   assert.equal(r.calls.length, 2, "the changes made during the call go out as one call");
@@ -262,9 +271,9 @@ test("an identical frame is never sent twice", async () => {
 test("each call is stateless: the previous observation in words, never an earlier frame", async () => {
   const r = rig();
   const a = app("com.editor");
-  r.state.reply = { note: "reading the parser in parse.ts" };
+  r.state.reply = { note: "reading the parser in parse.ts", topics: [] };
   await r.tick({ app: a, screen: moving });
-  r.state.reply = { note: "writing a test for the parser" };
+  r.state.reply = { note: "writing a test for the parser", topics: [] };
   await r.tick({ app: a, screen: moving });
   await r.tick({ app: a, screen: moving });
   const [first, second, third] = r.calls.map((c) => c.input);
@@ -281,17 +290,17 @@ test("each call is stateless: the previous observation in words, never an earlie
 test("a memory note only when the activity changed, at most one a minute", async () => {
   const r = rig();
   const a = app("com.editor");
-  r.state.reply = { note: "editing the tokenizer in lex.ts" };
+  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [] };
   await r.tick({ app: a, screen: moving });
   assert.deepEqual(r.notes, ["editing the tokenizer in lex.ts"]);
-  r.state.reply = { note: "debugging a failing test in parse.test.ts" };
+  r.state.reply = { note: "debugging a failing test in parse.test.ts", topics: [] };
   await r.tick({ app: a, screen: moving });
   assert.equal(r.notes.length, 1, "a new note inside 60 s waits");
   r.advance(LOOK.noteMs);
-  r.state.reply = { note: "still editing the tokenizer in lex.ts" };
+  r.state.reply = { note: "still editing the tokenizer in lex.ts", topics: [] };
   await r.tick({ app: a, screen: moving });
   assert.equal(r.notes.length, 1, "a near-duplicate of a recent note isn't written");
-  r.state.reply = { note: "debugging a failing test in parse.test.ts" };
+  r.state.reply = { note: "debugging a failing test in parse.test.ts", topics: [] };
   await r.tick({ app: a, screen: moving });
   assert.deepEqual(r.notes, ["editing the tokenizer in lex.ts", "debugging a failing test in parse.test.ts"]);
   assert.equal(nearDuplicate("Editing lex.ts!", "editing lex.ts"), true);
@@ -305,7 +314,7 @@ test("typing still counts and coalesces with the screen into one call", async ()
   await r.ticks(2, { app: a, screen: moving });
   await r.ticks(2, { app: a, screen: still });
   assert.equal(r.calls.length, 1, "the first change is in flight");
-  r.calls[0]!.resolve({ note: null });
+  r.calls[0]!.resolve({ note: null, topics: [] });
   await r.settle();
   await r.tick({ app: a, screen: still });
   assert.equal(r.calls.length, 2);
@@ -325,7 +334,7 @@ test("when the look model can't be sent pictures, the status says why and screen
   await r.ticks(2, { app: app("com.b"), screen: still });
   assert.equal(r.calls.length, 1, "an app switch still makes a text-only call");
   assert.equal(r.calls[0]!.input.image, null);
-  assert.deepEqual(r.records[0]!.result, { note: "note" });
+  assert.deepEqual(r.records[0]!.result, { note: "note", topics: [] });
 
   r.state.pictures = { ok: true, why: "" };
   r.advance(LOOK.minMs.any);
@@ -359,7 +368,7 @@ test("a timed-out or failed call frees the slot and counts toward the limits", a
   await r.settle();
   assert.equal(r.calls[0]!.signal.aborted, true);
   assert.equal(r.statuses().at(-1), "failed");
-  r.calls[0]!.resolve({ note: "late" });
+  r.calls[0]!.resolve({ note: "late", topics: [] });
   await r.settle();
   assert.equal(r.records.length, 0, "a late answer is dropped");
 
@@ -380,6 +389,7 @@ test("blocked ticks drop pending triggers", async () => {
   r.state.blocked = true;
   await r.tick({ screen: moving });
   assert.equal(r.statuses().at(-1), "blocked");
+  assert.equal(r.views.at(-1)!.reason, "busy", "a blocked look says why");
   r.state.blocked = false;
   await r.ticks(4);
   assert.equal(r.calls.length, 0, "the save and the screen change before the block were dropped");
@@ -394,13 +404,13 @@ test("blocked ticks drop pending triggers", async () => {
   assert.equal(r.calls.length, 1);
 });
 
-test("with no backend the look says it's unadvised, and never calls or asks for a frame", async () => {
+test("with no backend the look says so, and never calls or asks for a frame", async () => {
   const r = rig();
   r.state.advised = false;
   await r.tick({ app: app("com.a") }, [saved("g/a.ts", "1")]);
   await r.ticks(4, { app: app("com.b"), screen: moving });
   await r.ticks(4, { app: app("com.b"), screen: still });
-  assert.deepEqual(r.statuses(), ["unadvised"]);
+  assert.deepEqual(r.statuses(), ["no-backend"]);
   assert.equal(r.calls.length, 0);
   assert.equal(r.frames.length, 0);
 
@@ -473,8 +483,10 @@ function lookModel(replies: (string | Error)[], images = true) {
   return { agent, opened, turns };
 }
 
-test("a look's prompt carries the zone, what changed, the previous observation and the diffs as data, and asks for no advice", () => {
-  const text = observationPrompt(look({ previous: "reading scores.py", image: { mimeType: "image/png", data: "AAAA" } }));
+const PY: SkillRef[] = [{ name: "lambdas", lang: "python" }, { name: "sorting with keys", lang: "python" }, { name: "lists", lang: "python" }];
+
+test("a look's prompt carries the zone, what changed, the previous observation, the diffs as data and the skills it may name, and asks for no advice", () => {
+  const text = observationPrompt(look({ previous: "reading scores.py", image: { mimeType: "image/png", data: "AAAA" } }), PY);
   assert.match(text, /ZONE BACKGROUND/);
   assert.match(text, /what changed: code/);
   assert.match(text, /previous observation \(data\): "reading scores\.py"/);
@@ -484,33 +496,45 @@ test("a look's prompt carries the zone, what changed, the previous observation a
   assert.doesNotMatch(text, /11111111-2222/, "grant IDs stay out");
   assert.match(text, /screen: a picture of it is attached/);
   assert.match(text, /never advise/);
-  assert.match(text, /\{"note": "<one sentence>" or null\}/);
-  assert.doesNotMatch(text, /anchor|"say"|ASIDE/i, "the look asks for no aside");
-  assert.match(observationPrompt(look()), /screen: no picture/);
+  assert.match(text, /THE SKILLS YOU MAY NAME\n[\s\S]*sorting with keys \(python\)/);
+  assert.doesNotMatch(text, /anchor|"say"|ASIDE|wizard/i, "the look asks for no aside");
+  assert.match(observationPrompt(look(), PY), /screen: no picture/);
+  assert.ok(lookCandidates(look()).some((s) => s.name === "lambdas" && s.lang === "python"), "the zone's language is on offer");
 });
 
-test("a look's reply is a bounded note or nothing, and anything else is unreadable", () => {
-  const read = (v: unknown) => parseObservation(JSON.stringify(v));
-  assert.deepEqual(read({ note: null }), { note: null });
-  assert.deepEqual(read({ note: "  sorting the  leaderboard \u2014 by score " }), { note: "sorting the leaderboard - by score" });
+test("a look's reply is a bounded note or nothing plus checked topics, and anything else is unreadable", () => {
+  const read = (v: unknown) => parseObservation(JSON.stringify(v), PY);
+  assert.deepEqual(read({ note: null }), { note: null, topics: [] });
+  assert.deepEqual(read({ note: "  sorting the  leaderboard \u2014 by score " }), { note: "sorting the leaderboard - by score", topics: [] });
   const long = read({ note: "word ".repeat(200) })!.note!;
   assert.ok(long.length <= MAX_NOTE && long.endsWith("…"));
-  assert.deepEqual(read({ note: "see https://example.invalid" }), { note: null });
-  assert.deepEqual(read({ note: "x\n```py\nx = 1\n```" }), { note: null });
-  assert.deepEqual(read({ note: "editing", anchor: "python-sorting", say: "ties keep their order" }), { note: "editing" }, "an aside in the reply is ignored");
-  assert.equal(parseObservation("not json"), null);
+  assert.deepEqual(read({ note: "see https://example.invalid" }), { note: null, topics: [] });
+  assert.deepEqual(read({ note: "x\n```py\nx = 1\n```" }), { note: null, topics: [] });
+  assert.deepEqual(read({ note: "editing", anchor: "python-sorting", say: "ties keep their order" }), { note: "editing", topics: [] }, "an aside in the reply is ignored");
+  const topics = read({
+    note: null,
+    topics: [
+      { topic: "sort key", skill: { name: "Sorting With Keys", lang: "python" }, confidence: 0.9, reason: "sorted(..., key=lambda)" },
+      { topic: "a cooking tab", skill: { name: "recipes", lang: "python" }, confidence: 0.95, reason: "browser tab" },
+      { topic: "lists maybe", skill: { name: "lists", lang: "python" }, confidence: 0.5, reason: "a guess" },
+    ],
+  })!.topics;
+  assert.deepEqual(topics.map((t) => t.skill), [{ name: "sorting with keys", lang: "python" }, null, null], "only offered, confident skills map; the rest stay unmapped topics");
+  assert.deepEqual(topics.map((t) => t.topic), ["sort key", "a cooking tab", "lists maybe"]);
+  assert.equal(parseObservation("not json", PY), null);
   assert.equal(read({ note: 7 }), null);
   assert.equal(read({ say: "hi" }), null);
 });
 
 test("observe makes one call on the look model with the one frame, and fails loudly rather than quietly", async () => {
   const frame: Picture = { mimeType: "image/png", data: "iVBORw0KGgo=" };
-  const m = lookModel([JSON.stringify({ note: "reading scores.py in Code" })]);
+  const m = lookModel([JSON.stringify({ note: "reading scores.py in Code", topics: [{ topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" }] })]);
   const result = await observe(look({ image: frame, triggers: ["screen"] }), { agent: m.agent, cwd: "/h/zones/z/runtime", signal: new AbortController().signal });
-  assert.deepEqual(result, { note: "reading scores.py in Code" });
+  assert.deepEqual(result, { note: "reading scores.py in Code", topics: [{ topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" }] });
   assert.equal(m.opened.length, 1);
   assert.deepEqual(m.opened[0]!.selector, { backend: "claude", model: "haiku", effort: "low" }, "the look role's model, not the helper's");
   assert.deepEqual(m.opened[0]!.actions, []);
+  assert.equal("zone" in m.opened[0]! || "binding" in m.opened[0]!, false, "the backend gets transport options only");
   assert.deepEqual(m.turns[0]!.images, [frame]);
   const signal = new AbortController().signal;
   await assert.rejects(observe(look(), { agent: lookModel(["no idea"]).agent, cwd: "/tmp", signal }), /unreadable/);
@@ -518,4 +542,41 @@ test("observe makes one call on the look model with the one frame, and fails lou
   const moved = lookModel([], false);
   await assert.rejects(observe(look({ image: frame }), { agent: moved.agent, cwd: "/tmp", signal }), /haiku changed to claude-new, which isn't verified for pictures yet/);
   assert.equal(moved.opened.length, 0, "no picture went anywhere");
+});
+
+test("every successful look reaches the trail hook before the note throttle, null and repeated notes included", async () => {
+  const r = rig();
+  const a = app("com.editor");
+  const hint = { topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" };
+  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [] };
+  await r.tick({ app: a, screen: moving });
+  r.state.reply = { note: null, topics: [hint] };
+  await r.tick({ app: a, screen: moving });
+  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [hint] };
+  await r.tick({ app: a, screen: moving });
+  assert.equal(r.notes.length, 1, "the throttle still keeps memory to one note a minute");
+  assert.equal(r.observed.length, 3, "every look was reported, including the null and the throttled one");
+  assert.deepEqual(r.observed[1]!.result.topics, [hint]);
+  assert.ok(r.views.at(-1)!.lastSuccess !== null && r.views.at(-1)!.lastAttempt !== null);
+});
+
+test("forget drops the latest observation, so it never feeds the next look", async () => {
+  const r = rig();
+  const a = app("com.editor");
+  r.state.reply = { note: "reading secrets.env", topics: [] };
+  await r.tick({ app: a, screen: moving });
+  assert.equal(r.views.at(-1)!.seen, "reading secrets.env");
+  r.ambient.forget();
+  assert.equal(r.views.at(-1)!.seen, null);
+  await r.tick({ app: a, screen: moving });
+  assert.equal(r.calls.at(-1)!.input.previous, null);
+});
+
+test("a timed-out look says so", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const r = rig({ auto: false });
+  await r.tick({ app: app("com.editor"), screen: moving });
+  t.mock.timers.tick(LOOK.checkMs);
+  await r.settle();
+  assert.deepEqual([r.views.at(-1)!.status, r.views.at(-1)!.reason], ["failed", "timeout"]);
 });

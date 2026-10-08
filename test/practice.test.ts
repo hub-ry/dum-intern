@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { Practice, active, checkedProject, parseSubmit, parseTarget, toProject, MAX_PROJECTS, type LearningTarget } from "../src/practice.ts";
+import { Practice, checkedProject, parseSubmit, parseTarget, toProject, MAX_PROJECTS, type LearningTarget } from "../src/practice.ts";
 import { Evidence } from "../src/evidence.ts";
 import { Store, Cancelled } from "../src/store.ts";
 import { createRegistry } from "../src/agent/registry.ts";
@@ -67,10 +67,9 @@ function setup(built: string[], o: { reply?: Reply; audit?: Reply; zone?: Partia
   const files = new Shared();
   const prompts: string[] = [];
   const calls: Opts[] = [];
-  const binding = { zoneId: id, zoneEpoch: "epoch1", inputToken: "token1", requestId: "request1" };
   const reply = o.reply ?? (() => assert.fail("no model call expected"));
   const audit = o.audit ?? (() => assert.fail("no audit expected"));
-  const practice = new Practice(zone, store, files, evidence, o.personal ?? NONE, createRegistry([], new Set()), binding, async (prompt, opts) => {
+  const practice = new Practice(zone, store, files, evidence, o.personal ?? NONE, createRegistry([], new Set()), async (prompt, opts) => {
     prompts.push(prompt);
     calls.push(opts);
     return /^You check suggested projects/.test(prompt) ? audit(prompt) : reply(prompt);
@@ -132,8 +131,7 @@ test("a skill request yields only projects that make that skill a learning targe
     for (const name of ["for loops", "conditionals", "variables", "printing"]) assert.equal(level(name, "go"), null, "a suggestion never unlocks");
     assert.equal(curriculum.mapped("for loops", "go"), undefined);
     assert.match(s.calls[0]!.cwd, new RegExp(`/zones/${s.zone.id}/runtime$`));
-    assert.equal(s.calls[0]!.zone, s.zone);
-    assert.equal(s.calls[0]!.binding.requestId, "request1");
+    assert.equal(s.calls[0]!.role, "helper");
   } finally {
     s.done();
   }
@@ -306,14 +304,13 @@ test("a skill taken back while the model works isn't leaned on by anything saved
   }
 });
 
-test("a broken practice file is reported, not replaced, and keeps the Wizard quiet", async () => {
+test("a broken practice file is reported, not replaced", async () => {
   const s = setup(BASICS);
   try {
     mkdirSync(`${s.home}/zones/${s.zone.id}`, { recursive: true });
     writeFileSync(s.file, "{nope");
     await assert.rejects(s.practice.suggest("new"), /isn't valid JSON/);
     assert.equal(readFileSync(s.file, "utf8"), "{nope");
-    assert.equal(active(s.home, s.zone.id), true);
   } finally {
     s.done();
   }
@@ -325,19 +322,19 @@ test("starting a project marks it as being built until it's stopped or every tar
     : projects(project()), audit: () => audits(check(project())) });
   try {
     await s.practice.suggest("new");
-    assert.equal(active(s.home, s.zone.id), false, "a suggestion alone isn't being built");
+    assert.equal(s.saved().active, null, "a suggestion alone isn't being built");
     assert.match(await s.practice.suggest("start p9"), /no saved project p9/);
     assert.match(await s.practice.suggest("start p1"), /^building p1/);
-    assert.equal(active(s.home, s.zone.id), true);
+    assert.equal(s.saved().active, "p1");
     assert.match(s.practice.describe(), /p1  ▶ .*building now/);
     assert.match(await s.practice.suggest("stop"), /stopped building p1/);
-    assert.equal(active(s.home, s.zone.id), false);
+    assert.equal(s.saved().active, null);
     assert.match(await s.practice.suggest("stop"), /aren't building/);
     await s.practice.suggest("start p1");
     s.files.add("main.go", 'package main\nimport "fmt"\nfunc main() { player := "Ada"; fmt.Println(player) }\n');
     assert.match(await s.practice.submit("p1 main.go --unaided"), /2\/2 targets passed review; 2 recorded/);
     assert.equal(s.saved().projects[0].state, "passed");
-    assert.equal(active(s.home, s.zone.id), false, "a finished project isn't being built");
+    assert.equal(s.saved().active, null, "a finished project isn't being built");
     assert.match(await s.practice.suggest("start p1"), /already built/);
   } finally {
     s.done();

@@ -18,6 +18,10 @@ type State = Extract<HostEvent, { type: "state" }>;
 type Reply = Extract<HostEvent, { type: "reply" }>;
 
 const PERSONAL = { path: "", text: "", warning: "" };
+const MAIN = {
+  version: "0.0.0-test", platform: "linux", backends: [], screenPermission: "not-required", lookPaused: false,
+  voice: { supported: false, available: false, bridge: false }, shortcuts: { open: null, voice: null, sendDraft: null },
+};
 const CLAUDE: AgentChoice = {
   backend: "claude", login: "anthropic-key",
   intern: { backend: "claude", model: "opus", effort: "high" },
@@ -97,7 +101,7 @@ class Host {
   }
 
   initialize(home: string): Promise<Reply> {
-    return this.call({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: DEFAULT_PREFERENCES });
+    return this.call({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: DEFAULT_PREFERENCES, main: MAIN });
   }
 }
 
@@ -120,29 +124,42 @@ test("the real host takes only strict requests, holds H for one writer, and reop
     assert.match(early.error!, /isn't set up/);
 
     // Malformed, foreign-epoch, legacy and unknown-login requests get no reply at all.
-    first.send({ op: "panel", panel: "tree", extra: true }, "extra-field");
-    first.send({ op: "panel", panel: "tree" }, "foreign", randomUUID());
+    first.send({ op: "view", view: "tree", extra: true }, "extra-field");
+    first.send({ op: "view", view: "tree" }, "foreign", randomUUID());
+    first.send({ op: "panel", panel: "tree" }, "legacy-panel");
     first.send({ op: "open", root: dir, personal: PERSONAL }, "legacy-open");
-    first.send({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent: SUBSCRIPTION } }, "init-subscription");
+    first.send({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent: SUBSCRIPTION }, main: MAIN }, "init-subscription");
+    first.send({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: DEFAULT_PREFERENCES }, "init-no-main");
     assert.equal((await first.initialize(home)).ok, true);
     first.send({ op: "agent-select", choice: SUBSCRIPTION }, "select-subscription");
     const again = await first.initialize(home);
     assert.equal(again.ok, false);
 
     // The tree and settings need no zone and no backend; this build has neither Claude nor a released ChatGPT.
-    await first.ok({ op: "panel", panel: "tree" });
+    await first.ok({ op: "view", view: "tree" });
     assert.notEqual((await first.until((s) => s.tree !== null)).tree, null);
     await first.ok({ op: "settings", settings: { ...DEFAULT_PREFERENCES, personalContext: true } });
     const noClaude = await first.call({ op: "agent-select", choice: CLAUDE });
     assert.equal(noClaude.ok, false);
     assert.match(noClaude.error!, /isn't available/);
-    for (const id of ["extra-field", "foreign", "legacy-open", "init-subscription", "select-subscription"]) {
+    for (const id of ["extra-field", "foreign", "legacy-panel", "legacy-open", "init-subscription", "init-no-main", "select-subscription"]) {
       assert.equal(first.events.some((e) => e.type === "reply" && e.id === id), false, id);
     }
 
-    const zone = (await first.ok({ op: "zone-create", zone: { name: "Rust", goal: "learn ownership", parentId: null, language: "rust", focusSkills: [] }, enter: true })).zone!;
-    const opened = await first.until((s) => s.activeZone?.id === zone.id && s.state?.prompt?.type === "next");
+    const created = await first.ok({ op: "zone-create", zone: { name: "Rust", goal: "learn ownership", parentId: null, language: "rust", focusSkills: [] }, enter: true });
+    const zone = created.zone!;
+    // Goal-start alignment begins for the new zone, locally; nothing calls a model and nothing is agreed.
+    assert.equal(created.direction!.zoneId, zone.id);
+    assert.equal(created.direction!.current, null);
+    assert.equal(created.direction!.attempt!.phase, "reflect");
+    const opened = await first.until((s) => s.activeZone?.id === zone.id && s.state?.prompt?.type === "next" && s.session !== null);
     assert.ok(opened.zoneEpoch);
+    assert.equal(opened.look.status, "no-backend");
+    // With no backend, starting alignment keeps a pending attempt that waits for setup, never a fabricated agreement.
+    const waiting = (await first.ok({ op: "alignment-step", binding: created.direction!.binding, action: "start" })).direction!;
+    assert.equal(waiting.status, "needs-backend");
+    assert.equal(waiting.current, null);
+    const firstSession = opened.session!.id;
     const binding = { zoneId: zone.id, zoneEpoch: opened.zoneEpoch, inputToken: opened.inputToken, requestId: randomUUID() };
     const noAgent = await first.call({ op: "send", binding, text: "explain borrowing", shares: [] });
     assert.equal(noAgent.ok, false);
@@ -165,9 +182,15 @@ test("the real host takes only strict requests, holds H for one writer, and reop
     assert.equal(existsSync(join(home, "session.lock")), false);
 
     assert.equal((await second.initialize(home)).ok, true);
-    const restored = await second.until((s) => s.activeZone?.id === zone.id && s.state?.prompt?.type === "next");
+    const restored = await second.until((s) => s.activeZone?.id === zone.id && s.state?.prompt?.type === "next" && s.session !== null);
     assert.ok(restored.state!.transcript.some((e) => e.kind === "note" && e.text.includes("integer cents")));
     assert.notEqual(restored.zoneEpoch, opened.zoneEpoch);
+    // The goal-start attempt survived the restart; the old session was closed and a fresh one started.
+    assert.equal((await second.ok({ op: "alignment-read", zoneId: zone.id })).direction!.status, "needs-backend");
+    assert.notEqual(restored.session!.id, firstSession);
+    const earlier = (await second.ok({ op: "trail-read", zoneId: zone.id, sessionId: firstSession, cursor: null })).trail!;
+    assert.notEqual(earlier.session.endedAt, null);
+    assert.equal(earlier.session.endReason, "quit");
     const stale = await second.call({ op: "command", name: "remember", argument: "from the old epoch", binding });
     assert.equal(stale.ok, false);
     await second.ok({ op: "close" });

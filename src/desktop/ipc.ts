@@ -1,17 +1,20 @@
 // The whole renderer-to-main surface: a check that a request came from Dum's own page, and the
-// router that validates it with protocol.ts's RequestSchema and applies it to the host, captures,
-// drafts, settings, agent setup, voice and a small native port. No Electron here, so tests drive it.
+// router that authorizes it with protocol.ts's `parseRequest` and applies it to the host, captures,
+// drafts, settings, agent setup, voice, diagnostics and a small native port. No Electron here, so
+// tests drive it.
 //
 // Main issues the binding every conversation request carries: zoneEpoch and inputToken from the
 // host's state, and a requestId of its own. While a request runs, the binding names that request
 // (nested answers and shares belong to it); otherwise it names the next request, fresh after each
-// Send and each zone epoch.
+// Send, Do this or decision turn, and each zone epoch. Alignment uses its own per-zone binding and
+// debug chat its own; neither ever carries the active zone's grants.
 
 import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { DesktopPreferencesSchema, RequestSchema } from "./protocol.ts";
+import { DesktopPreferencesSchema, parseRequest } from "./protocol.ts";
+import { DIAGNOSTIC_LIMITS } from "../diagnostic-types.ts";
 import { sameBinding, type Drafts } from "./draft.ts";
 import { BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
 import type { AgentSetup } from "./agent-setup.ts";
@@ -19,18 +22,19 @@ import type { Captures } from "./capture.ts";
 import type { DictationHelper } from "./dictation.ts";
 import type { HostController, HostView } from "./host-client.ts";
 import type { DesktopSettings } from "./settings.ts";
+import type { Context } from "../context.ts";
 import type { LoginUi } from "../agent/types.ts";
-import type { InputBinding, RequestBinding } from "../share-types.ts";
+import type { ContextUseView } from "../delegation-types.ts";
+import type { DebugView, DiagnosticCode, DiagnosticOutcome, MainStatus, SanitizedMainEvent } from "../diagnostic-types.ts";
+import type { HostLookStatus, ScreenPermission } from "../observe-types.ts";
+import type { InputBinding, RequestBinding, ShareGrant } from "../share-types.ts";
+import type { SharedImage } from "../store-types.ts";
 import type { ZoneId, ZoneRegistry } from "../zone-types.ts";
 import type { VoiceEvent, VoiceState } from "./native-protocol.ts";
-import type { CapturePreview, CaptureSource, DesktopPreferences, Panel, Reply, Request, Snapshot, ZoneCreate } from "./protocol.ts";
-import type { ModelOption } from "../agent/types.ts";
-
-/**
- * Who sent a request: one of Dum's windows, or main's own tray menu. The bubble has no invoke at
- * all; a request from it is refused here too.
- */
-export type Role = "panel" | "command" | "bubble" | "tray";
+import type {
+  CircleDisplays, CircleReason, CircleReply, CircleRequest, CircleState, CircleView, DesktopPreferences, DraftState, PersonalView, Reply,
+  Request, Role, Snapshot, ViewName, ZoneCreate,
+} from "./protocol.ts";
 
 /** A frame's URL is Dum's own UI page: the same file, any query (the view), nothing else. */
 export function ownedPage(url: string, index: string): boolean {
@@ -45,9 +49,14 @@ export function ownedPage(url: string, index: string): boolean {
 
 /** The host operations main routes; HostController fits. */
 export type Host = Pick<HostController,
-  | "view" | "running" | "createZone" | "openZone" | "updateZone" | "zoneContext" | "deleteZone" | "settings" | "agentSelect"
-  | "agentModels" | "send" | "respond" | "command" | "panel" | "shareAdd" | "shareRemove" | "followAdd" | "followRemove"
-  | "changeRevert" | "skillEdit" | "treeSync" | "openRecord" | "interrupt">;
+  | "view" | "debug" | "running" | "createZone" | "openZone" | "updateZone" | "zoneContext" | "deleteZone" | "settings" | "agentSelect"
+  | "agentModels" | "send" | "respond" | "command" | "selectView" | "shareAdd" | "shareRemove" | "followAdd" | "followRemove"
+  | "changeRevert" | "skillEdit" | "treeSync" | "openRecord" | "openPersonal" | "interrupt"
+  | "alignmentRead" | "alignmentStep" | "alignmentAccept" | "directionRead"
+  | "decisionHelp" | "decisionDismiss" | "selectHandoff" | "editHandoff" | "dismissHandoff" | "runHandoff" | "readHandoff" | "reviewHandoff"
+  | "contextUseRead" | "contextReload" | "contextIgnoreObservation"
+  | "newSession" | "trailRead" | "trailSource" | "trailMap" | "storyRead"
+  | "debugOpen" | "debugSend" | "debugStop" | "debugReset" | "diagnosticMain">;
 
 /** Operating-system actions main performs for the router. Every argument comes from main, never the renderer. */
 export type Native = {
@@ -58,14 +67,30 @@ export type Native = {
   openPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   openScreenSettings(): Promise<void>;
-  screenPermission(): string;
+  screenPermission(): ScreenPermission;
   /** Apply global shortcuts and the login item; throws (having changed nothing) when one can't be applied. */
   apply(next: DesktopPreferences, previous: DesktopPreferences): void;
   hotkeyError(): string;
-  showSurface(surface: "panel" | "command"): Promise<void>;
-  /** Show the panel window on one pane (a same-document hash change). */
-  openPane(panel: Panel): void;
-  dismissSurface(surface: "panel" | "command"): Promise<void>;
+  /** Each global shortcut's registration problem by category; null when it is registered. */
+  shortcuts(): MainStatus["shortcuts"];
+  /** Capture the external app, place beside the circle, show and focus the composer. */
+  showWindow(): Promise<void>;
+  /** Hide and FocusReturn.dismiss() once. */
+  dismissWindow(): Promise<void>;
+  windowVisible(): boolean;
+  /** Show the working window on one in-window view. */
+  openView(view: ViewName): void;
+  /** Main samples the cursor and bounds; returns the gesture id. */
+  circleBegin(): string;
+  circleEnd(gestureId: string): Promise<void>;
+  circleCancel(gestureId: string): void;
+  circleToggle(): Promise<void>;
+  circlePosition(action: "begin" | "commit" | "cancel"): CircleDisplays;
+  circleNudge(dx: number, dy: number): CircleDisplays;
+  circleDisplay(displayId: string): CircleDisplays;
+  displays(): CircleDisplays;
+  /** Main's current named personal-context files; an open-record personal path must be one. */
+  personalFiles(): readonly string[];
   quit(): void;
 };
 
@@ -77,8 +102,17 @@ export type RouterPorts = {
   agent: AgentSetup;
   native: Native;
   dictation: Pick<DictationHelper, "status" | "configure" | "setup" | "start" | "stop" | "cancel">;
-  observer: { setLook(p: DesktopPreferences["look"]): void; pause(paused: boolean): void; readonly status: string };
+  observer: { setLook(p: DesktopPreferences["look"]): void; pause(paused: boolean): void };
   bubble: Bubble;
+  /**
+   * Main's opted-in personal-context copy: `current` is cached (the Settings row reads it often),
+   * `reload` re-reads the named files now. Both are empty while the opt-in is off.
+   */
+  personal: { current(): Context; reload(): Context };
+  /** Exact stored credential values, so debug text never carries one to a model or a screen. */
+  secrets(): Promise<readonly string[]>;
+  /** Why the host isn't usable; "" while it is healthy. */
+  hostFailure(): string;
   /** Start the host over with fresh personal context, after that setting changed. */
   restart(): Promise<void>;
   /** The Anthropic key was just saved and checked; main reconciles the saved models with the live catalog. */
@@ -89,13 +123,54 @@ export type RouterPorts = {
   version: string;
 };
 
+type WindowRequest = Request;
+type Extra = Omit<Extract<Reply, { ok: true }>, "ok" | "snapshot">;
+
 const IDLE_VOICE: VoiceState = { phase: "idle", recordingId: null, status: "" };
+const NO_CONTEXT_USE: ContextUseView = {
+  subject: null, contextRevision: null, correctionRevision: 0, counts: { used: 0, omitted: 0, missing: 0, stale: 0 }, cursor: null,
+};
+const REDACTED = "[redacted]";
+/** Recognized secret forms. Not a promise that every secret in prose is caught; exact stored values are replaced too. */
+const SECRET_FORMS = [
+  /sk-ant-[A-Za-z0-9_-]{8,}/g,
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/gi,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+];
+/** Stored values shorter than this aren't credentials Dum keeps; replacing them would mangle ordinary words. */
+const MIN_SECRET = 12;
+
+/** Text with recognized secret forms and the exact stored values replaced. */
+function redact(text: string, exact: readonly string[]): string {
+  let out = text;
+  for (const value of exact) if (value.length >= MIN_SECRET) out = out.split(value).join(REDACTED);
+  for (const form of SECRET_FORMS) out = out.replace(form, REDACTED);
+  return out;
+}
 
 function bounded(err: unknown): string {
   const message = err instanceof z.ZodError
-    ? `Dum's window sent a request it doesn't accept (${err.issues.map((i) => i.path.join(".") || i.message).slice(0, 3).join(", ")})`
+    ? `Dum sent a request it doesn't accept (${err.issues.map((i) => i.path.join(".") || i.message).slice(0, 3).join(", ")})`
     : err instanceof Error ? err.message : "that didn't work";
   return message.slice(0, 2000);
+}
+
+/** One of main's own diagnostic events: categorical, no request, path or text. */
+function mainEvent(kind: SanitizedMainEvent["kind"], outcome: DiagnosticOutcome, reason: DiagnosticCode): SanitizedMainEvent {
+  return { kind, role: null, requestId: null, checkId: null, outcome, reason, latencyMs: null, httpStatus: null };
+}
+
+/** A request's own fields, without its wire `type`. */
+function fields<R extends { type: string }>(r: R): R extends unknown ? Omit<R, "type"> : never {
+  const { type: _type, ...rest } = r;
+  return rest as R extends unknown ? Omit<R, "type"> : never;
 }
 
 /** Live zones under `id`, itself included. */
@@ -107,11 +182,41 @@ function subtree(registry: ZoneRegistry, id: ZoneId): ZoneId[] {
   return out;
 }
 
+/** Why the circle needs attention, in priority order; null when nothing does. */
+function attention(s: Snapshot, hostFailure: string, keyRejected: boolean): CircleReason | null {
+  if (s.state?.prompt?.type === "question" && s.state.prompt.purpose !== undefined) return "decision";
+  if (hostFailure) return "host-failed";
+  if (keyRejected) return "key-rejected";
+  const chosen = s.settings.agent;
+  if (!chosen || !s.agent.backends.some((b) => b.id === chosen.backend && b.ready !== null)) return "setup";
+  if (s.voice.phase === "error") return "voice-error";
+  if (s.look.reason === "unverified-model") return "look-route";
+  return null;
+}
+
+/**
+ * Main computes the circle's face from typed fields only, never status prose. Priority:
+ * listening → needs attention → thinking → looking → idle.
+ */
+export function circleView(s: Snapshot, hostFailure: string, keyRejected = false): CircleView {
+  const face = (state: CircleState, reason: CircleReason): CircleView => ({ state, reason, paused: s.look.paused, open: s.window.visible });
+  if (s.voice.phase === "recording") return face("listening", "recording");
+  if (s.voice.phase === "transcribing") return face("listening", "transcribing");
+  const needs = attention(s, hostFailure, keyRejected);
+  if (needs) return face("attention", needs);
+  if (s.state?.busy) return face("thinking", "zone");
+  if (s.debug?.state === "busy") return face("thinking", "debug");
+  if (s.look.status === "checking") return face("looking", "looking");
+  return face("idle", s.look.paused ? "look-paused" : "none");
+}
+
 export class Router {
-  /** The next request's ID; rotated after each Send and each zone epoch. */
+  /** The next request's ID; rotated after each Send, Do this and decision turn, and each zone epoch. */
   private next = randomUUID();
-  /** The request a Send started, until the host shows a fresh "what's next" prompt. */
+  /** The request a Send or Do this started, until the host shows a fresh "what's next" prompt. */
   private running: { requestId: string; token: string; seen: boolean } | null = null;
+  /** A Send or Do this is being handed to the host: a second one is refused, never queued. */
+  private submitting = false;
   /** The first-run goal binding's epoch; fresh once the goal became a zone. */
   private goalEpoch = randomUUID();
   private last: InputBinding | null = null;
@@ -119,6 +224,12 @@ export class Router {
   /** A voice-originated request whose reply goes to the bubble: entries after `after` are its reply. */
   private spoken: { requestId: string; after: number } | null = null;
   private paused = false;
+  /** The last Anthropic key they pasted was refused; cleared by a saved key, a sign-out or a new choice. */
+  private keyRejected = false;
+  /** Exact stored credential values, refreshed before each debug send and after a key change. */
+  private secrets: readonly string[] = [];
+  /** The status main last told this host, as JSON; "" when the host has none from us. */
+  private reported = "";
 
   constructor(private readonly o: RouterPorts) {}
 
@@ -137,11 +248,12 @@ export class Router {
   /** The host's state changed: retire what the old binding allowed and follow a voice request's reply. */
   changed(): void {
     const view = this.o.host.view;
+    if (!view) this.reported = "";
     this.settle(view);
     const live = this.live();
     const before = this.last;
     if (before && (live?.zoneId !== before.zoneId || live?.zoneEpoch !== before.zoneEpoch)) {
-      // Another zone, a reopened zone or no host: shares, captures, voice and the next request ID are void.
+      // Another zone, a new session, a reopened zone or no host: shares, captures, voice and the next request ID are void.
       this.o.drafts.invalidate(before.zoneId);
       this.o.captures.discard();
       void this.o.dictation.cancel().catch(() => undefined);
@@ -155,16 +267,18 @@ export class Router {
     this.o.captures.invalidate(now?.zoneId ? (now as RequestBinding) : null);
     this.last = now;
     this.follow(view);
+    this.diagnose([]);
   }
 
   snapshot(): Snapshot {
     const { host, settings, agent, native, drafts } = this.o;
     const view = host.view;
     const live = this.live();
+    const prefs = settings.get();
     return {
       state: view?.state ?? null,
       tree: view?.tree ?? null,
-      settings: settings.get(),
+      settings: prefs,
       zones: view?.registry ?? { version: 1, revision: 0, activeZoneId: null, zones: [] },
       activeZone: view?.activeZone ?? null,
       zoneEpoch: live?.zoneEpoch ?? "",
@@ -174,8 +288,17 @@ export class Router {
       follows: view?.follows ?? [],
       changes: view?.changes ?? [],
       voice: { ...this.voice },
-      agent: { backends: agent.backends, chosen: settings.get().agent },
-      look: { status: view?.look.status ?? this.o.observer.status, paused: this.paused, screenPermission: native.screenPermission() },
+      agent: { backends: agent.backends, chosen: prefs.agent },
+      look: { ...(view?.look ?? this.noLook()), paused: this.paused, permission: native.screenPermission() },
+      direction: view?.direction ?? null,
+      decision: view?.decision ?? null,
+      handoff: view?.handoff ?? null,
+      contextUse: view?.contextUse ?? NO_CONTEXT_USE,
+      session: view?.session ?? null,
+      trail: view?.trail ?? null,
+      debug: host.debug ? this.redactView(host.debug) : null,
+      window: { visible: native.windowVisible() },
+      personal: this.personal(prefs),
       hotkeyError: native.hotkeyError(),
       platform: this.o.platform,
       version: this.o.version,
@@ -183,21 +306,68 @@ export class Router {
     };
   }
 
-  /** Validate and apply one request from `role`'s window. Failures come back as a message; nothing throws across IPC. */
-  async handle(raw: unknown, role: Role): Promise<Reply> {
+  /** The circle's face, for its restricted channel. */
+  circle(): CircleView {
+    return circleView(this.snapshot(), this.o.hostFailure(), this.keyRejected);
+  }
+
+  /** Main's sanitized facts for the host: on initialize and whenever they change. */
+  mainStatus(): MainStatus {
+    const voice = this.o.dictation.status();
+    return {
+      version: this.o.version,
+      platform: this.o.platform,
+      backends: this.o.agent.backends.map((b) => ({ id: b.id, installed: b.installed, ready: b.ready })),
+      screenPermission: this.o.native.screenPermission(),
+      lookPaused: this.paused,
+      voice: { supported: voice.supported, available: voice.available, bridge: voice.bridge },
+      shortcuts: this.o.native.shortcuts(),
+    };
+  }
+
+  /**
+   * Main's own diagnostic events (OS, settings, backend), with its status when that changed since
+   * the host last heard it. Nothing goes while the host isn't running; the ring is the host's.
+   */
+  diagnose(events: readonly SanitizedMainEvent[]): void {
+    const { host } = this.o;
+    if (!host.running || !host.view) return;
+    const status = this.mainStatus();
+    const json = JSON.stringify(status);
+    const fresh = json !== this.reported;
+    if (!events.length && !fresh) return;
+    this.reported = json;
+    void host.diagnosticMain(events.slice(-DIAGNOSTIC_LIMITS.mainEvents), fresh ? status : null).catch(() => {
+      if (this.reported === json) this.reported = "";
+    });
+  }
+
+  /**
+   * Validate and apply one request from `role`'s surface. The working window gets a Reply, the
+   * circle a CircleReply, the bubble nothing. Failures come back as a message; nothing throws across IPC.
+   */
+  handle(raw: unknown, role: "window"): Promise<Reply>;
+  handle(raw: unknown, role: "circle"): Promise<CircleReply>;
+  handle(raw: unknown, role: Role): Promise<Reply | CircleReply>;
+  async handle(raw: unknown, role: Role): Promise<Reply | CircleReply> {
     try {
-      if (role === "bubble") throw new Error("The bubble can't ask for anything");
-      const request = RequestSchema.parse(raw) as Request;
-      const extra = await this.apply(request, role);
+      const parsed = parseRequest(role, raw);
+      if (parsed.role === "circle") {
+        const gestureId = await this.circleRequest(parsed.request);
+        return { ok: true, view: this.circle(), ...(gestureId ? { gesture: { gestureId } } : {}) };
+      }
+      const extra = await this.apply(parsed.request);
       return { ok: true, snapshot: this.snapshot(), ...extra };
     } catch (err) {
       return { ok: false, error: bounded(err) };
     } finally {
+      // A request may have changed main's status (pause, voice, backends, shortcuts).
+      this.diagnose([]);
       this.o.changed();
     }
   }
 
-  /** The Send-draft shortcut: send the current draft exactly as a Send button would. */
+  /** The Send-draft shortcut: send the zone chat's current draft exactly as a Send button would. */
   async sendDraft(): Promise<void> {
     const live = this.live();
     if (!live) throw new Error("Dum isn't ready for a message yet");
@@ -219,7 +389,7 @@ export class Router {
           break;
         }
         if (drafts.current(live).text.trim()) {
-          bubble.timed("voice", ["Your draft isn't empty", "Edit it with the command bar, or send it first"], BUBBLE_TTL.error);
+          bubble.timed("voice", ["Your draft isn't empty", "Open Dum to edit it, or send it first"], BUBBLE_TTL.error);
           break;
         }
         this.voice = { phase: "idle", recordingId: null, status: "Starting to listen…" };
@@ -239,7 +409,7 @@ export class Router {
           const draft = drafts.voice(event.text, event.binding, this.live());
           this.voice = { phase: "ready", recordingId: null, status: "Your draft is ready - send it or edit it" };
           const preview = draft.text.length > 280 ? `${draft.text.slice(0, 279)}…` : draft.text;
-          bubble.timed("voice", [preview, "Send with the Send-draft shortcut, or edit it in the command bar"], BUBBLE_TTL.ready);
+          bubble.timed("voice", [preview, "Send with the Send-draft shortcut, or open Dum to edit it"], BUBBLE_TTL.ready);
         } catch (err) {
           this.voiceError(bounded(err));
         }
@@ -277,6 +447,29 @@ export class Router {
     this.o.changed();
   }
 
+  /** The look as Current context shows it before a host has reported one. */
+  private noLook(): HostLookStatus {
+    return {
+      status: this.o.hostFailure() ? "failed" : "blocked", reason: null, noPictures: "", seen: null,
+      lastTick: null, lastAttempt: null, lastSuccess: null, chosen: null, resolved: null,
+    };
+  }
+
+  private personal(prefs: DesktopPreferences): PersonalView {
+    if (!prefs.personalContext) return { status: "off", files: [], warning: "" };
+    const context = this.o.personal.current();
+    const status = context.text ? "loaded" : context.warning ? "unreadable" : "missing";
+    return { status, files: [...this.o.native.personalFiles()], warning: context.warning.slice(0, 2000) };
+  }
+
+  private redactView(view: DebugView): DebugView {
+    return { ...view, entries: view.entries.map((e) => ({ ...e, text: redact(e.text, this.secrets) })) };
+  }
+
+  private async refreshSecrets(): Promise<void> {
+    this.secrets = [...(await this.o.secrets())];
+  }
+
   /** A sent request ends when the host shows a fresh "what's next" prompt with nothing running. */
   private settle(view: HostView | null): void {
     const run = this.running;
@@ -290,7 +483,7 @@ export class Router {
     }
   }
 
-  /** The bubble follows a voice-originated request: status while it works, then what Dum and the Wizard said. */
+  /** The bubble follows a voice-originated request: status while it works, then what Dum said. */
   private follow(view: HostView | null): void {
     const spoken = this.spoken;
     if (!spoken) return;
@@ -298,23 +491,21 @@ export class Router {
     if (!state) return;
     const fresh = state.transcript.filter((e) => e.id > spoken.after);
     const dum = fresh.flatMap((e) => (e.kind === "say" ? [e.text] : e.kind === "question" ? [e.question] : []));
-    const quip = fresh.findLast((e) => e.kind === "quip");
-    const wizard = quip?.kind === "quip" ? quip.text : null;
     const done = this.running?.requestId !== spoken.requestId;
     const deciding = state.prompt?.type === "question" && state.prompt.purpose !== undefined;
     if (deciding) {
-      this.o.bubble.timed("reply", [...bubbleLines(dum, wizard), "Decision waiting - answer it in the command bar"], BUBBLE_TTL.reply);
+      // The decision itself stays in the window; the bubble only says where it is.
+      this.o.bubble.timed("reply", [...bubbleLines(dum, null), "Decision waiting - answer it in Dum"], BUBBLE_TTL.reply);
       this.spoken = null;
       return;
     }
     if (done) {
       this.spoken = null;
-      if (dum.length || wizard) this.o.bubble.timed("reply", bubbleLines(dum, wizard), BUBBLE_TTL.reply);
+      if (dum.length) this.o.bubble.timed("reply", bubbleLines(dum, null), BUBBLE_TTL.reply);
       else this.o.bubble.dismiss();
       return;
     }
-    const lines = dum.length || wizard ? bubbleLines(dum, wizard) : [state.status.slice(0, 200) || "Dum is working…"];
-    this.o.bubble.voice(lines);
+    this.o.bubble.voice(dum.length ? bubbleLines(dum, null) : [state.status.slice(0, 200) || "Dum is working…"]);
   }
 
   private requestBinding(binding: RequestBinding): RequestBinding {
@@ -323,45 +514,83 @@ export class Router {
     return binding;
   }
 
-  /** Zone and epoch must be the open ones; the host checks the prompt itself. */
-  private zoneBinding<B extends InputBinding>(binding: B): B {
+  /** Zone and epoch must be the open ones; the host checks the prompt, card and record revisions itself. */
+  private zoneBinding<B extends InputBinding>(binding: B): B & { zoneId: ZoneId } {
     const live = this.live();
     if (!live || binding.zoneId === null || binding.zoneId !== live.zoneId || binding.zoneEpoch !== live.zoneEpoch) {
       throw new Error("That was meant for a zone that isn't open any more - nothing happened");
     }
-    return binding;
+    return binding as B & { zoneId: ZoneId };
+  }
+
+  /**
+   * Hand a request the draft's grants exactly once: the shares it names and its held picture. Only
+   * one Send or Do this is handed over at a time; after the host takes it the draft is consumed.
+   */
+  private async submit(
+    live: RequestBinding,
+    draft: DraftState,
+    start: (shares: ShareGrant[], image: SharedImage | undefined) => Promise<void>,
+  ): Promise<void> {
+    const { host, drafts, captures } = this.o;
+    if (this.submitting) throw new Error("Dum is still taking your last request - nothing was sent");
+    const view = host.view!;
+    const asking = view.state?.prompt?.type === "next";
+    if (draft.captureToken && !view.canAttach) throw new Error("Dum can only take a picture with your next request - nothing was sent. Send it then, or discard it.");
+    this.submitting = true;
+    try {
+      const image = draft.captureToken ? captures.take(draft.captureToken, live) : undefined;
+      const named = new Set(draft.shareIds);
+      try {
+        await start(view.shares.filter((s) => named.has(s.id)), image);
+      } catch (err) {
+        // The picture was handed over once; a failed request doesn't get it back.
+        if (image) drafts.capture(live, null);
+        throw err;
+      }
+    } finally {
+      this.submitting = false;
+    }
+    drafts.sent(live);
+    if (asking) this.running = { requestId: live.requestId, token: live.inputToken, seen: false };
   }
 
   private async send(binding: InputBinding, revision: number): Promise<void> {
-    const { host, drafts, captures } = this.o;
     const live = this.live();
-    const draft = drafts.ready(binding, revision, live);
+    const draft = this.o.drafts.ready(binding, revision, live);
     if (live!.zoneId === null) {
       await this.createRoot(draft.text);
       return;
     }
-    const bound = live as RequestBinding;
-    const view = host.view!;
     if (!draft.text.trim()) throw new Error("Type something to send");
-    const asking = view.state?.prompt?.type === "next";
-    if (draft.captureToken && !view.canAttach) throw new Error("Dum can only take a picture with your next request - nothing was sent. Send it then, or discard it.");
-    const image = draft.captureToken ? captures.take(draft.captureToken, bound) : undefined;
-    const named = new Set(draft.shareIds);
-    const shares = view.shares.filter((s) => named.has(s.id));
-    const after = view.state?.transcript.at(-1)?.id ?? -1;
-    try {
-      await host.send(bound, draft.text, shares, image);
-    } catch (err) {
-      // The picture was handed over once; a failed Send doesn't get it back.
-      if (image) drafts.capture(live, null);
-      throw err;
-    }
-    drafts.sent(live);
-    if (asking) this.running = { requestId: bound.requestId, token: bound.inputToken, seen: false };
+    const bound = live as RequestBinding;
+    const after = this.o.host.view?.state?.transcript.at(-1)?.id ?? -1;
+    await this.submit(bound, draft, (shares, image) => this.o.host.send(bound, draft.text, shares, image));
     if (draft.source === "voice") {
       this.spoken = { requestId: this.running?.requestId ?? bound.requestId, after };
       this.o.bubble.voice(["Dum is working…"]);
     }
+  }
+
+  /**
+   * Do this: the explicit command for one handoff revision. The canonical draft is compare-and-swapped
+   * and consumed like a Send; it must hold no text of its own, since that would be a different request.
+   */
+  private async runHandoff(r: Extract<WindowRequest, { type: "handoff-run" }>): Promise<void> {
+    const binding = this.requestBinding(r.binding);
+    const draft = this.o.drafts.ready(binding, r.draftRevision, this.live());
+    if (draft.text.trim()) throw new Error("Your draft has text that isn't part of this handoff - send it or clear it first; nothing ran");
+    await this.submit(binding, draft, (shares, image) =>
+      this.o.host.runHandoff({ binding, handoffId: r.handoffId, revision: r.revision, shares, ...(image ? { image } : {}) }));
+  }
+
+  /** A decision turn: the host composes one card for their outcome, then that request ID is retired. */
+  private async decisionHelp(r: Extract<WindowRequest, { type: "decision-help" }>): Promise<Extra> {
+    const binding = this.requestBinding(r.binding);
+    if (this.running) throw new Error("Wait for Dum to finish, or Stop it - nothing was asked");
+    const decision = await this.o.host.decisionHelp(binding, r.outcome);
+    if (!this.running && this.next === binding.requestId) this.next = randomUUID();
+    return { decision };
   }
 
   /** The first-run goal becomes the root zone: the exact trimmed goal, and a default name from its start. */
@@ -372,13 +601,14 @@ export class Router {
     await this.createZone({ name, goal, parentId: null, language: null, focusSkills: [] }, true);
   }
 
-  private async createZone(zone: ZoneCreate, enter: boolean): Promise<void> {
+  private async createZone(zone: ZoneCreate, enter: boolean): Promise<Extra> {
     const goalStep = this.o.host.view?.registry.activeZoneId === null;
-    await this.o.host.createZone(zone, enter);
+    const { direction } = await this.o.host.createZone(zone, enter);
     if (goalStep && enter) {
       this.o.drafts.drop([null]);
       this.goalEpoch = randomUUID();
     }
+    return { direction };
   }
 
   private async settingsChange(next: DesktopPreferences): Promise<void> {
@@ -387,8 +617,13 @@ export class Router {
     const previous = settings.get();
     if (JSON.stringify(parsed.agent) !== JSON.stringify(previous.agent)) throw new Error("Choose who powers Dum in Settings › Agent");
     const keys = [parsed.hotkey, parsed.sendDraftHotkey, parsed.voiceHotkey];
-    if (new Set(keys).size !== keys.length) throw new Error("The command bar, Send-draft and voice shortcuts must all be different");
-    native.apply(parsed, previous);
+    if (new Set(keys).size !== keys.length) throw new Error("The Open Dum, Send-draft and voice shortcuts must all be different");
+    try {
+      native.apply(parsed, previous);
+    } catch (err) {
+      this.diagnose([mainEvent("settings", "failed", "shortcut-conflict")]);
+      throw err;
+    }
     try {
       settings.set(parsed);
       if (parsed.voiceHotkey !== previous.voiceHotkey && dictation.status().available) await dictation.configure(parsed.voiceHotkey);
@@ -398,6 +633,7 @@ export class Router {
       throw new Error(`Settings couldn't be applied: ${(err as Error).message}`);
     }
     observer.setLook(parsed.look);
+    this.diagnose([mainEvent("settings", "ok", "settings-change")]);
     if (parsed.personalContext !== previous.personalContext) {
       await this.o.restart();
       return;
@@ -412,20 +648,35 @@ export class Router {
     };
   }
 
-  private async apply(r: Request, role: Role): Promise<{ sources?: CaptureSource[]; preview?: CapturePreview; models?: ModelOption[] }> {
+  /** The circle's gestures and toggle; main samples the pointer itself. Returns a new gesture's id. */
+  private async circleRequest(r: CircleRequest): Promise<string | null> {
+    const { native } = this.o;
+    switch (r.type) {
+      case "circle-press":
+        if (r.phase === "begin") return native.circleBegin();
+        if (r.phase === "end") await native.circleEnd(r.gestureId);
+        else native.circleCancel(r.gestureId);
+        return null;
+      case "circle-toggle":
+        await native.circleToggle();
+        return null;
+      case "circle-view":
+        return null;
+    }
+  }
+
+  private async apply(r: WindowRequest): Promise<Extra> {
     const { host, captures, drafts, agent, native, dictation } = this.o;
     switch (r.type) {
       case "snapshot":
         return {};
       case "zone-create":
-        await this.createZone(r.zone, r.enter);
-        return {};
+        return this.createZone(r.zone, r.enter);
       case "zone-enter":
         await host.openZone(r.id, r.expectedRevision);
         return {};
       case "zone-update":
-        await host.updateZone(r.id, r.patch, r.expectedRevision);
-        return {};
+        return { direction: (await host.updateZone(r.id, r.patch, r.expectedRevision)).direction };
       case "zone-context":
         await host.zoneContext(r.id, r.text, r.expectedRevision);
         return {};
@@ -455,10 +706,9 @@ export class Router {
         this.zoneBinding(r.binding);
         await host.interrupt();
         return {};
-      case "panel":
-        // The panel switches its own panes; from the command bar or tray, main takes the panel there.
-        if (role !== "panel") native.openPane(r.panel);
-        await host.panel(r.panel);
+      case "view":
+        // The window switches its own views; the host loads what that view shows.
+        await host.selectView(r.view);
         return {};
       case "command":
         await host.command(r.name, r.argument, this.zoneBinding(r.binding));
@@ -490,9 +740,17 @@ export class Router {
       case "change-revert":
         await host.changeRevert(r.changeId, this.zoneBinding(r.binding));
         return {};
-      case "open-record":
-        await native.openPath(await host.openRecord(r.record, r.id));
+      case "open-record": {
+        if (r.record !== "personal") {
+          await native.openPath(await host.openRecord(r.record, r.id));
+          return {};
+        }
+        // The host names the file behind its own ref; main opens it only if it is one of its named files now.
+        const path = await host.openPersonal(r.sourceId);
+        if (!native.personalFiles().includes(path)) throw new Error("That isn't one of your current personal-context files - nothing was opened");
+        await native.openPath(path);
         return {};
+      }
       case "skill-edit":
         if (r.op === "add") {
           const label = r.skill.lang ? `${r.skill.name} (${r.skill.lang})` : r.skill.name;
@@ -555,6 +813,7 @@ export class Router {
         return {};
       case "agent-check":
         await agent.check();
+        this.diagnose([mainEvent("backend", "ok", "backend-check")]);
         return {};
       case "agent-login": {
         // Refusals come back now; the sign-in itself runs on, reporting through the backend's status.
@@ -566,12 +825,23 @@ export class Router {
         agent.cancel();
         return {};
       case "agent-key":
-        await agent.setKey(r.backend, r.key);
+        try {
+          await agent.setKey(r.backend, r.key);
+        } catch (err) {
+          this.keyRejected = true;
+          this.diagnose([mainEvent("backend", "failed", "authentication")]);
+          throw err;
+        }
+        this.keyRejected = false;
+        await this.refreshSecrets();
         await agent.check();
+        this.diagnose([mainEvent("backend", "ok", "backend-check")]);
         this.o.keySaved();
         return {};
       case "agent-signout":
         await agent.signOut(r.backend, r.method);
+        this.keyRejected = false;
+        await this.refreshSecrets();
         await agent.check();
         return {};
       case "agent-models":
@@ -582,13 +852,96 @@ export class Router {
           settings: this.o.settings,
           send: (choice) => host.agentSelect(choice),
         });
+        this.keyRejected = false;
         return {};
+      // Goal alignment of any zone, by its own binding: nothing of the active zone's request goes with it.
+      case "alignment-read":
+        return { direction: await host.alignmentRead(r.zoneId) };
+      case "alignment-step":
+        return { direction: await host.alignmentStep(fields(r)) };
+      case "alignment-accept":
+        return { direction: await host.alignmentAccept(fields(r)) };
+      case "direction-read":
+        return { directionRecord: await host.directionRead(r.zoneId, r.directionId) };
+      // Decisions and handoffs in the open zone. Selection and edits write no source file.
+      case "decision-help":
+        return this.decisionHelp(r);
+      case "decision-dismiss":
+        await host.decisionDismiss(this.zoneBinding(r.binding), r.decisionId, r.revision);
+        return {};
+      case "handoff-select":
+        this.zoneBinding(r.binding);
+        return { handoff: await host.selectHandoff(fields(r)) };
+      case "handoff-edit":
+        this.zoneBinding(r.binding);
+        return { handoff: await host.editHandoff(fields(r)) };
+      case "handoff-dismiss":
+        this.zoneBinding(r.binding);
+        await host.dismissHandoff(fields(r));
+        return {};
+      case "handoff-run":
+        await this.runHandoff(r);
+        return {};
+      case "handoff-read":
+        return { handoff: await host.readHandoff(r.zoneId, r.handoffId) };
+      case "handoff-review":
+        this.zoneBinding(r.binding);
+        return { handoff: await host.reviewHandoff(fields(r)) };
+      // Current context.
+      case "context-use-read":
+        return { contextUse: await host.contextUseRead(this.zoneBinding(r.binding), r.cursor) };
+      case "context-reload": {
+        const binding = this.zoneBinding(r.binding);
+        // Main re-reads its opted-in copy first; the renderer never names a file.
+        const personal = this.o.settings.get().personalContext ? this.o.personal.reload() : { path: "", text: "", warning: "" };
+        await host.contextReload(binding, personal);
+        return {};
+      }
+      case "context-ignore-observation":
+        this.zoneBinding(r.binding);
+        await host.contextIgnoreObservation(fields(r));
+        return {};
+      // Sessions, trail and story. Historical reads confer nothing.
+      case "session-new":
+        await host.newSession(this.zoneBinding(r.binding));
+        return {};
+      case "trail-read":
+        return { trail: await host.trailRead(fields(r)) };
+      case "trail-source":
+        return { trailSource: await host.trailSource(r.zoneId, r.sessionId, r.sourceId) };
+      case "trail-map":
+        this.zoneBinding(r.binding);
+        await host.trailMap(fields(r));
+        return {};
+      case "story-read":
+        return { story: await host.storyRead(fields(r)) };
+      // Debug chat: its own binding; typed text is redacted here before any model sees it.
+      case "debug-open":
+        await this.refreshSecrets();
+        return { debug: this.redactView(await host.debugOpen()) };
+      case "debug-send": {
+        await this.refreshSecrets();
+        const text = redact(r.text, this.secrets);
+        await host.debugSend(r.binding, text);
+        return {};
+      }
+      case "debug-stop":
+        await host.debugStop(r.binding);
+        return {};
+      case "debug-reset":
+        return { debug: this.redactView(await host.debugReset()) };
+      // Move circle: main samples and clamps.
+      case "circle-position":
+        return { displays: native.circlePosition(r.action) };
+      case "circle-nudge":
+        return { displays: native.circleNudge(r.dx, r.dy) };
+      case "circle-display":
+        return { displays: native.circleDisplay(r.displayId) };
       case "show-surface":
-        await native.showSurface(r.surface);
+        await native.showWindow();
         return {};
       case "dismiss-surface":
-        if (r.surface !== role) throw new Error("A window can only dismiss itself");
-        await native.dismissSurface(r.surface);
+        await native.dismissWindow();
         return {};
       case "quit":
         native.quit();

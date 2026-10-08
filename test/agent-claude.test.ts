@@ -22,8 +22,6 @@ import {
 } from "../src/agent/claude.ts";
 import { FLAGS, authStatus, cliArgs, providerFreeEnv } from "../src/agent/claude-cli.ts";
 import type { AgentEvent, DumAction, OpenOptions } from "../src/agent/types.ts";
-import type { ZoneContext } from "../src/zone-types.ts";
-import type { RequestBinding } from "../src/share-types.ts";
 
 process.env.DUM_CONTEXT = "off";
 const signal = new AbortController().signal;
@@ -166,7 +164,7 @@ test("the catalog keeps each row's resolved model and marks verified by it, neve
 type Msg = Record<string, unknown>;
 
 /** A fake SDK: records options and prompt delivery, replays `replies` once input arrives. */
-function fakeSdk(o: { account?: Record<string, unknown>; replies?: (input: SDKUserMessage) => Msg[]; managed?: boolean; models?: () => typeof MODELS }) {
+function fakeSdk(o: { account?: Record<string, unknown>; replies?: (input: SDKUserMessage) => Msg[]; managed?: boolean; models?: () => readonly Record<string, unknown>[] }) {
   const seen = { options: [] as Options[], inputs: [] as SDKUserMessage[], closed: 0, started: 0 };
   const sdk: Sdk = {
     resolveSettings: (async () => ({ effective: {}, provenance: {}, sources: o.managed ? [{ source: "managed", settings: { hooks: {} } }] : [] })) as unknown as Sdk["resolveSettings"],
@@ -265,11 +263,9 @@ test("aborting while Claude starts closes it and releases nothing", async () => 
   assert.equal((await delivery).done, true);
 });
 
-const zone = { id: "zone" } as unknown as ZoneContext;
-const binding = {} as unknown as RequestBinding;
 function openOptions(over: Partial<OpenOptions> = {}): OpenOptions {
   return {
-    cwd: "/tmp", zone, binding, systemPrompt: "fixed", selector: CLAUDE_DEFAULTS.intern,
+    cwd: "/tmp", systemPrompt: "fixed", selector: CLAUDE_DEFAULTS.intern,
     login: "anthropic-key", actions: [action], signal, ...over,
   };
 }

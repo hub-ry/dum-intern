@@ -130,6 +130,12 @@ export type CircleDisplays = {
   positioning: boolean;
 };
 
+/**
+ * Settings' view-only "Use personal context" row: main's current named files and how they loaded.
+ * Working window only; never in the circle, bubble or diagnostics. `warning` is context.ts's fixed sentence.
+ */
+export type PersonalView = { status: "off" | "loaded" | "missing" | "unreadable"; files: string[]; warning: string };
+
 export type Snapshot = {
   state: State | null;
   tree: TreeView | null;
@@ -154,6 +160,7 @@ export type Snapshot = {
   trail: TrailView | null;
   debug: DebugView | null;
   window: { visible: boolean };
+  personal: PersonalView;
   hotkeyError: string;
   platform: string;
   version: string;

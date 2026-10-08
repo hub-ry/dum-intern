@@ -1,7 +1,8 @@
-// The canonical draft (docs/revamp-design.md §6 "DraftState"): one per zone, plus the first-run goal
-// draft under a null-zone binding. Main owns them in memory only; nothing is written on exit. Every
-// edit is a compare-and-swap on the revision, and a draft only sends under the binding it was last
-// edited for: a prompt that changed under it keeps the text but has to be looked at again.
+// The canonical draft (docs/circle-design.md §9): one per zone, plus the first-run goal draft under a
+// null-zone binding. Main owns them in memory only; nothing is written on exit. Every edit is a
+// compare-and-swap on the revision, and a draft only sends under the binding it was last edited for:
+// a prompt that changed under it keeps the text but has to be looked at again. Send and Do this
+// consume it the same way, so one revision commands at most once. Debug chat never uses it.
 
 import type { InputBinding } from "../share-types.ts";
 import type { DraftState } from "./protocol.ts";
@@ -51,8 +52,8 @@ export class Drafts {
   }
 
   /**
-   * The draft a Send may consume: the live binding, the revision they saw, and the binding the draft
-   * was edited under. A draft whose prompt moved is rebound and refused once, so they see it first.
+   * The draft a Send or Do this may consume: the live binding, the revision they saw, and the binding
+   * the draft was edited under. A draft whose prompt moved is rebound and refused once, so they see it first.
    */
   ready(binding: InputBinding, revision: number, live: InputBinding | null): DraftState {
     if (!sameBinding(binding, live)) throw new Error("That prompt changed before your message arrived - nothing was sent");
@@ -83,7 +84,7 @@ export class Drafts {
     d.revision++;
   }
 
-  /** After a Send: the text, shares and capture are gone; the revision keeps counting. */
+  /** After a Send or Do this: the text, shares and capture are gone; the revision keeps counting. */
   sent(live: InputBinding | null): void {
     const draft = this.entry(live);
     draft.text = "";

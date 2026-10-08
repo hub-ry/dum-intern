@@ -79,7 +79,7 @@ test("Claude takes only an API key: a subscription sign-in or sign-out is refuse
 
   // The real Claude setup refuses on its own too.
   const real = claudeSetup({ executable: null, credentials: new Credentials(join(temp(), "c.json"), cipher) });
-  await assert.rejects(real.login(SUBSCRIPTION, ui), /doesn't sign in with claude-subscription/);
+  await assert.rejects(real.login(SUBSCRIPTION), /doesn't sign in with claude-subscription/);
 });
 
 test("the Anthropic key is write-only: stored encrypted, never in a status, a snapshot or an error", async () => {

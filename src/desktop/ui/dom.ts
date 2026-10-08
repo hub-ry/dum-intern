@@ -1,12 +1,14 @@
 // DOM building for the renderer, and its one request client. Every piece of model or user text lands as a text node.
 
-import type { BubbleAPI, DesktopAPI, Reply, Request, Snapshot } from "../protocol.ts";
+import type { BubbleAPI, CircleAPI, DesktopAPI, Reply, Request, Snapshot } from "../protocol.ts";
 import type { RequestBinding } from "../../share-types.ts";
 
 declare global {
   interface Window {
-    /** Panel and command bar only. */
+    /** The working window only. */
     dum: DesktopAPI;
+    /** The circle only: its gestures, toggle and small view. */
+    dumCircle: CircleAPI;
     /** The bubble only. */
     dumBubble: BubbleAPI;
   }
@@ -62,6 +64,9 @@ const ICONS = {
   pause: "M8 5v14M16 5v14",
   play: "M7 5l12 7-12 7z",
   zones: "M3 6h7M3 12h7M3 18h7M14 6h7M14 12h4M14 18h4",
+  move: "M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3",
+  story: "M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2zM4 21a2 2 0 0 1 2-2h12v2M8 7h6M8 11h6",
+  bug: "M8 9a4 4 0 0 1 8 0v5a4 4 0 0 1-8 0zM12 9v9M4 13h4M16 13h4M5 8l3 2M19 8l-3 2M5 19l3-2M19 19l-3-2",
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;
@@ -84,14 +89,34 @@ export function iconButton(name: IconName, label: string, onClick: (e: Event) =>
   return h("button", { type: "button", class: cls, "aria-label": text ? null : label, title: label, onclick: onClick }, icon(name), text ? h("span", {}, text) : null);
 }
 
+export type Tone = "ok" | "warn" | "bad" | "info" | "muted";
+
+/** A small status label; tone is never the only signal, the text says it too. */
+export function chip(text: string, tone: Tone): HTMLElement {
+  return h("span", { class: `chip chip-${tone}` }, text);
+}
+
+/** "binary search (C++)", or the bare name for a language-free skill. */
+export function skillName(skill: { name: string; lang: string }): string {
+  return skill.lang ? `${skill.name} (${skill.lang})` : skill.name;
+}
+
+/** A local time for an ISO timestamp: "14:05", or "3 Oct, 14:05" when it isn't today. */
+export function when(iso: string): string {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 export const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
-/** Terminal colour codes some panel text still carries. */
+/** Terminal colour codes some host text still carries. */
 export function plain(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 }
 
-/** The one way the panel and the command bar talk to main: every reply's snapshot is applied, every refusal is shown. */
+/** The working window's one way to talk to main: every reply's snapshot is applied, every refusal is shown. */
 export class Client {
   snap: Snapshot | null = null;
   readonly errors = h("div", { class: "errors", role: "alert" });

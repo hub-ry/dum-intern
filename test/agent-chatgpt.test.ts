@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import { chatgptBackend, responsesClient } from "../src/agent/openai-responses.ts";
 import type { AgentEvent, CredentialSource, DumAction, ModelClient, ModelOption, OpenOptions, WireAction, WireMessage } from "../src/agent/types.ts";
-import type { ZoneContext } from "../src/zone-types.ts";
 
 process.env.DUM_HOME = mkdtempSync(join(tmpdir(), "dum-chatgpt-"));
 process.env.DUM_CONTEXT = "off";
@@ -257,13 +256,9 @@ test("models: the account catalog, listed models only, in server order", async (
   await assert.rejects(backend.models("anthropic-key", new AbortController().signal), /doesn't sign in with anthropic-key/);
 });
 
-const zone: ZoneContext = { id: "z1", revision: 1, breadcrumb: [{ id: "z1", name: "Zone" }], goal: "", ancestorGoals: [], language: "", focusSkills: [], notes: [] };
-
 function openOptions(o: Partial<OpenOptions> = {}): OpenOptions {
   return {
     cwd: tmpdir(),
-    zone,
-    binding: { zoneId: "z1", zoneEpoch: "e", inputToken: "t", requestId: "r" },
     systemPrompt: "You are Dum.",
     selector: { backend: "chatgpt", model: "gpt-6.1-sol", effort: "high" },
     login: "chatgpt",
