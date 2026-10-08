@@ -77,6 +77,7 @@ export async function catalog(endpoints: LocalEndpoints, server: LocalServer, si
       .filter((m) => m.type === "llm" || m.type === "vlm")
       .map((m) => ({
         id: `lmstudio/${m.id}`,
+        resolved: `lmstudio/${m.id}`,
         label: `LM Studio · ${m.id}`,
         efforts: [],
         // Text-only until a real chat-completions image call passes (llm-setup-design §4.4).
@@ -94,6 +95,7 @@ export async function catalog(endpoints: LocalEndpoints, server: LocalServer, si
     if (!show.capabilities.includes("completion")) continue;
     out.push({
       id: `ollama/${m.name}`,
+      resolved: `ollama/${m.name}`,
       label: `Ollama · ${m.name}`,
       efforts: show.capabilities.includes("thinking") ? OLLAMA_EFFORTS : [],
       images: show.capabilities.includes("vision"),
@@ -129,7 +131,7 @@ export function localSetup(endpoints: LocalEndpoints = LOCAL_ENDPOINTS): Backend
       }
     }
     const message = found.length ? found.join(", ") : problems[0] ?? "Not running. Get Ollama at https://ollama.com/download";
-    return { id: "local", label: "On this Mac", installed, methods, ready: models > 0 ? "none" : null, loginRunning: false, loginNeedsCode: false, message };
+    return { id: "local", label: "On this Mac", installed, methods, ready: models > 0 ? "none" : null, loginRunning: false, message };
   }
   return {
     id: "local",

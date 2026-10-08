@@ -75,7 +75,7 @@ flowchart LR
 9. Practice means suggested projects that fit a skill's scope. No guided practices.
 10. Voice and keyboard are both first-class. Voice goes through OpenSuperWhisper, and everything works from the keyboard without the mouse.
 11. Dum may run on agents other than Claude, and you pick the backend and model.
-12. Public builds follow each provider's rules: "for public i want to follow rules". A public build never offers Claude subscription sign-in; Claude connects with your own API key. Subscription sign-in is for local builds only.
+12. Dum connects to cloud models only with your own API key: "let's just have dum be strictly api keys for now". There is no subscription sign-in.
 
 ## Known limitations
 

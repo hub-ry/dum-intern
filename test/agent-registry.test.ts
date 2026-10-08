@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRegistry, RELEASED } from "../src/agent/registry.ts";
-import { agentChoiceSchema, BuildInfoSchema } from "../src/agent/schema.ts";
+import { AgentChoiceSchema } from "../src/agent/schema.ts";
 import type { AgentBackend, AgentChoice, BackendId } from "../src/agent/types.ts";
 
 process.env.DUM_HOME = mkdtempSync(join(tmpdir(), "dum-registry-"));
@@ -14,7 +14,7 @@ const fake = (id: BackendId): AgentBackend => ({
   id,
   label: id,
   models: async () => [],
-  capabilities: () => ({ images: false, interrupt: true, runtimeActionCheck: true }),
+  capabilities: async (selector) => ({ model: selector.model, images: false, noImages: "fake", interrupt: true, runtimeActionCheck: true }),
   open: async () => { throw new Error("fake backends open no sessions"); },
 });
 const choice = (backend: BackendId, login: AgentChoice["login"]): AgentChoice => ({
@@ -22,6 +22,7 @@ const choice = (backend: BackendId, login: AgentChoice["login"]): AgentChoice =>
   login,
   intern: { backend, model: "big", effort: "high" },
   helper: { backend, model: "small", effort: null },
+  look: { backend, model: "eyes", effort: "low" },
 });
 const released = new Set<BackendId>(["claude", "local"]);
 
@@ -44,6 +45,7 @@ test("selector() returns the chosen role's selector", () => {
   r.set(choice("claude", "anthropic-key"));
   assert.deepEqual(r.selector("intern"), { backend: "claude", model: "big", effort: "high" });
   assert.deepEqual(r.selector("helper"), { backend: "claude", model: "small", effort: null });
+  assert.deepEqual(r.selector("look"), { backend: "claude", model: "eyes", effort: "low" });
 });
 
 test("unreleased and unregistered backends throw, and are never chosen", () => {
@@ -57,31 +59,23 @@ test("unreleased and unregistered backends throw, and are never chosen", () => {
   assert.throws(() => createRegistry([fake("claude"), fake("claude")], released));
 });
 
-test("agentChoiceSchema gates the Claude subscription by flavor", () => {
-  assert.equal(agentChoiceSchema("public").safeParse(choice("claude", "claude-subscription")).success, false);
-  assert.equal(agentChoiceSchema("local").safeParse(choice("claude", "claude-subscription")).success, true);
-  assert.equal(agentChoiceSchema("public").safeParse(choice("claude", "anthropic-key")).success, true);
+test("AgentChoiceSchema takes Claude only with an API key: a subscription login no longer parses", () => {
+  assert.equal(AgentChoiceSchema.safeParse(choice("claude", "anthropic-key")).success, true);
+  assert.equal(AgentChoiceSchema.safeParse({ ...choice("claude", "anthropic-key"), login: "claude-subscription" }).success, false);
 });
 
-test("agentChoiceSchema rejects backend and login mismatches", () => {
-  for (const flavor of ["public", "local"] as const) {
-    const s = agentChoiceSchema(flavor);
-    assert.equal(s.safeParse(choice("local", "none")).success, true);
-    assert.equal(s.safeParse(choice("chatgpt", "chatgpt")).success, true);
-    assert.equal(s.safeParse(choice("claude", "chatgpt")).success, false);
-    assert.equal(s.safeParse(choice("local", "anthropic-key")).success, false);
-    assert.equal(s.safeParse(choice("chatgpt", "none")).success, false);
-    assert.equal(s.safeParse(choice("copilot", "anthropic-key")).success, false);
-    assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), helper: { backend: "local", model: "small", effort: null } }).success, false);
-    assert.equal(s.safeParse({ ...choice("local", "none"), backend: "ollama" }).success, false);
-    assert.equal(s.safeParse({ ...choice("local", "none"), fallback: "claude" }).success, false);
-  }
-});
-
-test("BuildInfoSchema accepts only the two flavors", () => {
-  assert.deepEqual(BuildInfoSchema.parse({ flavor: "public" }), { flavor: "public" });
-  assert.deepEqual(BuildInfoSchema.parse({ flavor: "local" }), { flavor: "local" });
-  for (const v of [{ flavor: "dev" }, { flavor: "" }, {}, { flavor: "local", extra: true }, null, "local"]) {
-    assert.equal(BuildInfoSchema.safeParse(v).success, false, JSON.stringify(v));
-  }
+test("AgentChoiceSchema rejects backend and login mismatches, and needs every role on the backend", () => {
+  const s = AgentChoiceSchema;
+  assert.equal(s.safeParse(choice("local", "none")).success, true);
+  assert.equal(s.safeParse(choice("chatgpt", "chatgpt")).success, true);
+  assert.equal(s.safeParse(choice("claude", "chatgpt")).success, false);
+  assert.equal(s.safeParse(choice("local", "anthropic-key")).success, false);
+  assert.equal(s.safeParse(choice("chatgpt", "none")).success, false);
+  assert.equal(s.safeParse(choice("copilot", "anthropic-key")).success, false);
+  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), helper: { backend: "local", model: "small", effort: null } }).success, false);
+  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), look: { backend: "local", model: "eyes", effort: null } }).success, false);
+  const { look: _look, ...noLook } = choice("claude", "anthropic-key");
+  assert.equal(s.safeParse(noLook).success, false, "the look role is required");
+  assert.equal(s.safeParse({ ...choice("local", "none"), backend: "ollama" }).success, false);
+  assert.equal(s.safeParse({ ...choice("local", "none"), fallback: "claude" }).success, false);
 });

@@ -107,8 +107,9 @@ test("catalog reports capabilities, drops cloud models, and keeps LM Studio text
       ["lmstudio/qwen/qwen3-vl", true, false, []],
       ["lmstudio/plain-llm", false, false, []],
     ]);
-    assert.equal(backend.capabilities({ backend: "local", model: "ollama/llava:7b", effort: null }).images, true);
-    assert.equal(backend.capabilities({ backend: "local", model: "lmstudio/qwen/qwen3-vl", effort: null }).images, false);
+    assert.equal((await backend.capabilities({ backend: "local", model: "ollama/llava:7b", effort: null }, "none", new AbortController().signal)).images, true);
+    const lm = await backend.capabilities({ backend: "local", model: "lmstudio/qwen/qwen3-vl", effort: null }, "none", new AbortController().signal);
+    assert.deepEqual([lm.images, lm.noImages], [false, "lmstudio/qwen/qwen3-vl can't see pictures"]);
     assert.equal(o.paths.some((p) => p.includes("cloud") || p.includes("sneaky")), false);
     await assert.rejects(backend.models("chatgpt", new AbortController().signal), /no sign-in/);
   } finally {

@@ -79,7 +79,7 @@ export class Store {
       status: "",
       stage: CONVERSATION,
       unlocked: 0,
-      models: { intern: null, helper: null },
+      models: { intern: null, helper: null, look: null },
     };
   }
 

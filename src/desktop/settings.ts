@@ -4,10 +4,9 @@
 import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { agentChoiceSchema } from "../agent/schema.ts";
-import type { Flavor } from "../agent/types.ts";
+import { AgentChoiceSchema, CLAUDE_DEFAULTS, SelectorSchema } from "../agent/schema.ts";
 import { readState, writeState } from "../state-files.ts";
-import { accelerator, DEFAULT_PREFERENCES, desktopPreferencesSchema, type DesktopPreferences } from "./protocol.ts";
+import { accelerator, DEFAULT_PREFERENCES, DesktopPreferencesSchema, type DesktopPreferences } from "./protocol.ts";
 
 const FILE = "settings.json";
 const MAX_FILE = 64 * 1024;
@@ -30,20 +29,43 @@ const StoredV1 = z.object({
   companion: z.object({ x: z.number(), y: z.number() }).strict().nullable(),
 }).strict();
 
+/**
+ * A saved agent choice from before the look role and before Claude took only API keys: the
+ * explicit migration to today's shape. A choice without `look` gets Claude's look default on
+ * Claude and its own helper selector elsewhere; a Claude subscription sign-in becomes the API key
+ * with the same models. Anything else is left for the schema to judge.
+ */
+function migrateAgent(agent: unknown): { agent: unknown; notes: string[] } {
+  if (!agent || typeof agent !== "object" || Array.isArray(agent)) return { agent, notes: [] };
+  const next: Record<string, unknown> = { ...agent };
+  const notes: string[] = [];
+  if (next.login === "claude-subscription" && next.backend === "claude") {
+    next.login = "anthropic-key";
+    notes.push("Claude now connects only with your own Anthropic API key. Add it in Settings › Agent; your models are kept.");
+  }
+  const helper = SelectorSchema.safeParse(next.helper);
+  if (!("look" in next) && helper.success) {
+    const look = next.backend === "claude" ? { ...CLAUDE_DEFAULTS.look } : helper.data;
+    next.look = look;
+    notes.push(`Dum now looks at your screen with its own look model: ${look.model}${look.effort ? ` (${look.effort})` : ""}. Change it in Settings › Agent.`);
+  }
+  return { agent: next, notes };
+}
+
 export class DesktopSettings {
   /** Why the saved file wasn't used as it was, if it wasn't; shown once, never fatal. */
   warning = "";
   private prefs: DesktopPreferences = structuredClone(DEFAULT_PREFERENCES);
 
-  private constructor(readonly dir: string, readonly flavor: Flavor) {}
+  private constructor(readonly dir: string) {}
 
   /**
-   * A missing file means defaults. A version 1 file is migrated and rewritten as version 2 once.
-   * An unreadable one is kept aside, never silently overwritten. A saved agent choice this build
-   * doesn't offer loads as null.
+   * A missing file means defaults. A version 1 file is migrated and rewritten as version 2 once,
+   * and so is a saved agent choice of an older shape. An unreadable file is kept aside, never
+   * silently overwritten. A saved agent choice that still doesn't parse loads as null.
    */
-  static load(dir: string, flavor: Flavor): DesktopSettings {
-    const out = new DesktopSettings(dir, flavor);
+  static load(dir: string): DesktopSettings {
+    const out = new DesktopSettings(dir);
     let raw: unknown;
     try {
       const text = readState(dir, FILE, MAX_FILE);
@@ -63,15 +85,21 @@ export class DesktopSettings {
       out.setAside();
       return out;
     }
-    const { agent, ...rest } = v2.data.settings;
-    const prefs = desktopPreferencesSchema(flavor).safeParse({ ...rest, agent: null });
+    const { agent: saved, ...rest } = v2.data.settings;
+    const prefs = DesktopPreferencesSchema.safeParse({ ...rest, agent: null });
     if (!prefs.success) {
       out.setAside();
       return out;
     }
-    const choice = agentChoiceSchema(flavor).nullable().safeParse(agent ?? null);
+    const { agent, notes } = migrateAgent(saved ?? null);
+    const choice = AgentChoiceSchema.nullable().safeParse(agent);
     out.prefs = { ...prefs.data, agent: choice.success ? choice.data : null };
-    if (!choice.success) out.warning = "The saved choice of who powers Dum isn't available in this build. Choose again in Settings.";
+    if (!choice.success) {
+      out.warning = "The saved choice of who powers Dum isn't valid any more. Choose again in Settings › Agent.";
+    } else if (notes.length) {
+      out.warning = notes.join("\n");
+      out.save();
+    }
     return out;
   }
 
@@ -79,9 +107,9 @@ export class DesktopSettings {
     return structuredClone(this.prefs);
   }
 
-  /** Validated for this build's flavor and saved before it counts: a failed write leaves the previous preferences in force. */
+  /** Validated and saved before it counts: a failed write leaves the previous preferences in force. */
   set(p: DesktopPreferences): void {
-    const next = desktopPreferencesSchema(this.flavor).parse(p);
+    const next = DesktopPreferencesSchema.parse(p);
     this.write(next);
     this.prefs = next;
   }
@@ -103,6 +131,11 @@ export class DesktopSettings {
     if (old.wizardAdvice && old.wizardSource === "files") {
       this.warning = "Dum no longer watches a project for saved changes. Follow a folder in a zone to get advice when you save code there.";
     }
+    this.save();
+  }
+
+  /** A migration's result, written once; if that fails it still applies and is saved on the next change. */
+  private save(): void {
     try {
       this.write(this.prefs);
     } catch (err) {

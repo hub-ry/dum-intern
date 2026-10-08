@@ -18,11 +18,14 @@ type State = Extract<HostEvent, { type: "state" }>;
 type Reply = Extract<HostEvent, { type: "reply" }>;
 
 const PERSONAL = { path: "", text: "", warning: "" };
-const SUBSCRIPTION: AgentChoice = {
-  backend: "claude", login: "claude-subscription",
-  intern: { backend: "claude", model: "claude-sonnet-4-5", effort: null },
-  helper: { backend: "claude", model: "claude-haiku-4-5", effort: null },
+const CLAUDE: AgentChoice = {
+  backend: "claude", login: "anthropic-key",
+  intern: { backend: "claude", model: "opus", effort: "high" },
+  helper: { backend: "claude", model: "fable", effort: "high" },
+  look: { backend: "claude", model: "haiku", effort: "low" },
 };
+/** The Claude subscription login Dum removed: it no longer parses as a login method. */
+const SUBSCRIPTION = { ...CLAUDE, login: "claude-subscription" };
 
 class Host {
   readonly epoch = randomUUID();
@@ -94,7 +97,7 @@ class Host {
   }
 
   initialize(home: string): Promise<Reply> {
-    return this.call({ op: "initialize", home, flavor: "public", claudeExecutable: null, personal: PERSONAL, settings: DEFAULT_PREFERENCES });
+    return this.call({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: DEFAULT_PREFERENCES });
   }
 }
 
@@ -116,15 +119,13 @@ test("the real host takes only strict requests, holds H for one writer, and reop
     assert.equal(early.ok, false);
     assert.match(early.error!, /isn't set up/);
 
-    // Malformed, foreign-epoch, legacy and flavor-refused requests get no reply at all.
+    // Malformed, foreign-epoch, legacy and unknown-login requests get no reply at all.
     first.send({ op: "panel", panel: "tree", extra: true }, "extra-field");
     first.send({ op: "panel", panel: "tree" }, "foreign", randomUUID());
     first.send({ op: "open", root: dir, personal: PERSONAL }, "legacy-open");
-    first.send({ op: "initialize", home, flavor: "public", claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent: SUBSCRIPTION } }, "public-subscription");
+    first.send({ op: "initialize", home, claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent: SUBSCRIPTION } }, "init-subscription");
     assert.equal((await first.initialize(home)).ok, true);
-    for (const id of ["extra-field", "foreign", "legacy-open", "public-subscription"]) {
-      assert.equal(first.events.some((e) => e.type === "reply" && e.id === id), false, id);
-    }
+    first.send({ op: "agent-select", choice: SUBSCRIPTION }, "select-subscription");
     const again = await first.initialize(home);
     assert.equal(again.ok, false);
 
@@ -132,12 +133,12 @@ test("the real host takes only strict requests, holds H for one writer, and reop
     await first.ok({ op: "panel", panel: "tree" });
     assert.notEqual((await first.until((s) => s.tree !== null)).tree, null);
     await first.ok({ op: "settings", settings: { ...DEFAULT_PREFERENCES, personalContext: true } });
-    const noClaude = await first.call({ op: "agent-select", choice: { ...SUBSCRIPTION, login: "anthropic-key" } });
+    const noClaude = await first.call({ op: "agent-select", choice: CLAUDE });
     assert.equal(noClaude.ok, false);
     assert.match(noClaude.error!, /isn't available/);
-    const subscription = await first.call({ op: "agent-select", choice: SUBSCRIPTION });
-    assert.equal(subscription.ok, false);
-    assert.match(subscription.error!, /public build/);
+    for (const id of ["extra-field", "foreign", "legacy-open", "init-subscription", "select-subscription"]) {
+      assert.equal(first.events.some((e) => e.type === "reply" && e.id === id), false, id);
+    }
 
     const zone = (await first.ok({ op: "zone-create", zone: { name: "Rust", goal: "learn ownership", parentId: null, language: "rust", focusSkills: [] }, enter: true })).zone!;
     const opened = await first.until((s) => s.activeZone?.id === zone.id && s.state?.prompt?.type === "next");

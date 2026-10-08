@@ -399,7 +399,7 @@ export class Practice {
   private helped(prompt: string): Promise<string> {
     const cwd = join(this.home, "zones", this.zone.id, "runtime");
     mkdirSync(cwd, { recursive: true, mode: 0o700 });
-    return this.store.helper((signal) => this.ask(prompt, { agent: this.agent, cwd, zone: this.zone, binding: this.binding, signal }));
+    return this.store.helper((signal) => this.ask(prompt, { agent: this.agent, role: "helper", cwd, zone: this.zone, binding: this.binding, signal }));
   }
 
   /** `:projects` and its arguments. */

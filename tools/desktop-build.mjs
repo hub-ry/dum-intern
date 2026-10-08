@@ -3,15 +3,6 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { appIconPng } from './app-icon.mjs';
 
-// The flavor is fixed at build time (docs/llm-setup-design.md §8.3); main reads build-info.json.
-const FLAVORS = ['public', 'local'];
-const at = process.argv.indexOf('--flavor');
-const flavor = at === -1 ? undefined : process.argv[at + 1];
-if (!FLAVORS.includes(flavor)) {
-  console.error(`desktop-build: --flavor ${FLAVORS.join('|')} is required`);
-  process.exit(1);
-}
-
 await rm('dist', { recursive: true, force: true });
 execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.desktop.json'], { stdio: 'inherit' });
 await Promise.all([
@@ -25,7 +16,6 @@ await Promise.all([
 ]);
 await rm('dist/desktop/preload.js', { force: true });
 await rm('dist/desktop/bubble-preload.js', { force: true });
-await writeFile('dist/desktop/build-info.json', `${JSON.stringify({ flavor })}\n`);
 
 // Reuse Dum's original portrait for the app icon.
 const { parse } = await import('../dist/art-parser.js');
@@ -42,4 +32,4 @@ if (process.platform === 'darwin') {
   }
   execFileSync('/usr/bin/iconutil', ['-c', 'icns', 'build/icon.iconset', '-o', 'build/icon.icns'], { stdio: 'inherit' });
 }
-console.log(`Desktop compiled (${flavor} flavor) with renderer, curriculum, portraits and app icon.`);
+console.log('Desktop compiled with renderer, curriculum, portraits and app icon.');

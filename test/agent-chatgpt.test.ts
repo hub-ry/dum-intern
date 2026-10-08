@@ -49,7 +49,7 @@ function accessToken(scope = "chatgpt.tokens.use.direct email offline_access ope
   return `${part({ alg: "RS256" })}.${part({ sub: "user", aud, scope, iss: "https://auth.openai.com", exp: 9_999_999_999 })}.sig`;
 }
 
-const option = (o: Partial<ModelOption> = {}): ModelOption => ({ id: "gpt-6.1-sol", label: "GPT-6.1-Sol", efforts: ["low", "medium", "high"], images: true, actions: true, verified: false, ...o });
+const option = (o: Partial<ModelOption> = {}): ModelOption => ({ id: "gpt-6.1-sol", resolved: "gpt-6.1-sol", label: "GPT-6.1-Sol", efforts: ["low", "medium", "high"], images: true, actions: true, verified: false, ...o });
 const actions: WireAction[] = [{ name: "remember", description: "Save a note", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }];
 const step = (history: readonly WireMessage[], o: { effort?: string | null; signal?: AbortSignal; client?: ModelClient } = {}) =>
   (o.client ?? responsesClient(credential(), option())).step({ system: "You are Dum.", history, actions, model: "gpt-6.1-sol", effort: o.effort === undefined ? "high" : o.effort, signal: o.signal ?? new AbortController().signal });
@@ -249,11 +249,11 @@ test("models: the account catalog, listed models only, in server order", async (
   assert.equal(seen[0]!.url, "https://api.openai.com/v1/models");
   assert.equal(seen[0]!.method, "GET");
   assert.deepEqual(models, [
-    { id: "gpt-6.1-sol", label: "GPT-6.1-Sol", efforts: ["low", "high"], images: true, actions: true, verified: false },
-    { id: "gpt-text", label: "Text Only", efforts: [], images: false, actions: true, verified: false },
+    { id: "gpt-6.1-sol", resolved: "gpt-6.1-sol", label: "GPT-6.1-Sol", efforts: ["low", "high"], images: true, actions: true, verified: false },
+    { id: "gpt-text", resolved: "gpt-text", label: "Text Only", efforts: [], images: false, actions: true, verified: false },
   ]);
-  assert.equal(backend.capabilities({ backend: "chatgpt", model: "gpt-6.1-sol", effort: null }).images, true);
-  assert.equal(backend.capabilities({ backend: "chatgpt", model: "gpt-text", effort: null }).images, false);
+  assert.equal((await backend.capabilities({ backend: "chatgpt", model: "gpt-6.1-sol", effort: null }, "chatgpt", new AbortController().signal)).images, true);
+  assert.equal((await backend.capabilities({ backend: "chatgpt", model: "gpt-text", effort: null }, "chatgpt", new AbortController().signal)).images, false);
   await assert.rejects(backend.models("anthropic-key", new AbortController().signal), /doesn't sign in with anthropic-key/);
 });
 

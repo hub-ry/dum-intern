@@ -1,15 +1,14 @@
 // "Who powers Dum?" as data: which rows to show, what is preselected, and how each model reads.
 // Pure, so the rules are tested without a window (docs/llm-setup-design.md §4.1-4.4).
 
-import { CLAUDE_DEFAULTS, offeredLogins } from "../../agent/schema.ts";
-import type { AgentChoice, BackendId, BackendStatus, Flavor, LoginMethod, ModelOption, Role, Selector } from "../../agent/types.ts";
+import { BACKEND_LOGINS, CLAUDE_DEFAULTS, ROLES } from "../../agent/schema.ts";
+import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption, Role, Selector } from "../../agent/types.ts";
 
-/** One backend as the sheet shows it, with only the sign-in methods this build offers. */
+/** One backend as the sheet shows it, with only the sign-in methods Dum offers for it. */
 export type BackendRow = Omit<BackendStatus, "methods" | "ready"> & { methods: LoginMethod[]; ready: LoginMethod | null };
 
 const METHOD_LABELS: Record<LoginMethod, string> = {
   "anthropic-key": "Use an Anthropic API key",
-  "claude-subscription": "Sign in with Claude",
   chatgpt: "Continue with ChatGPT",
   github: "Sign in with GitHub",
   none: "No sign-in needed",
@@ -21,11 +20,11 @@ export function methodLabel(method: LoginMethod): string {
   return METHOD_LABELS[method];
 }
 
-/** One row per backend main reports, ready rows first. A method the flavor doesn't offer is never listed or shown as ready. */
-export function backendRows(flavor: Flavor, backends: readonly BackendStatus[]): BackendRow[] {
+/** One row per backend main reports, ready rows first. A method the backend doesn't take is never listed or shown as ready. */
+export function backendRows(backends: readonly BackendStatus[]): BackendRow[] {
   const rows: BackendRow[] = [];
   for (const b of backends) {
-    const offered = offeredLogins(flavor, b.id);
+    const offered = BACKEND_LOGINS[b.id];
     const methods = b.methods.filter((m) => offered.includes(m));
     if (!methods.length) continue;
     rows.push({ ...b, methods, ready: b.ready !== null && methods.includes(b.ready) ? b.ready : null });
@@ -47,9 +46,11 @@ export function preselectedLogin(row: BackendRow, chosen: AgentChoice | null): L
   return row.methods.length === 1 ? row.methods[0]! : null;
 }
 
-/** The intern needs function calling; the helper may be any listed model. */
+/** The intern needs function calling, the look needs image input, and the helper may be any listed model. */
 export function roleModels(models: readonly ModelOption[], role: Role): ModelOption[] {
-  return role === "intern" ? models.filter((m) => m.actions) : [...models];
+  if (role === "intern") return models.filter((m) => m.actions);
+  if (role === "look") return models.filter((m) => m.images);
+  return [...models];
 }
 
 /** A model as the picker lists it: its label, and "untested" until Dum has proven it on this backend. */
@@ -59,7 +60,12 @@ export function modelText(model: ModelOption): string {
 
 /** What a helper without image input can't do, or "" when it can see pictures. */
 export function helperWarning(model: ModelOption | null): string {
-  return model && !model.images ? "This helper can't see pictures, so screen look and shared pictures won't work with it." : "";
+  return model && !model.images ? "This helper can't see pictures, so pictures you share won't work with it." : "";
+}
+
+/** What an unverified look model means for screen looks, or "" when it is verified. */
+export function lookWarning(model: ModelOption | null): string {
+  return model && !model.verified ? "Dum won't send this model pictures until it is verified, so the look runs on text alone." : "";
 }
 
 /** `wanted` when the model advertises it, else its first advertised effort, or null for a model without the knob. */
@@ -80,8 +86,9 @@ export function preselectedSelector(backend: BackendId, role: Role, models: read
   return backend === "claude" ? from(CLAUDE_DEFAULTS[role]) : null;
 }
 
-/** A complete choice, or null while anything is still unpicked. */
-export function buildChoice(backend: BackendId | null, login: LoginMethod | null, intern: Selector | null, helper: Selector | null): AgentChoice | null {
-  if (!backend || !login || !intern || !helper || intern.backend !== backend || helper.backend !== backend) return null;
-  return { backend, login, intern, helper };
+/** A complete choice, or null while any role is unpicked or picked on another backend. */
+export function buildChoice(backend: BackendId | null, login: LoginMethod | null, picks: Readonly<Record<Role, Selector | null>>): AgentChoice | null {
+  if (!backend || !login) return null;
+  for (const role of ROLES) if (picks[role]?.backend !== backend) return null;
+  return { backend, login, intern: picks.intern!, helper: picks.helper!, look: picks.look! };
 }

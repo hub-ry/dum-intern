@@ -1,7 +1,7 @@
 // The conversation's data, without the Store: protocol and renderer import these, never the Store itself.
 
 import type { Mode } from "./gate.ts";
-import type { BackendId } from "./agent/types.ts";
+import type { BackendId, Role } from "./agent/types.ts";
 import type { ZoneId } from "./zone-types.ts";
 
 export type Outcome = "ran" | "held" | "refused";
@@ -67,7 +67,7 @@ export type State = {
   status: string;
   stage: Stage;
   unlocked: number;
-  models: { intern: ModelLabel | null; helper: ModelLabel | null };
+  models: Record<Role, ModelLabel | null>;
 };
 
 /** A picture they chose to share with one request: base64 PNG, held only until that turn is sent. */

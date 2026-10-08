@@ -15,7 +15,7 @@ test("a store holds one zone's conversation state, with no model until one is se
   assert.equal(state.zoneId, z.id);
   assert.equal(state.zoneName, "Data Structures");
   assert.equal(state.mode, "anti-vibe");
-  assert.deepEqual(state.models, { intern: null, helper: null });
+  assert.deepEqual(state.models, { intern: null, helper: null, look: null });
   assert.equal(state.prompt, null);
   assert.ok(!("repo" in state) && !("root" in state) && !("files" in state));
 });
@@ -31,6 +31,7 @@ test("model labels name the backend, model and effort, and set only on change", 
   assert.deepEqual(s.getSnapshot().models, {
     intern: { backend: "claude", model: "claude-opus-5-5", effort: "high" },
     helper: { backend: "local", model: "qwen3:8b", effort: null },
+    look: null,
   });
   s.setModel("intern", null);
   assert.equal(s.getSnapshot().models.intern, null);

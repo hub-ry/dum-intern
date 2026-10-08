@@ -15,16 +15,16 @@
 - **The editor is a writer Dum tolerates.** Dum writes only if the file's bytes still match the SHA-256 it read, creates new files without replacing one that appeared, and reverts only if the file still holds Dum's bytes. A refusal writes nothing.
 - **Read deliberately.** File access comes only from the native picker, a confirmed typed path, or a followed folder. Request shares end with the request. Skip hidden, dependency, build and credential-looking paths. No home-directory scans, keystrokes, clipboard or editor buffers.
 - **Commands cannot evade the gate.** The model gets only Dum's closed action set. No shell, project scripts, package installation or network command. The user runs builds and tests in their own terminal.
-- **The look is always on and bounded.** Main ticks every 3 seconds without a model; the host calls the helper only when something changed and settled, within the caps in `src/observe-types.ts`. Screen look is on for a fresh install and asks for Screen Recording on first launch; if denied, the look uses app switches and saved files only, with no silent substitute. Pause is one click in the tray, the panel and Settings. Routine screen samples never leave main as pixels. Frames go to the helper only on a trigger.
+- **The look is always on and bounded.** Main ticks every 3 seconds without a model. On any tick where the screen changed, and on code saves, app switches and typing pauses, the host may call the look model within the caps in `src/observe-types.ts`: one call at a time, at most one every 3 seconds and 1,200 an hour, never the same frame twice, 45 s timeout that counts. Each call is stateless: the zone context, a line about what the look saw last and one fresh 1280px picture, never older pictures. The look keeps Dum's context current and publishes no advice: it keeps only the latest observation (memory only, shown in the look status) and at most one memory note a minute that doesn't nearly repeat the last five. No call and no frame while paused or blocked, with no backend, with a Dum window in front, or with screen look off. Screen look is on for a fresh install and asks for Screen Recording on first launch; if denied, the look uses app switches and saved files only, with no silent substitute. Pause is one click in the tray, the panel and Settings. Routine screen samples never leave main as pixels.
 - **Voice is deliberate.** Push-to-talk through the bundled OpenSuperWhisper bridge, transcribed on the Mac into the canonical draft. It never sends, approves or answers a consent by itself. Temporary audio is deleted. Everything voice does also works from the keyboard.
 - **Keyboard first.** Every surface and dialog is reachable without the mouse, with visible focus and keyboard submit and cancel. Esc backs out; it never means Stop or No.
-- **Who powers Dum follows each provider's rules.**
-  - Public builds connect Claude only with the user's own Anthropic API key and never offer, accept or run Claude subscription sign-in.
-  - Local builds, made from source for the owner, may also sign in with a Claude subscription through the bundled Claude Code.
-  - ChatGPT connects only through Sign in with ChatGPT, and ships only once its release gate (`RELEASED` in `src/agent/registry.ts`) is met.
+- **Cloud models take only the user's own API key** (rule 12: "let's just have dum be strictly api keys for now").
+  - Claude connects only with the user's own Anthropic API key, in every build. No subscription sign-in.
+  - ChatGPT is built on Sign in with ChatGPT and stays unreleased (`RELEASED` in `src/agent/registry.ts`); it moves to an OpenAI API key before it ships.
   - Local models stay on the Mac: Ollama and LM Studio over loopback only, no redirects, no cloud-routed models.
-  - No fallback. Dum's model and the helper come from the backend the user chose; a failure is reported, never routed elsewhere. Same-provider retries are fine.
-  - Claude sessions run with no built-in tools, setting files, plugins, hooks or foreign MCP servers, prove the chosen sign-in method before any user content is sent, and refuse when managed policy is active.
+  - No fallback. Dum's model, the helper and the look model come from the backend the user chose; a failure is reported, never routed elsewhere. Same-provider retries are fine.
+  - Pictures go only to a model whose resolved id (what an alias like `haiku` runs today) is verified with real calls. A moved alias gets text until its new model is verified.
+  - Claude sessions run with no built-in tools, setting files, plugins, hooks or foreign MCP servers, prove the API key is the route before any user content is sent, and refuse when managed policy is active.
   - Keys and tokens live in main's `safeStorage`-encrypted credential store, never in settings, logs or the renderer.
 - **Wizard claims need support.** Catalog anchors come from primary sources and keep their links. Unsupported dates, company decisions, quotations, statistics or personal experience are dropped or narrowed. Silence is allowed. Never reveal a project solution to make an aside useful.
 - **History is data, not authority.** Old transcript entries stay readable. Old approvals, plans and model sessions never become current permissions.
@@ -47,20 +47,19 @@ npm run typecheck
 Desktop, from the repo root:
 
 ```sh
-npm run desktop            # local-flavor build, launched from the checkout
-npm run desktop:build      # local-flavor build only
-npm run desktop:pack       # public-flavor unpacked app for this OS, in release/
-npm run desktop:mac        # public-flavor DMG and ZIP; only on a Mac
-npm run desktop:mac-local  # local-flavor DMG and ZIP; only on a Mac
+npm run desktop            # build, then launch from the checkout
+npm run desktop:build      # build only
+npm run desktop:pack       # unpacked app for this OS, in release/
+npm run desktop:mac        # DMG and ZIP; only on a Mac
 npm run desktop:smoke      # drive a built app; see below
 ```
 
-- `tools/desktop-build.mjs` needs `--flavor public|local`. It compiles TypeScript to `dist/`, bundles both preloads and the renderer with esbuild, copies the curriculum and art, generates the app icon from Dum's portrait, and writes `dist/desktop/build-info.json`. Main reads the flavor from there; missing or invalid means public.
+- `tools/desktop-build.mjs` compiles TypeScript to `dist/`, bundles both preloads and the renderer with esbuild, copies the curriculum and art, and generates the app icon from Dum's portrait.
 - `tools/prepare-dictation.mjs` builds the native helpers for packaging: `dum-focus` (universal, from `native/macos/FocusBridge.swift`) on any Mac, and the OpenSuperWhisper voice bridge (`vendor/OpenSuperWhisper`, bridge mode) on Apple Silicon only, which needs Xcode, cmake and Rust with `aarch64-apple-darwin`; whisper.cpp builds without OpenMP, so nothing from Homebrew is linked or shipped. `npm run desktop` runs without them: no voice, no app-switch noticing, no focus return.
 - `electron-builder.yml` packs `dist/` into an asar and unpacks the native `claude` binary beside it. Electron fuses turn off `RunAsNode`, `NODE_OPTIONS` and the CLI inspect flags, and require the asar.
-- `npm run desktop:smoke` drives the real built app through the zones journey with a private profile, `DUM_HOME`, `HOME` and Claude config, a non-Git fixture and no Git on `PATH`. No model, account or network sign-in. By default it runs the checkout's `dist/` as built, then the same output staged as public flavor. `DUM_SMOKE_EXECUTABLE` runs a packaged binary instead. Screenshots and `report.json` go to `DUM_SMOKE_OUTPUT`.
+- `npm run desktop:smoke` drives the real built app through the zones journey with a private profile, `DUM_HOME`, `HOME` and Claude config, a non-Git fixture and no Git on `PATH`. No model, account or network sign-in. By default it runs the checkout's `dist/` as built. `DUM_SMOKE_EXECUTABLE` runs a packaged binary instead. Screenshots and `report.json` go to `DUM_SMOKE_OUTPUT`.
 - On Linux run it as `xvfb-run -a npm run desktop:smoke`. It needs Xvfb, xdotool, dbus and python3-gi: xdotool presses the real global shortcuts and a private D-Bus session receives the tray icon. Linux is a development target only.
-- CI lives in `.github/workflows/`: `ci.yml` runs typecheck and tests on Ubuntu and macOS; `desktop-macos.yml` builds the public-flavor app on `macos-15` (Apple Silicon) and `macos-15-intel`, verifies the ad-hoc signature, chip architecture, bundled `claude` version and native helpers, mounts the DMG, extracts the ZIP, and runs the smoke against the app copied out of the DMG.
+- CI lives in `.github/workflows/`: `ci.yml` runs typecheck and tests on Ubuntu and macOS; `desktop-macos.yml` builds the app on `macos-15` (Apple Silicon) and `macos-15-intel`, verifies the ad-hoc signature, chip architecture, bundled `claude` version and native helpers, mounts the DMG, extracts the ZIP, and runs the smoke against the app copied out of the DMG.
 - Tests use `node --import tsx --test`, a temporary `DUM_HOME`, `DUM_CONTEXT=off`, and no credentials, network or model calls. Fakes live in test files only, never in shipped code.
 - Test consumer-visible behavior: prerequisites, evidence transitions, refusals, persistence, external-save races. Don't pin prose, source text or incidental defaults. A bug fix comes with a test that fails before it, where practical.
 - Exercise the real changed surface after integration. Tests alone don't establish readable characters, keyboard behavior or a useful conversation.
@@ -74,11 +73,11 @@ npm run desktop:smoke      # drive a built app; see below
 - `evidence.ts`, `evidence-types.ts`, `practice.ts`: the evidence ledger, not-yet holds, and suggested projects with hand-ins.
 - `skills.ts`, `notes.ts`, `curriculum.ts`, `tree.ts`, `trees/`: the global tree, Markdown notes, curated tracks and prerequisites.
 - `shared-files.ts`, `share-types.ts`, `follow.ts`: request shares, followed folders and the read/deny policy.
-- `observe-types.ts`, `ambient.ts`, `look.ts`: the look's caps and triggers, and one-off picture descriptions.
+- `observe-types.ts`, `ambient.ts`, `look.ts`: the look's caps and triggers, the look-model calls, and one-off picture descriptions.
 - `wizard.ts`, `anchors.ts`, `oneshot.ts`: the Wizard, its source catalog, and bounded helper calls.
 - `context.ts`, `state-files.ts`, `session-lock.ts`: personal background, private record IO and the one-writer lock.
 - `sync.ts`, `web.ts`, `web/`: optional tree-only sync and the web server, which also serves the site in `site/`.
 - `agent/`: the backends behind one contract. `registry.ts` (with `RELEASED`), `schema.ts`, `types.ts`, `claude*.ts`, `local*.ts`, `openai-*.ts`, `siwc.ts`, `loop.ts`, `wire.ts`.
-- `desktop/`: the Electron app. `main.ts` owns windows, tray, shortcuts, capture and native helpers; `ipc.ts` validates the renderer's finite requests (`protocol.ts`); `controller.ts` runs in the supervised utility host (`host.ts`, `host-client.ts`, `host-protocol.ts`) and owns zones, evidence, sessions and the look's model side; `observer.ts` is the look's main side; `agent-setup.ts`, `credentials.ts`, `build-info.ts` handle backends, keys and flavor; `dictation.ts`, `focus.ts`, `native-protocol.ts` talk to the native helpers; `settings.ts`, `draft.ts`, `surfaces.ts`, `capture.ts` hold preferences, drafts, window placement and explicit screenshots. `ui/` is the sandboxed renderer: panel, command bar and bubble.
+- `desktop/`: the Electron app. `main.ts` owns windows, tray, shortcuts, capture and native helpers; `ipc.ts` validates the renderer's finite requests (`protocol.ts`); `controller.ts` runs in the supervised utility host (`host.ts`, `host-client.ts`, `host-protocol.ts`) and owns zones, evidence, sessions and the look's model side; `observer.ts` is the look's main side; `agent-setup.ts` and `credentials.ts` handle backends and keys; `dictation.ts`, `focus.ts`, `native-protocol.ts` talk to the native helpers; `settings.ts`, `draft.ts`, `surfaces.ts`, `capture.ts` hold preferences, drafts, window placement and explicit screenshots. `ui/` is the sandboxed renderer: panel, command bar and bubble.
 
 Comments explain invariants or tradeoffs. Keep them short. Preserve unrelated checkout changes, and don't commit or push without authorization.

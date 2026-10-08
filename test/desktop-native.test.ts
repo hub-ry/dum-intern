@@ -183,12 +183,12 @@ class FakeHost {
   async interrupt() { this.calls.push("interrupt"); }
 }
 
-function desktop(o: { flavor?: "public" | "local" } = {}) {
+function desktop() {
   const dir = temp();
   const host = new FakeHost();
   const { c, grabs } = capturer();
   const captures = new Captures(c);
-  const settings = DesktopSettings.load(dir, o.flavor ?? "local");
+  const settings = DesktopSettings.load(dir);
   const calls: string[] = [];
   let conflict = "";
   let picked: string | null = null;
@@ -224,9 +224,9 @@ function desktop(o: { flavor?: "public" | "local" } = {}) {
   const look: string[] = [];
   const router = new Router({
     host: host as unknown as Host, captures, drafts: new Drafts(), settings,
-    agent: new AgentSetup([], settings.flavor, new Set()), native, dictation,
+    agent: new AgentSetup([], new Set()), native, dictation,
     observer: { setLook: (p) => look.push(JSON.stringify(p)), pause: (p) => look.push(`pause ${p}`), status: "looking" },
-    bubble, restart: async () => void calls.push("restart"), changed: () => {}, platform: "linux", version: "0.0.1",
+    bubble, restart: async () => void calls.push("restart"), keySaved: () => void calls.push("key saved"), changed: () => {}, platform: "linux", version: "0.0.1",
   });
   router.changed();
   return {
@@ -470,7 +470,10 @@ test("settings: distinct shortcuts, applied before saved, rolled back on conflic
   d.conflictOn("Alt+K");
   refused(await d.router.handle({ type: "settings", settings: { ...prefs, hotkey: "Alt+K" } }, "panel"), /already used/);
   assert.equal(existsSync(join(d.dir, "settings.json")), false, "a refused shortcut saves nothing");
-  const agent = { backend: "local", login: "none", intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "m", effort: null } } as const;
+  const agent = {
+    backend: "local", login: "none",
+    intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "m", effort: null }, look: { backend: "local", model: "m", effort: null },
+  } as const;
   refused(await d.router.handle({ type: "settings", settings: { ...prefs, agent } }, "panel"), /Who powers Dum|Agent/);
 
   ok(await d.router.handle({ type: "settings", settings: { ...prefs, hotkey: "Alt+J", voiceHotkey: "Control+Alt+V", look: { apps: true, screen: false } } }, "panel"));

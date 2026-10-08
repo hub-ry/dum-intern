@@ -1,6 +1,7 @@
 // Claude behind the agent contract: the bundled CLI through the Agent SDK, with no built-in
-// tools, no setting files, no auto-memory and only Dum's own actions. Every session proves its
-// sign-in method before any user content reaches Claude, and nothing falls back.
+// tools, no setting files, no auto-memory and only Dum's own actions. Claude connects only with
+// the user's own Anthropic API key; every session proves it before any user content reaches
+// Claude, and nothing falls back.
 
 import { setTimeout as sleep } from "node:timers/promises";
 import { createSdkMcpServer, query, resolveSettings, tool } from "@anthropic-ai/claude-agent-sdk";
@@ -15,7 +16,6 @@ import type {
   SDKSystemMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_DEFAULTS, offeredLogins } from "./schema.ts";
 import { AUTO_MEMORY_OFF, FLAGS, authStatus, providerFreeEnv, type AuthStatus } from "./claude-cli.ts";
 import type {
   AgentBackend,
@@ -24,7 +24,6 @@ import type {
   Capabilities,
   CredentialSource,
   DumAction,
-  Flavor,
   LoginMethod,
   ModelOption,
   OpenOptions,
@@ -32,30 +31,32 @@ import type {
   UserTurn,
 } from "./types.ts";
 
-/** Selectors proven with real calls. Only these are offered with pictures. */
-export const CLAUDE_VERIFIED: readonly Selector[] = [CLAUDE_DEFAULTS.intern, CLAUDE_DEFAULTS.helper];
+/**
+ * Models proven with real calls through Dum's own Claude backend, by the id a catalog row resolves
+ * to and the session reports at `system/init`; never by alias. Only these are sent pictures.
+ */
+export const CLAUDE_VERIFIED: Readonly<Record<string, true>> = { "claude-opus-5-5": true, "claude-fable-5-1": true };
 
-/** The one Claude child's environment: no inherited routes or keys, auto-memory off, and Dum's key only in key mode. */
-export function claudeEnv(base: NodeJS.ProcessEnv, key: string | null): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...providerFreeEnv(base), ...AUTO_MEMORY_OFF };
-  if (key !== null) env.ANTHROPIC_API_KEY = key;
-  return env;
+/** Why `selector`, running `resolved` today, may not be sent pictures; "" when it may. */
+export function noImages(selector: Selector, resolved: string): string {
+  if (Object.hasOwn(CLAUDE_VERIFIED, resolved)) return "";
+  return selector.model === resolved
+    ? `${resolved} isn't verified for pictures yet`
+    : `${selector.model} changed to ${resolved}, which isn't verified for pictures yet`;
+}
+
+/** The one Claude child's environment: no inherited routes or keys, auto-memory off, and the user's key. */
+export function claudeEnv(base: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
+  return { ...providerFreeEnv(base), ...AUTO_MEMORY_OFF, ANTHROPIC_API_KEY: key };
 }
 
 /** Dum's single in-process MCP server; its tools are Dum's actions. */
 const SERVER = "dum";
 const PREFIX = `mcp__${SERVER}__`;
 
-/** The sign-in a session must prove, and the build it runs in. */
-export type Route = { login: LoginMethod; flavor: Flavor };
-
-/** Refuse a sign-in this build doesn't offer for Claude, before anything starts. */
-function assertRoute(route: Route): void {
-  if (!offeredLogins(route.flavor, "claude").includes(route.login)) {
-    throw new Error(route.login === "claude-subscription"
-      ? "This build of Dum doesn't use a Claude subscription. Use an Anthropic API key."
-      : `Claude doesn't sign in with ${route.login}`);
-  }
+/** Claude connects only with the user's Anthropic API key; refuse anything else before it starts. */
+function assertKey(login: LoginMethod): void {
+  if (login !== "anthropic-key") throw new Error(`Claude doesn't sign in with ${login}; it uses your Anthropic API key`);
 }
 
 /** Only the given wire names, served by Dum's own in-process server; anything else is denied. */
@@ -140,17 +141,11 @@ export function closed(o: ClosedInput): Options {
 export type Init = Pick<SDKSystemMessage, "apiKeySource" | "tools" | "mcp_servers"> & { plugins?: { name: string }[] };
 
 /**
- * Fail closed when a started session isn't on the chosen sign-in or reports anything beyond
- * Dum's actions. Names only: no account or credential contents go in the message.
+ * Fail closed when a started session isn't on the user's API key or reports anything beyond Dum's
+ * actions. Names only: no account or credential contents go in the message.
  */
-export function assertInit(init: Init, route: Route, actions: readonly string[]): void {
-  assertRoute(route);
-  if (route.login === "anthropic-key" && init.apiKeySource !== "ANTHROPIC_API_KEY") {
-    throw new Error(`Claude didn't start with your API key (${init.apiKeySource})`);
-  }
-  if (route.login === "claude-subscription" && init.apiKeySource !== "none") {
-    throw new Error(`Claude started with an API key (${init.apiKeySource}) instead of your subscription login`);
-  }
+export function assertInit(init: Init, actions: readonly string[]): void {
+  if (init.apiKeySource !== "ANTHROPIC_API_KEY") throw new Error(`Claude didn't start with your API key (${init.apiKeySource})`);
   const wire = new Set(actions.map((a) => PREFIX + a));
   const extra = (init.tools ?? []).filter((t) => !wire.has(t));
   if (extra.length) throw new Error(`Claude started with actions Dum doesn't allow: ${extra.slice(0, 8).join(", ")}`);
@@ -160,57 +155,54 @@ export function assertInit(init: Init, route: Route, actions: readonly string[])
 }
 
 /**
- * The account must be on Anthropic's own route and on the chosen sign-in. When the handshake
- * hasn't resolved the credential yet, `auth` asks the same bundled CLI with the same env.
- * Fails closed if Claude can't say within `ms`.
+ * The account must be on Anthropic's own route with the user's API key. When the handshake hasn't
+ * resolved the credential yet, `auth` asks the same bundled CLI with the same env. Fails closed if
+ * Claude can't say within `ms`.
  */
-export async function assertProvider(
-  q: { accountInfo(): Promise<AccountInfo> },
-  route: Route,
-  auth: () => Promise<AuthStatus>,
-  ms = 15_000,
-): Promise<void> {
-  assertRoute(route);
+export async function assertProvider(q: { accountInfo(): Promise<AccountInfo> }, auth: () => Promise<AuthStatus>, ms = 15_000): Promise<void> {
   const stop = new AbortController();
   // Unref'd: a start that was aborted mid-check doesn't hold the process open.
   const late = sleep(ms, undefined, { signal: stop.signal, ref: false }).then(
-    () => { throw new Error("Claude didn't confirm its sign-in in time"); },
+    () => { throw new Error("Claude didn't confirm your API key in time"); },
     () => undefined,
   );
   try {
     const info = await Promise.race([q.accountInfo(), late]);
     if (info?.apiProvider !== "firstParty") throw new Error(`Claude isn't on Anthropic's own route (${info?.apiProvider ?? "unknown"})`);
-    const key = route.login === "anthropic-key";
     if (info.apiKeySource === undefined) {
       const status = await Promise.race([auth(), late]);
-      const method = key ? "api_key" : "claude.ai";
-      if (!status?.loggedIn || status.authMethod !== method || status.apiProvider !== "firstParty") {
-        throw new Error(key ? "Claude didn't start with your API key" : "Claude isn't signed in with your subscription");
-      }
-    } else if (info.apiKeySource !== (key ? "ANTHROPIC_API_KEY" : "none")) {
-      throw new Error(key ? "Claude didn't start with your API key" : "Claude didn't confirm a subscription login without an API key");
+      if (!status?.loggedIn || status.authMethod !== "api_key" || status.apiProvider !== "firstParty") throw new Error("Claude didn't start with your API key");
+    } else if (info.apiKeySource !== "ANTHROPIC_API_KEY") {
+      throw new Error("Claude didn't start with your API key");
     }
   } finally {
     stop.abort();
   }
 }
 
-/** The live catalog as the picker shows it. Only verified selectors take pictures. */
+/**
+ * The live catalog as the picker shows it. Every Claude model takes pictures; Dum sends them only to
+ * a row whose resolved model is in `CLAUDE_VERIFIED`, and `verified` says which rows those are.
+ */
 export function catalog(models: readonly ModelInfo[]): ModelOption[] {
-  return models.map((m) => ({
-    id: m.value,
-    label: m.displayName || m.value,
-    efforts: m.supportsEffort ? [...(m.supportedEffortLevels ?? [])] : [],
-    images: CLAUDE_VERIFIED.some((s) => s.model === m.value),
-    actions: true,
-    verified: CLAUDE_VERIFIED.some((s) => s.model === m.value),
-  }));
+  return models.map((m) => {
+    const resolved = m.resolvedModel || m.value;
+    return {
+      id: m.value,
+      resolved,
+      label: m.displayName || m.value,
+      efforts: m.supportsEffort ? [...(m.supportedEffortLevels ?? [])] : [],
+      images: true,
+      actions: true,
+      verified: Object.hasOwn(CLAUDE_VERIFIED, resolved),
+    };
+  });
 }
 
 /** The selector must be in the live catalog with an advertised effort. */
 function assertListed(options: readonly ModelOption[], selector: Selector): void {
   const hit = options.find((m) => m.id === selector.model);
-  if (!hit) throw new Error(`Claude doesn't offer ${selector.model} on this sign-in`);
+  if (!hit) throw new Error(`Claude doesn't list ${selector.model} for your key - choose again in Settings › Agent`);
   if (selector.effort === null ? hit.efforts.length > 0 : !hit.efforts.includes(selector.effort)) {
     throw new Error(`${selector.model} doesn't take ${selector.effort ?? "no"} effort`);
   }
@@ -227,10 +219,14 @@ const SDK: Sdk = { query, resolveSettings };
 export async function start(
   prompt: AsyncIterable<SDKUserMessage>,
   options: Options,
-  o: { route: Route; selector: Selector | null; auth: () => Promise<AuthStatus>; sdk?: Sdk },
+  o: {
+    login: LoginMethod; selector: Selector | null; auth: () => Promise<AuthStatus>; sdk?: Sdk;
+    /** The catalog this handshake read, before the selector is checked against it. */
+    seen?: (options: ModelOption[]) => void;
+  },
 ): Promise<Query> {
   const sdk = o.sdk ?? SDK;
-  assertRoute(o.route);
+  assertKey(o.login);
   const signal = options.abortController?.signal;
   const stopped = () => new Error("stopped before Claude finished starting");
   const policy = await sdk.resolveSettings({ cwd: options.cwd, settingSources: [] });
@@ -249,8 +245,12 @@ export async function start(
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
     if (signal?.aborted) throw stopped();
-    await Promise.race([assertProvider(session, o.route, o.auth), aborted]);
-    if (o.selector) assertListed(catalog(await Promise.race([session.supportedModels(), aborted])), o.selector);
+    await Promise.race([assertProvider(session, o.auth), aborted]);
+    if (o.selector) {
+      const options = catalog(await Promise.race([session.supportedModels(), aborted]));
+      o.seen?.(options);
+      assertListed(options, o.selector);
+    }
     release(true);
     return session;
   } catch (err) {
@@ -321,28 +321,32 @@ function userMessage(input: UserTurn): SDKUserMessage {
   };
 }
 
-export function claudeBackend(o: { executable: string; flavor: Flavor; credential: CredentialSource; sdk?: Sdk }): AgentBackend {
-  /** The key for key mode (fetched from main for this one query), or null for the subscription. */
-  async function keyFor(login: LoginMethod, signal: AbortSignal): Promise<string | null> {
-    assertRoute({ login, flavor: o.flavor });
-    if (login !== "anthropic-key") return null;
+export function claudeBackend(o: { executable: string; credential: CredentialSource; sdk?: Sdk }): AgentBackend {
+  /** The user's key, fetched from main for this one query. */
+  async function keyFor(login: LoginMethod, signal: AbortSignal): Promise<string> {
+    assertKey(login);
     const key = await o.credential("anthropic-key", signal);
     if (!key) throw new Error("Add your Anthropic API key to use Claude");
     return key.value;
   }
 
-  function capabilities(selector: Selector): Capabilities {
-    return {
-      images: CLAUDE_VERIFIED.some((s) => s.model === selector.model && s.effort === selector.effort),
-      interrupt: true,
-      runtimeActionCheck: true,
-    };
+  /** The last catalog Claude listed for the key: every catalog read and session handshake refreshes it. */
+  let listed: readonly ModelOption[] | null = null;
+
+  function judge(selector: Selector, options: readonly ModelOption[]): Capabilities {
+    const row = options.find((m) => m.id === selector.model);
+    const model = row?.resolved ?? selector.model;
+    const why = row ? noImages(selector, model) : `${selector.model} isn't in Claude's model list for your key`;
+    return { model, images: why === "", noImages: why, interrupt: true, runtimeActionCheck: true };
   }
 
-  return {
+  const backend: AgentBackend = {
     id: "claude",
     label: "Claude",
-    capabilities,
+
+    async capabilities(selector, login, signal) {
+      return judge(selector, listed ?? await backend.models(login, signal));
+    },
 
     async models(login, signal) {
       const env = claudeEnv(process.env, await keyFor(login, signal));
@@ -353,11 +357,11 @@ export function claudeBackend(o: { executable: string; flavor: Flavor; credentia
       inbox.end();
       try {
         const options = closed({ executable: o.executable, cwd: process.cwd(), systemPrompt: "", selector: null, env, actions: [], abortController });
-        const session = await start(inbox.messages(), options, {
-          route: { login, flavor: o.flavor }, selector: null, auth: () => authStatus(o.executable, env), sdk: o.sdk,
-        });
+        const session = await start(inbox.messages(), options, { login, selector: null, auth: () => authStatus(o.executable, env), sdk: o.sdk });
         try {
-          return catalog(await session.supportedModels());
+          const options = catalog(await session.supportedModels());
+          listed = options;
+          return options;
         } finally {
           session.close();
         }
@@ -369,7 +373,6 @@ export function claudeBackend(o: { executable: string; flavor: Flavor; credentia
 
     async open(open: OpenOptions): Promise<AgentSession> {
       if (open.selector.backend !== "claude") throw new Error(`${open.selector.backend} isn't a Claude model`);
-      const route: Route = { login: open.login, flavor: o.flavor };
       const env = claudeEnv(process.env, await keyFor(open.login, open.signal));
       const abortController = new AbortController();
       const onAbort = () => abortController.abort();
@@ -382,14 +385,22 @@ export function claudeBackend(o: { executable: string; flavor: Flavor; credentia
         env, actions: open.actions, abortController, maxTurns: open.maxTurns,
       });
       let session: Query;
+      // Pictures are judged on the model the selector resolves to in this very handshake's catalog.
+      let caps: Capabilities | null = null;
       try {
-        session = await start(inbox.messages(), options, { route, selector: open.selector, auth: () => authStatus(o.executable, env), sdk: o.sdk });
+        session = await start(inbox.messages(), options, {
+          login: open.login, selector: open.selector, auth: () => authStatus(o.executable, env), sdk: o.sdk,
+          seen: (options) => {
+            listed = options;
+            caps = judge(open.selector, options);
+          },
+        });
       } catch (err) {
         open.signal.removeEventListener("abort", onAbort);
         throw err;
       }
       const replies = session[Symbol.asyncIterator]();
-      const images = capabilities(open.selector).images;
+      const { model, images, noImages: why } = caps ?? judge(open.selector, []);
       let shut = false;
       let busy = false;
       let interrupted = false;
@@ -405,7 +416,7 @@ export function claudeBackend(o: { executable: string; flavor: Flavor; credentia
       async function* turn(input: UserTurn): AsyncGenerator<AgentEvent> {
         if (shut) throw new Error("this Claude session is closed");
         if (busy) throw new Error("Claude is still answering the last turn");
-        if (input.images?.length && !images) throw new Error(`${open.selector.model} isn't set up to read pictures in Dum`);
+        if (input.images?.length && !images) throw new Error(why);
         busy = true;
         interrupted = false;
         try {
@@ -417,7 +428,9 @@ export function claudeBackend(o: { executable: string; flavor: Flavor; credentia
             if (msg.type === "system" && msg.subtype === "api_retry") {
               yield { type: "retry", message: retryStatus(msg) };
             } else if (msg.type === "system" && msg.subtype === "init") {
-              assertInit(msg, route, names);
+              assertInit(msg, names);
+              // Verification is by the model the session runs; pictures sent for one model must not reach another.
+              if (input.images?.length && msg.model !== model) throw new Error(`Claude ran ${msg.model}, not ${model} - stopped`);
               yield { type: "model", model: msg.model, effort: open.selector.effort };
             } else if (msg.type === "assistant") {
               for (const b of msg.message.content) {
@@ -454,4 +467,5 @@ export function claudeBackend(o: { executable: string; flavor: Flavor; credentia
       };
     },
   };
+  return backend;
 }

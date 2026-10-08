@@ -8,7 +8,7 @@ import { BrowserWindow, utilityProcess, type UtilityProcess } from "electron";
 import { providerFreeEnv } from "../agent/claude-cli.ts";
 import { HostEventSchema, HostRequestSchema, type HostEvent, type HostResult } from "./host-protocol.ts";
 import type { Context } from "../context.ts";
-import type { AgentChoice, BackendId, CredentialSource, Flavor, LoginMethod, ModelOption, Picture } from "../agent/types.ts";
+import type { AgentChoice, BackendId, CredentialSource, LoginMethod, ModelOption, Picture } from "../agent/types.ts";
 import type { Tick } from "../observe-types.ts";
 import type { InputBinding, RequestBinding, ShareGrant } from "../share-types.ts";
 import type { SharedImage } from "../store-types.ts";
@@ -20,7 +20,6 @@ export type HostView = Omit<Extract<HostEvent, { type: "state" }>, "type" | "epo
 
 export type HostOptions = {
   home: string;
-  flavor: Flavor;
   /** The bundled Claude executable, or null when this build has none. */
   claudeExecutable: string | null;
   /** Main's encrypted store answers the host; values are never kept here. */
@@ -62,7 +61,7 @@ export class HostController {
   get running(): boolean { return this.child !== null; }
 
   /**
-   * Start a fresh host and set it up: H, flavor, the Claude executable, personal context and the
+   * Start a fresh host and set it up: H, the Claude executable, personal context and the
    * settings copy. After a crash this starts over into fresh history; nothing queued is replayed.
    */
   start(personal: Context, settings: DesktopPreferences): Promise<void> {
@@ -110,7 +109,7 @@ export class HostController {
       const unstated = setTimeout(() => stated.reject(new Error("the teaching host didn't report its state")), READY_MS);
       try {
         await this.request({
-          op: "initialize", home: this.options.home, flavor: this.options.flavor, claudeExecutable: this.options.claudeExecutable, personal, settings,
+          op: "initialize", home: this.options.home, claudeExecutable: this.options.claudeExecutable, personal, settings,
         });
         await stated.promise;
       } catch (err) {

@@ -45,10 +45,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - name: Build ad-hoc signed, non-notarized public-flavor test app
+      - name: Build ad-hoc signed, non-notarized test app
         run: npm run desktop:mac -- --${{ matrix.arch }}
-      - name: Verify the public flavor
-        run: node -e 'process.exit(JSON.parse(require("fs").readFileSync("dist/desktop/build-info.json","utf8")).flavor==="public"?0:1)'
       - name: Verify native bundle, runtime architecture and distributables
         env:
           APP: release/${{ matrix.appdir }}/Dum.app

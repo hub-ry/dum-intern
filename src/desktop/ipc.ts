@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { desktopPreferencesSchema, RequestSchema } from "./protocol.ts";
+import { DesktopPreferencesSchema, RequestSchema } from "./protocol.ts";
 import { sameBinding, type Drafts } from "./draft.ts";
 import { BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
 import type { AgentSetup } from "./agent-setup.ts";
@@ -73,7 +73,7 @@ export type RouterPorts = {
   host: Host;
   captures: Captures;
   drafts: Drafts;
-  settings: Pick<DesktopSettings, "get" | "set" | "flavor">;
+  settings: Pick<DesktopSettings, "get" | "set">;
   agent: AgentSetup;
   native: Native;
   dictation: Pick<DictationHelper, "status" | "configure" | "setup" | "start" | "stop" | "cancel">;
@@ -81,6 +81,8 @@ export type RouterPorts = {
   bubble: Bubble;
   /** Start the host over with fresh personal context, after that setting changed. */
   restart(): Promise<void>;
+  /** The Anthropic key was just saved and checked; main reconciles the saved models with the live catalog. */
+  keySaved(): void;
   /** Something the snapshot shows changed; main broadcasts. */
   changed(): void;
   platform: string;
@@ -172,7 +174,7 @@ export class Router {
       follows: view?.follows ?? [],
       changes: view?.changes ?? [],
       voice: { ...this.voice },
-      agent: { flavor: agent.flavor, backends: agent.backends, chosen: settings.get().agent },
+      agent: { backends: agent.backends, chosen: settings.get().agent },
       look: { status: view?.look.status ?? this.o.observer.status, paused: this.paused, screenPermission: native.screenPermission() },
       hotkeyError: native.hotkeyError(),
       platform: this.o.platform,
@@ -381,7 +383,7 @@ export class Router {
 
   private async settingsChange(next: DesktopPreferences): Promise<void> {
     const { settings, native, host, dictation, observer } = this.o;
-    const parsed = desktopPreferencesSchema(settings.flavor).parse(next);
+    const parsed = DesktopPreferencesSchema.parse(next);
     const previous = settings.get();
     if (JSON.stringify(parsed.agent) !== JSON.stringify(previous.agent)) throw new Error("Choose who powers Dum in Settings › Agent");
     const keys = [parsed.hotkey, parsed.sendDraftHotkey, parsed.voiceHotkey];
@@ -560,18 +562,13 @@ export class Router {
         void flow.catch(() => undefined).finally(() => void agent.check().finally(() => this.o.changed()));
         return {};
       }
-      case "agent-login-open":
-        await agent.openPage();
-        return {};
-      case "agent-login-code":
-        agent.code(r.code);
-        return {};
       case "agent-login-cancel":
         agent.cancel();
         return {};
       case "agent-key":
         await agent.setKey(r.backend, r.key);
         await agent.check();
+        this.o.keySaved();
         return {};
       case "agent-signout":
         await agent.signOut(r.backend, r.method);

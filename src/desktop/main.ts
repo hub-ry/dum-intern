@@ -38,7 +38,6 @@ import { localSetup } from "../agent/local-setup.ts";
 import { RELEASED } from "../agent/registry.ts";
 import { accessToken, chatgptSetup } from "../agent/siwc.ts";
 import { AgentSetup, credentialSource } from "./agent-setup.ts";
-import { readFlavor } from "./build-info.ts";
 import { Captures, MAX_PNG_BYTES, type Capturer } from "./capture.ts";
 import { Credentials, safeStorageCipher } from "./credentials.ts";
 import { DictationHelper } from "./dictation.ts";
@@ -134,13 +133,12 @@ async function start(): Promise<void> {
   // A menu bar app: no Dock icon, no app switcher entry.
   if (MAC) app.dock?.hide();
 
-  const flavor = readFlavor();
   const userData = app.getPath("userData");
-  const settings = DesktopSettings.load(userData, flavor);
+  const settings = DesktopSettings.load(userData);
   const credentials = new Credentials(join(userData, "credentials.json"), safeStorageCipher(safeStorage));
   const claudeExecutable = bundledExecutable();
   const released = new Set((Object.keys(RELEASED) as BackendId[]).filter((id) => RELEASED[id]));
-  const agent = new AgentSetup([claudeSetup({ flavor, executable: claudeExecutable, credentials }), chatgptSetup({ credentials }), localSetup()], flavor, released);
+  const agent = new AgentSetup([claudeSetup({ executable: claudeExecutable, credentials }), chatgptSetup({ credentials }), localSetup()], released);
   const dum = parse(readFileSync(join(here, "..", "art", "intern.txt"), "utf8"));
 
   // -- windows ----------------------------------------------------------------
@@ -314,7 +312,6 @@ async function start(): Promise<void> {
     broadcast();
   }, {
     home: home(),
-    flavor,
     claudeExecutable,
     credential: credentialSource(credentials, accessToken),
     frame: (checkId) => observer.frame(checkId),
@@ -336,7 +333,10 @@ async function start(): Promise<void> {
       const view = host.view;
       return view?.zoneEpoch && view.activeZone ? { zoneId: view.activeZone.id, epoch: view.zoneEpoch } : null;
     },
-    blocked: () => (asleep ? "asleep or locked" : router?.recording ? "listening" : host.running ? null : "the host isn't running"),
+    blocked: () => (asleep ? "asleep or locked"
+      : router?.recording ? "listening"
+      : BrowserWindow.getFocusedWindow() !== null ? "a Dum window is in front"
+      : host.running ? null : "the host isn't running"),
     frontmost: () => focus.frontmost(),
     async thumbnail(): Promise<Bitmap | null> {
       if (!screenGranted()) return null;
@@ -490,6 +490,17 @@ async function start(): Promise<void> {
     quit: () => setImmediate(() => app.quit()),
   };
 
+  /** Saved model ids the live catalog no longer lists move to the names it does list, or the user is asked to choose again. */
+  const reconcileModels = async () => {
+    const said = await agent.reconcile({
+      models: (b, l) => host.agentModels(b, l),
+      settings,
+      send: (choice) => host.agentSelect(choice),
+    }).catch((err: unknown) => (err as Error).message);
+    broadcast();
+    if (said) void dialog.showMessageBox({ type: "warning", message: "Dum updated your settings", detail: said });
+  };
+
   const captures = new Captures(capturer);
   router = new Router({
     host,
@@ -502,6 +513,7 @@ async function start(): Promise<void> {
     observer,
     bubble,
     restart: startHost,
+    keySaved: () => void reconcileModels(),
     changed: broadcast,
     platform: process.platform,
     version: app.getVersion(),
@@ -592,14 +604,15 @@ async function start(): Promise<void> {
     command.loadFile(INDEX, { query: { view: "command" } }),
     bubbleWindow.loadFile(INDEX, { query: { view: "bubble" } }),
   ]);
-  if (settings.warning) void dialog.showMessageBox({ type: "warning", message: "Dum's settings were reset", detail: settings.warning });
-  void agent.check().finally(broadcast);
+  if (settings.warning) void dialog.showMessageBox({ type: "warning", message: "Dum updated your settings", detail: settings.warning });
+  const checked = agent.check().finally(broadcast);
   if (dictation.status().available) void dictation.configure(settings.get().voiceHotkey).catch(() => undefined).finally(broadcast);
   // First run asks for Screen Recording once, so the look can see the screen (it's on by default).
   if (MAC && settings.get().look.screen && systemPreferences.getMediaAccessStatus("screen") === "not-determined") {
     void desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } }).catch(() => undefined);
   }
   await startHost();
+  void checked.then(reconcileModels);
 
   app.on("second-instance", showPanel);
   app.on("activate", showPanel);

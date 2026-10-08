@@ -2,10 +2,6 @@
 
 The working list for Dum. Newest decisions win; `docs/architecture.md` holds the rules.
 
-## In progress
-
-- **Always-on live look.** Dum looks at your screen while it's on, not just at app switches and typing pauses. Plan: a 1280px frame on every 3-second tick where the screen changed, sent to Claude Haiku 5.5. One call runs at a time, and old frames are never resent. Estimated cost: about $0.25 an hour, or about $5 a month at 5 hours a week. Haiku 5.5 must pass a real image call before Dum sends it pictures.
-
 ## UI changes (Ryan)
 
 Add notes here while going through the app.
@@ -21,7 +17,11 @@ These are built, but only Linux and CI smoke tests have exercised them.
 - The Screen Recording permission prompt and what happens when you deny it.
 - The bubble over full-screen apps and on other Spaces.
 - The API key stored through Keychain (`safeStorage`).
-- Claude subscription sign-in (local builds).
+- The live look's 1280px capture: its size and PNG bytes on Retina displays.
+- The changed-cells threshold under always-on look calls: whether a caret or clock stays under it, and how many calls a real hour makes.
+- The live look's real cost per hour against the $0.25 estimate.
+- No look call or frame while a Dum window is in front.
+- The look status wording, including when an alias moves and pictures stop.
 - Launch at login.
 - Gatekeeper on first open of an unsigned build.
 - Tuning the look's thresholds: changed cells, idle ticks and intervals are starting guesses.
@@ -32,9 +32,13 @@ These are built, but only Linux and CI smoke tests have exercised them.
 - **Moving a zone** to a new parent.
 - **Focus skills for a zone**: in the data model, with no UI.
 - **Adding or removing a skill from the Skills pane**: today it's only the `:skill` command.
-- **ChatGPT backend**: built, but switched off until its contract tests pass and one real call succeeds.
+- **ChatGPT backend**: built, but switched off until its contract tests pass and one real call succeeds. ChatGPT uses Sign in with ChatGPT today; per "strictly api keys", switch it to an OpenAI API key before releasing it.
 - **GitHub Copilot backend**: waits on a live check that its tools can be locked down.
 - **A public release**: needs an Apple Developer ID and notarization. Today's builds are unsigned test artifacts from GitHub Actions.
+
+## Watch
+
+- Claude's aliases can move. Dum verifies by the resolved model id, so a moved alias stops getting pictures until its new model passes a real call.
 
 ## Open questions
 

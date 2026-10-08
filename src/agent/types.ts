@@ -4,16 +4,18 @@ import type { z } from "zod";
 import type { ZoneContext } from "../zone-types.ts";
 import type { RequestBinding } from "../share-types.ts";
 
-/** Fixed when the app is built. "public" is what Dum distributes; "local" is the owner's own or dev build. */
-export type Flavor = "public" | "local";
 export type BackendId = "claude" | "chatgpt" | "local" | "copilot";
-/** How a backend authenticates. "claude-subscription" exists only in local builds. */
-export type LoginMethod = "anthropic-key" | "claude-subscription" | "chatgpt" | "github" | "none";
-/** "intern" is the conversation; "helper" is every bounded one-shot (suggested projects, Wizard, ambient calls, picture descriptions). */
-export type Role = "intern" | "helper";
+/** How a backend authenticates. Claude connects only with the user's own Anthropic API key. */
+export type LoginMethod = "anthropic-key" | "chatgpt" | "github" | "none";
+/**
+ * "intern" is the conversation; "helper" is every bounded one-shot (suggested projects, Wizard decisions,
+ * picture descriptions); "look" is the live look's calls, which need a model that sees pictures.
+ */
+export type Role = "intern" | "helper" | "look";
+/** `model` is an id the backend's live catalog lists; for Claude that may be an alias such as "haiku". */
 export type Selector = { backend: BackendId; model: string; effort: string | null };
 /** What the user picked. Sessions must prove `login` at runtime. */
-export type AgentChoice = { backend: BackendId; login: LoginMethod; intern: Selector; helper: Selector };
+export type AgentChoice = { backend: BackendId; login: LoginMethod; intern: Selector; helper: Selector; look: Selector };
 
 /** Base64 PNG. */
 export type Picture = { mimeType: "image/png"; data: string };
@@ -28,19 +30,28 @@ export type DumAction = {
 };
 
 export type ModelOption = {
+  /** What the selector names: for Claude, often an alias such as "haiku". */
   id: string;
+  /** The model `id` runs today: an alias's current target, or `id` itself. Verification is keyed on this. */
+  resolved: string;
   label: string;
   /** [] = no effort knob. */
   efforts: readonly string[];
+  /** The model takes picture input. Whether Dum may send it pictures is `Capabilities.images`. */
   images: boolean;
   /** Provider function calling; required for the intern. */
   actions: boolean;
-  /** Proven with real calls on this backend; false shows "untested". */
+  /** `resolved` is proven with real calls on this backend; false shows "untested". */
   verified: boolean;
 };
 
 export type Capabilities = {
+  /** The model the selector runs today (see `ModelOption.resolved`). */
+  model: string;
+  /** Dum may send this selector pictures now. Claude also needs its resolved model verified. */
   images: boolean;
+  /** Why pictures are refused, in a sentence; "" when `images`. */
+  noImages: string;
   interrupt: boolean;
   /** Backend reports active actions; open()/turn() assert them. */
   runtimeActionCheck: boolean;
@@ -51,12 +62,11 @@ export type BackendStatus = {
   label: string;
   /** Bundled binary runs, or the endpoint answers. */
   installed: boolean;
-  /** Offered in this flavor. */
+  /** The sign-in methods this backend takes. */
   methods: readonly LoginMethod[];
   /** Confirmed by a live check; never an account field. */
   ready: LoginMethod | null;
   loginRunning: boolean;
-  loginNeedsCode: boolean;
   message: string;
 };
 
@@ -100,10 +110,8 @@ export interface AgentSession {
 export interface BackendSetup {
   readonly id: BackendId;
   status(): Promise<BackendStatus>;
-  /** Refuses methods the flavor doesn't offer. */
+  /** Refuses methods this backend doesn't take. */
   login(method: LoginMethod, ui: LoginUi): Promise<void>;
-  /** Claude subscription paste-code. */
-  code?(code: string): void;
   /** Anthropic API key; write-only. */
   setKey?(key: string): Promise<void>;
   cancelLogin(): void;
@@ -115,7 +123,8 @@ export interface AgentBackend {
   readonly id: BackendId;
   readonly label: string;
   models(login: LoginMethod, signal: AbortSignal): Promise<ModelOption[]>;
-  capabilities(selector: Selector): Capabilities;
+  /** What the selector can do on this sign-in, from the live catalog. Throws when the catalog can't be read. */
+  capabilities(selector: Selector, login: LoginMethod, signal: AbortSignal): Promise<Capabilities>;
   /** Resolves only after provenance passes; never falls back. */
   open(o: OpenOptions): Promise<AgentSession>;
 }

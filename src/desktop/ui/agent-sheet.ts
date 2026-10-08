@@ -1,12 +1,13 @@
-// "Who powers Dum?": pick a backend, sign in the way this build allows, then pick the intern and
-// helper models. The same view is Settings → Agent. The renderer never sees a key after sending it,
-// and main checks every choice again against the flavor and the live catalog.
+// "Who powers Dum?": pick a backend, sign in, then pick the intern, helper and look models.
+// The same view is Settings → Agent. The renderer never sees a key after sending it, and main checks
+// every choice again against the backend's sign-ins and the live catalog.
 
 import type { Snapshot } from "../protocol.ts";
+import { ROLES } from "../../agent/schema.ts";
 import type { BackendId, LoginMethod, ModelOption, Role, Selector } from "../../agent/types.ts";
 import { h, icon, type Client } from "./dom.ts";
 import {
-  backendRows, buildChoice, helperWarning, methodLabel, modelText, pickEffort, preselectedBackend, preselectedLogin, preselectedSelector, roleModels,
+  backendRows, buildChoice, helperWarning, lookWarning, methodLabel, modelText, pickEffort, preselectedBackend, preselectedLogin, preselectedSelector, roleModels,
   type BackendRow,
 } from "./agent-picker.ts";
 
@@ -14,7 +15,8 @@ type Catalog = { state: "loading" } | { state: "ready"; models: ModelOption[] } 
 
 const ROLE_TEXT: Record<Role, { title: string; hint: string }> = {
   intern: { title: "Dum's model", hint: "Holds the conversation and calls Dum's actions, so it needs function calling." },
-  helper: { title: "Helper model", hint: "Suggested projects, the Wizard and looks at your screen. Screen and picture work need a model that can see pictures." },
+  helper: { title: "Helper model", hint: "Suggested projects, the Wizard and pictures you share. Shared pictures need a model that can see pictures." },
+  look: { title: "Look model", hint: "Sees one screen frame each time your screen changes while Dum is on, so it needs a model that takes pictures; a small fast model keeps it cheap." },
 };
 
 export class AgentSheet {
@@ -23,11 +25,10 @@ export class AgentSheet {
   private backend: BackendId | null = null;
   private login = new Map<BackendId, LoginMethod>();
   private catalogs = new Map<string, Catalog>();
-  private picks: Record<Role, Selector | null> = { intern: null, helper: null };
+  private picks: Record<Role, Selector | null> = { intern: null, helper: null, look: null };
   private picksFor = "";
   private key = "";
   private keyInput = h("input", { class: "input", type: "password", autocomplete: "off", spellcheck: "false", "aria-label": "Anthropic API key", "data-focus": "key", placeholder: "sk-ant-…" });
-  private codeInput = h("input", { class: "input", type: "password", autocomplete: "off", spellcheck: "false", "aria-label": "Sign-in code", "data-focus": "code", placeholder: "paste the code" });
 
   /** `setup` is the sheet a first model request opens; `settings` is Settings → Agent. */
   constructor(private client: Client, private mode: "setup" | "settings", private done: () => void = () => {}) {
@@ -51,7 +52,7 @@ export class AgentSheet {
   }
 
   update(s: Snapshot) {
-    const rows = backendRows(s.agent.flavor, s.agent.backends);
+    const rows = backendRows(s.agent.backends);
     if (this.backend === null || !rows.some((r) => r.id === this.backend)) this.backend = preselectedBackend(rows, s.agent.chosen);
     const row = rows.find((r) => r.id === this.backend) ?? null;
     if (row && !this.login.has(row.id)) {
@@ -64,10 +65,10 @@ export class AgentSheet {
     const pickKey = `${row?.id}:${login}`;
     if (pickKey !== this.picksFor) {
       this.picksFor = pickKey;
-      this.picks = { intern: null, helper: null };
+      this.picks = { intern: null, helper: null, look: null };
     }
     if (row && catalog?.state === "ready") {
-      for (const role of ["intern", "helper"] as const) this.picks[role] ??= preselectedSelector(row.id, role, catalog.models, s.agent.chosen);
+      for (const role of ROLES) this.picks[role] ??= preselectedSelector(row.id, role, catalog.models, s.agent.chosen);
     }
     const key = JSON.stringify([s.agent, this.backend, login, catalog, this.picks]);
     if (key === this.key) return;
@@ -102,7 +103,7 @@ export class AgentSheet {
       },
     }, icon("refresh"), "Check again");
     if (!rows.length) {
-      this.body.replaceChildren(h("p", { class: "muted" }, "No backend is available in this build."), h("div", { class: "actions" }, check));
+      this.body.replaceChildren(h("p", { class: "muted" }, "No backend is available."), h("div", { class: "actions" }, check));
       return;
     }
     const list = h(
@@ -179,7 +180,6 @@ export class AgentSheet {
         void this.client.call({ type: "agent-key", backend: "claude", key });
       });
       box.append(form, h("p", { class: "hint" }, "The key goes to Dum's encrypted store on this Mac and is used only for Dum's own Claude sessions."));
-      if (s.agent.flavor === "public") box.append(h("p", { class: "hint" }, "This build of Dum uses Claude with an API key only."));
       return box;
     }
     if (login === "none") {
@@ -188,38 +188,19 @@ export class AgentSheet {
     }
     if (row.ready === login) {
       box.append(
-        h("p", { class: "hint" }, login === "claude-subscription" ? "Signed in with your Claude subscription. Signing out here also signs Claude Code out on this Mac." : `Signed in. ${methodLabel(login)} again any time from here.`),
+        h("p", { class: "hint" }, `Signed in. ${methodLabel(login)} again any time from here.`),
         h("div", { class: "actions" }, signOut("Sign out")),
       );
       return box;
     }
     if (row.loginRunning) {
-      const code = h(
-        "form",
-        { class: "inline-form", hidden: !row.loginNeedsCode },
-        h("label", { class: "field" }, h("span", {}, "If the page shows a code, paste it here"), this.codeInput),
-        h("button", { type: "submit", class: "btn" }, "Use code"),
-      );
-      code.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const value = this.codeInput.value.trim();
-        this.codeInput.value = "";
-        if (value) void this.client.call({ type: "agent-login-code", code: value });
-      });
       box.append(
         h("p", { class: "hint" }, "Finish signing in in your browser. Dum picks it up here when you're done. It never sees your password."),
-        h(
-          "div",
-          { class: "actions" },
-          h("button", { type: "button", class: "btn", "data-focus": "open-page", onclick: call({ type: "agent-login-open" }) }, icon("external"), "Open sign-in page"),
-          h("button", { type: "button", class: "btn ghost", onclick: call({ type: "agent-login-cancel" }) }, "Cancel"),
-        ),
-        code,
+        h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", onclick: call({ type: "agent-login-cancel" }) }, "Cancel")),
       );
       return box;
     }
     box.append(h("div", { class: "actions" }, h("button", { type: "button", class: "btn primary", "data-focus": "login", disabled: !row.installed, onclick: call({ type: "agent-login", backend: row.id, method: login }) }, methodLabel(login))));
-    if (login === "claude-subscription") box.append(h("p", { class: "hint" }, "Uses your claude.ai subscription through the Claude Code that ships with this build of Dum."));
     return box;
   }
 
@@ -233,8 +214,8 @@ export class AgentSheet {
       box.append(h("div", { class: "notice bad" }, icon("warning"), h("span", {}, catalog.message)));
       return box;
     }
-    for (const role of ["intern", "helper"] as const) box.append(this.rolePicker(row.id, role, roleModels(catalog.models, role)));
-    const choice = buildChoice(row.id, login, this.picks.intern, this.picks.helper);
+    for (const role of ROLES) box.append(this.rolePicker(row.id, role, roleModels(catalog.models, role)));
+    const choice = buildChoice(row.id, login, this.picks);
     const chosen = this.client.snap?.agent.chosen;
     const same = !!choice && JSON.stringify(choice) === JSON.stringify(chosen);
     box.append(
@@ -276,7 +257,7 @@ export class AgentSheet {
       this.redraw();
     });
     const caps = current ? [current.actions ? "function calling" : "no function calling", current.images ? "sees pictures" : "no pictures", current.verified ? "verified with Dum" : "untested with Dum"].join(" · ") : "";
-    const warning = role === "helper" ? helperWarning(current) : "";
+    const warning = role === "helper" ? helperWarning(current) : role === "look" ? lookWarning(current) : "";
     return h(
       "div",
       { class: "role-picker" },

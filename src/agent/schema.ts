@@ -1,34 +1,35 @@
 // Schemas for the agent contract, shared by main, host and protocol.
 
 import { z } from "zod";
-import type { AgentChoice, BackendId, BackendStatus, Flavor, LoginMethod, ModelOption, Picture, Selector } from "./types.ts";
+import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption, Picture, Role, Selector } from "./types.ts";
 
 export const BACKEND_IDS = ["claude", "chatgpt", "local", "copilot"] as const satisfies readonly BackendId[];
-export const LOGIN_METHODS = ["anthropic-key", "claude-subscription", "chatgpt", "github", "none"] as const satisfies readonly LoginMethod[];
+export const LOGIN_METHODS = ["anthropic-key", "chatgpt", "github", "none"] as const satisfies readonly LoginMethod[];
 
-/** Claude's selectors before anything else is picked: the intern and the helper. Pure data, so the renderer can preselect them. */
+export const ROLES = ["intern", "helper", "look"] as const satisfies readonly Role[];
+
+/**
+ * Claude's selectors before anything else is picked: the intern, the helper and the look. Ids the live
+ * catalog lists; today they are aliases (opus → claude-opus-5-5, fable → claude-fable-5-1,
+ * haiku → claude-haiku-5-5), and pictures are judged on what they resolve to. Pure data, so the
+ * renderer can preselect them.
+ */
 export const CLAUDE_DEFAULTS = {
-  intern: { backend: "claude", model: "claude-opus-5-5", effort: "high" },
-  helper: { backend: "claude", model: "claude-fable-5-1", effort: "high" },
-} as const satisfies { intern: Selector; helper: Selector };
+  intern: { backend: "claude", model: "opus", effort: "high" },
+  helper: { backend: "claude", model: "fable", effort: "high" },
+  look: { backend: "claude", model: "haiku", effort: "low" },
+} as const satisfies Record<Role, Selector>;
 
-/** The sign-in methods each backend has in a local build. Public builds never offer "claude-subscription". */
+/** The sign-in each backend takes. Claude takes only the user's own Anthropic API key. */
 export const BACKEND_LOGINS: Readonly<Record<BackendId, readonly LoginMethod[]>> = {
-  claude: ["anthropic-key", "claude-subscription"],
+  claude: ["anthropic-key"],
   chatgpt: ["chatgpt"],
   local: ["none"],
   copilot: ["github"],
 };
 
-/** The sign-in methods `backend` offers in `flavor`. */
-export function offeredLogins(flavor: Flavor, backend: BackendId): readonly LoginMethod[] {
-  const all = BACKEND_LOGINS[backend];
-  return flavor === "public" ? all.filter((m) => m !== "claude-subscription") : all;
-}
-
 export const BackendIdSchema = z.enum(BACKEND_IDS);
 export const LoginMethodSchema = z.enum(LOGIN_METHODS);
-export const FlavorSchema = z.enum(["public", "local"]) satisfies z.ZodType<Flavor>;
 
 const modelId = z.string().min(1).max(200).regex(/^[\x21-\x7e]+$/, "not a model id");
 const effort = z.string().min(1).max(32).regex(/^[a-z0-9_-]+$/, "not an effort level");
@@ -39,25 +40,25 @@ export const SelectorSchema = z.object({
   effort: effort.nullable(),
 }).strict() satisfies z.ZodType<Selector>;
 
-/** A choice whose login is offered for its backend in `flavor`, with both selectors on that backend. */
-export function agentChoiceSchema(flavor: Flavor): z.ZodType<AgentChoice> {
-  return z.object({
-    backend: BackendIdSchema,
-    login: LoginMethodSchema,
-    intern: SelectorSchema,
-    helper: SelectorSchema,
-  }).strict().superRefine((c, ctx) => {
-    if (!offeredLogins(flavor, c.backend).includes(c.login)) {
-      ctx.addIssue({ code: "custom", path: ["login"], message: `${c.backend} doesn't sign in with ${c.login} in this build` });
-    }
-    for (const role of ["intern", "helper"] as const) {
-      if (c[role].backend !== c.backend) ctx.addIssue({ code: "custom", path: [role, "backend"], message: `the ${role} model must be on ${c.backend}` });
-    }
-  });
-}
+/** A choice whose login its backend takes, with every role's selector on that backend. */
+export const AgentChoiceSchema = z.object({
+  backend: BackendIdSchema,
+  login: LoginMethodSchema,
+  intern: SelectorSchema,
+  helper: SelectorSchema,
+  look: SelectorSchema,
+}).strict().superRefine((c, ctx) => {
+  if (!BACKEND_LOGINS[c.backend].includes(c.login)) {
+    ctx.addIssue({ code: "custom", path: ["login"], message: `${c.backend} doesn't sign in with ${c.login}` });
+  }
+  for (const role of ROLES) {
+    if (c[role].backend !== c.backend) ctx.addIssue({ code: "custom", path: [role, "backend"], message: `the ${role} model must be on ${c.backend}` });
+  }
+}) satisfies z.ZodType<AgentChoice>;
 
 export const ModelOptionSchema = z.object({
   id: modelId,
+  resolved: modelId,
   label: z.string().min(1).max(200),
   efforts: z.array(effort).max(16),
   images: z.boolean(),
@@ -72,11 +73,8 @@ export const BackendStatusSchema = z.object({
   methods: z.array(LoginMethodSchema).max(LOGIN_METHODS.length),
   ready: LoginMethodSchema.nullable(),
   loginRunning: z.boolean(),
-  loginNeedsCode: z.boolean(),
   message: z.string().max(2000),
 }).strict() satisfies z.ZodType<BackendStatus>;
-
-export const BuildInfoSchema = z.object({ flavor: FlavorSchema }).strict() satisfies z.ZodType<{ flavor: Flavor }>;
 
 /** Base64 PNG; 6 MiB of base64 keeps one frame under the 5 MB image limit. */
 export const PictureSchema = z.object({

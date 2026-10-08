@@ -26,13 +26,15 @@ function helper(reply: (input: UserTurn) => AsyncGenerator<AgentEvent>, images =
     id: "local",
     label: "Fake",
     models: async () => [],
-    capabilities: () => ({ images, interrupt: true, runtimeActionCheck: true }),
+    capabilities: async (selector) => ({
+      model: selector.model, images, noImages: images ? "" : `${selector.model} can't see pictures`, interrupt: true, runtimeActionCheck: true,
+    }),
     async open() {
       return { turn: (input) => (inputs.push(input), reply(input)), interrupt: async () => {}, close: () => {} };
     },
   };
   const agent = createRegistry([backend], new Set(["local"]));
-  agent.set({ backend: "local", login: "none", intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "eyes", effort: null } });
+  agent.set({ backend: "local", login: "none", intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "eyes", effort: null }, look: { backend: "local", model: "live", effort: null } });
   return { agent, inputs };
 }
 
@@ -63,7 +65,7 @@ test("the look sends the picture once to the helper model and returns a bounded 
 
 test("a helper that can't read pictures refuses the look", async () => {
   const h = helper(says("never"), false);
-  await assert.rejects(look(picture, "", { agent: h.agent, cwd: "/tmp", zone, binding }), /eyes can't look at pictures/);
+  await assert.rejects(look(picture, "", { agent: h.agent, cwd: "/tmp", zone, binding }), /eyes can't see pictures - choose a helper model that can see pictures/);
   assert.equal(h.inputs.length, 0);
 });
 
