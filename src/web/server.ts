@@ -37,7 +37,7 @@ type Stored = { version: number; snapshot: sync.Snapshot; created: string; updat
 
 const STATIC: Record<string, string> = { "page.js": "text/javascript", "page.css": "text/css" };
 
-const SITE_PAGES: Record<string, string> = { "/": "index.html", "/install": "install.html", "/how-it-works": "how-it-works.html", "/subjects": "subjects.html" };
+const SITE_PAGES: Record<string, string> = { "/": "index.html", "/install": "install.html", "/philosophy": "philosophy.html", "/how-it-works": "how-it-works.html", "/subjects": "subjects.html" };
 const SITE_ASSETS: Record<string, string> = {
   "site.css": "text/css; charset=utf-8",
   "game.js": "text/javascript; charset=utf-8",
