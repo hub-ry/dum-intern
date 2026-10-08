@@ -2,6 +2,7 @@
 
 - Dum is a Mac companion that floats beside your IDE or browser. Its implementation capability follows your unlocked skill tree.
 - Build in your own editor. When you're satisfied, tell dum what you built and why. The wizard offers occasional advice; dum isn't a live tutor.
+- How Dum is put together, and the rules it follows: [docs/architecture.md](docs/architecture.md).
 
 ## Download
 
