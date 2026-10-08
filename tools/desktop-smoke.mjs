@@ -965,7 +965,15 @@ async function keyboard() {
   const { win } = active;
   if (!linux) {
     unexercised('hotkey → window → typing → Esc', 'needs XTest (xdotool) on an X display');
-    await openWindow();
+    // Every later check holds the zone draft to this text, so a refusal that consumed or replaced it shows;
+    // without XTest it is typed into the focused composer through the page instead of the hotkey.
+    await step('the composer takes typing; main keeps the zone draft and sends nothing', async () => {
+      await openWindow();
+      await win.focus('textarea.composer-input');
+      await win.keyboard.type(DRAFT);
+      const s = await until((v) => v.draft.text === DRAFT, 'draft kept in main');
+      assert.equal(s.state.transcript.some((e) => e.kind === 'user'), false, 'nothing was sent');
+    }, { critical: true });
     return;
   }
   const keys = xkeys((await snapshot()).settings.hotkey);
