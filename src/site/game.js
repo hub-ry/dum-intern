@@ -2,12 +2,13 @@
 // Rose Pine Moon palette, sprite data from src/art/intern.txt
 
 // Palette: rose pine moon
-const BG  = '#232136'; // base
 const OVR = '#393552'; // overlay / ground
 const MUT = '#6e6a86'; // muted   / obstacle body
 const SUB = '#908caa'; // subtle  / game-over heading
+const TXT = '#e0def4'; // text    / state overlay
 const HLH = '#56526e'; // highlight high
 const HLM = '#44415a'; // highlight med / obstacle detail
+const GND = '#2a273f'; // ground fill, in front of the mountains
 
 // Intern sprite pixel colors (from art/intern.txt palette section)
 const _ = null;        // transparent
@@ -86,7 +87,10 @@ const SW = 7, SH = 8; // sprite cell size in art pixels
 // DOM refs (set during init)
 let canvas, ctx, statusEl, jumpBtn;
 
-// Layout (recalculated on resize)
+// Layout (recalculated on resize), in CSS pixels
+let cw         = 0;  // canvas width
+let ch         = 0;  // canvas height
+let pr         = 1;  // device pixels per CSS pixel
 let scale      = 7;  // art-pixel → CSS-pixel multiplier
 let groundY    = 0;  // ground line Y in canvas coords
 let internX    = 0;  // intern left edge X (fixed)
@@ -122,7 +126,6 @@ function init() {
   ctx      = canvas.getContext('2d');
   statusEl = document.getElementById('game-status');
   jumpBtn  = document.getElementById('game-jump');
-  drawPortrait();
 
   resize();
   new ResizeObserver(resize).observe(canvas);
@@ -141,11 +144,18 @@ function init() {
 
 function resize() {
   const r = canvas.getBoundingClientRect();
-  canvas.width  = Math.max(Math.floor(r.width),  200);
-  canvas.height = Math.max(Math.floor(r.height), 1);
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  pr = dpr;
+  cw = Math.max(Math.floor(r.width), 200);
+  ch = Math.max(Math.floor(r.height), 1);
+  // Backing store at device resolution so sprites and text stay sharp on HiDPI screens.
+  canvas.width  = Math.round(cw * dpr);
+  canvas.height = Math.round(ch * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
 
-  scale       = Math.max(2, Math.min(10, Math.floor(canvas.height / 85)));
-  groundY     = Math.floor(canvas.height * 0.83);
+  scale       = Math.max(2, Math.min(10, Math.floor(ch / 60)));
+  groundY     = Math.floor(ch * 0.83);
   internX     = SW * scale * 2;
   const newBase = groundY - SH * scale;
 
@@ -258,7 +268,7 @@ function update(dt) {
     // Height: 1× - 1.5× sprite (peak jump ~1.8× sprite height at every scale)
     const h = Math.floor(SH * scale * (1 + Math.random() * 0.5));
     const w = Math.floor(SW * scale * (0.75 + Math.random() * 0.45));
-    obstacles.push({ x: canvas.width + 4, y: groundY - h, w, h });
+    obstacles.push({ x: cw + 4, y: groundY - h, w, h });
     nextObsIn = (1.2 + Math.random() * 2.0) / ms;
   }
 
@@ -283,6 +293,14 @@ function update(dt) {
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
+// Round to the device pixel grid so art pixels never blend at fractional ratios.
+const snap = (v) => Math.round(v * pr) / pr;
+
+function fillSnapped(x, y, w, h) {
+  const x0 = snap(x), y0 = snap(y);
+  ctx.fillRect(x0, y0, snap(x + w) - x0, snap(y + h) - y0);
+}
+
 function drawSprite(name, x, y) {
   const rows = F[name];
   for (let r = 0; r < SH; r++) {
@@ -290,51 +308,33 @@ function drawSprite(name, x, y) {
       const col = rows[r][c];
       if (!col) continue;
       ctx.fillStyle = col;
-      ctx.fillRect(x + c * scale, y + r * scale, scale, scale);
-    }
-  }
-}
-
-function drawPortrait() {
-  const portrait = document.getElementById('hero-dum');
-  if (!portrait) return;
-  const pixel = 8;
-  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
-  portrait.width = SW * pixel * dpr;
-  portrait.height = SH * pixel * dpr;
-  const portraitCtx = portrait.getContext('2d');
-  portraitCtx.scale(dpr, dpr);
-  for (let r = 0; r < SH; r++) {
-    for (let c = 0; c < SW; c++) {
-      const color = F.idle[r][c];
-      if (!color) continue;
-      portraitCtx.fillStyle = color;
-      portraitCtx.fillRect(c * pixel, r * pixel, pixel, pixel);
+      fillSnapped(x + c * scale, y + r * scale, scale, scale);
     }
   }
 }
 
 function drawFrame() {
-  const W = canvas.width, H = canvas.height;
+  const W = cw, H = ch;
 
-  // Background
-  ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, W, H);
+  // Transparent sky: the mountain scene behind the canvas shows through.
+  ctx.clearRect(0, 0, W, H);
 
-  // Ground line
+  // Ground strip and its top edge
+  ctx.fillStyle = GND;
+  fillSnapped(0, groundY, W, H - groundY);
   ctx.fillStyle = OVR;
-  ctx.fillRect(0, groundY, W, 1);
+  fillSnapped(0, groundY, W, 1);
 
   // Obstacles — muted gray-purple blocks with subtle top edge and mid detail
   for (const ob of obstacles) {
     ctx.fillStyle = MUT;
-    ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+    fillSnapped(ob.x, ob.y, ob.w, ob.h);
     ctx.fillStyle = SUB;
-    ctx.fillRect(ob.x, ob.y, ob.w, 1);                                          // top edge
+    fillSnapped(ob.x, ob.y, ob.w, 1);                                          // top edge
     ctx.fillStyle = HLH;
-    ctx.fillRect(ob.x + 2, ob.y + Math.floor(ob.h * 0.45), ob.w - 4, 1);       // mid detail
+    fillSnapped(ob.x + 2, ob.y + Math.floor(ob.h * 0.45), ob.w - 4, 1);       // mid detail
     ctx.fillStyle = HLM;
-    ctx.fillRect(ob.x, ob.y + ob.h - 1, ob.w, 1);                              // bottom edge
+    fillSnapped(ob.x, ob.y + ob.h - 1, ob.w, 1);                              // bottom edge
   }
 
   // Intern sprite — select frame based on state
@@ -348,12 +348,12 @@ function drawFrame() {
 
   // Score — top-right corner, only while/after playing
   if (gameState !== 'idle') {
-    const fs = Math.max(10, Math.floor(scale * 1.5));
+    const fs = Math.max(12, scale * 4);
     ctx.font         = `${fs}px "Hack", monospace`;
     ctx.textAlign    = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillStyle    = MUT;
-    ctx.fillText(String(Math.floor(score)).padStart(5, '0'), W - scale * 2, scale * 2);
+    ctx.fillStyle    = SUB;
+    ctx.fillText(String(Math.floor(score)).padStart(5, '0'), W - scale * 3, scale * 3);
   }
 
   // State overlay — centred in the open sky above the ground
@@ -362,25 +362,21 @@ function drawFrame() {
   ctx.textBaseline = 'middle';
 
   if (gameState === 'idle') {
-    const fs = Math.max(10, Math.floor(scale * 1.4));
-    ctx.font      = `${fs}px "Hack", monospace`;
-    ctx.fillStyle = MUT;
-    ctx.fillText(
-      rmq.matches ? 'press space to play  ·  motion reduced' : 'press space to start',
-      W / 2, cy
-    );
+    ctx.font      = `${Math.max(13, scale * 4)}px "Hack", monospace`;
+    ctx.fillStyle = TXT;
+    ctx.fillText(rmq.matches ? 'press space to play' : 'press space to start', W / 2, cy);
   } else if (gameState === 'dead') {
-    const fs1 = Math.max(11, Math.floor(scale * 1.6));
-    const fs2 = Math.max(10, Math.floor(scale * 1.3));
+    const fs1 = Math.max(14, scale * 5);
+    const fs2 = Math.max(12, scale * 4);
 
     ctx.font      = `${fs1}px "Hack", monospace`;
-    ctx.fillStyle = SUB;
+    ctx.fillStyle = TXT;
     ctx.fillText('game over', W / 2, cy);
 
     ctx.font      = `${fs2}px "Hack", monospace`;
-    ctx.fillStyle = MUT;
-    ctx.fillText(`score  ${String(Math.floor(score)).padStart(5, '0')}`, W / 2, cy + fs1 * 1.7);
-    ctx.fillText('press space to try again', W / 2, cy + fs1 * 1.7 + fs2 * 1.9);
+    ctx.fillStyle = SUB;
+    ctx.fillText(`score  ${String(Math.floor(score)).padStart(5, '0')}`, W / 2, cy + fs1 * 1.4);
+    ctx.fillText('space to try again', W / 2, cy + fs1 * 1.4 + fs2 * 1.6);
   }
 }
 
