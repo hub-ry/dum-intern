@@ -1,8 +1,10 @@
-// Drives the real built Electron app through the revamp journey (docs/revamp-design.md §9) with a
-// private profile, H, HOME and Claude config, a non-Git fixture and no Git on PATH. No model, account
-// or network sign-in. On Linux it runs under Xvfb: xdotool presses the real global shortcuts, types into
-// the focused window and answers the native folder picker; a private D-Bus session with a minimal
-// StatusNotifierWatcher receives the tray icon. Screenshots and report.json go to DUM_SMOKE_OUTPUT.
+// Drives the real built Electron app through the circle journeys (docs/circle-design.md §2-§7, §10
+// "tools/desktop-smoke.mjs changes") with a private profile, H, HOME and Claude config, a non-Git
+// fixture and no Git on PATH. No model, account, key or network sign-in: the decision and handoff
+// steps run the no-backend path. On Linux it runs under Xvfb: xdotool presses, drags and clicks the
+// real circle, presses the real global shortcuts, types into the focused window and answers the native
+// folder picker; a private D-Bus session with a minimal StatusNotifierWatcher proves no tray icon is
+// ever registered. Screenshots and report.json go to DUM_SMOKE_OUTPUT.
 //
 // Development run (default): the checkout's `dist/` as built. DUM_SMOKE_EXECUTABLE runs a packaged
 // binary instead.
@@ -10,6 +12,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -39,7 +42,7 @@ if (linux) {
     try {
       await run(tools.python3, ['-c', 'import gi; gi.require_version("Gio", "2.0"); from gi.repository import Gio, GLib']);
     } catch {
-      missing.push('python3 with PyGObject (gi), for the tray watcher');
+      missing.push('python3 with PyGObject (gi), for the StatusNotifier watcher that proves there is no tray');
     }
   }
   if (missing.length) {
@@ -170,8 +173,8 @@ async function xwindow(pid, title, label, timeout = 15_000) {
   throw new Error(`${label}: no visible window titled /${title}/ appeared`);
 }
 /**
- * Dum's own X windows that are really mapped and viewable, by title: "Dum" is the panel and the bubble,
- * "Dum - command bar" the command bar. Electron's windows carry no _NET_WM_PID, so geometry tells them apart.
+ * Dum's own X windows that are really mapped and viewable, by title. All three surfaces are titled "Dum"
+ * and Electron's windows carry no _NET_WM_PID, so geometry tells them apart.
  */
 async function xviewable(title) {
   let ids = [];
@@ -189,9 +192,10 @@ async function xviewable(title) {
   }
   return out;
 }
-const X_PANEL = { title: '^Dum$', test: (w) => w.h >= 480 };
-const X_BUBBLE = { title: '^Dum$', test: (w) => w.w <= 360 && w.h <= 220 };
-const X_COMMAND = { title: '^Dum - command bar$', test: () => true };
+// §2: the circle's window is 64×64 DIP; §3: the working window is 640×720, never under 360×480; §7: the bubble is at most 360×220.
+const X_CIRCLE = { title: '^Dum$', test: (w) => w.w === 64 && w.h === 64 };
+const X_WINDOW = { title: '^Dum$', test: (w) => w.w >= 360 && w.h >= 480 };
+const X_BUBBLE = { title: '^Dum$', test: (w) => !(w.w === 64 && w.h === 64) && w.w <= 360 && w.h <= 220 };
 /** The window if it is mapped within `timeout`, else null. */
 async function xshown(kind, timeout = 8_000) {
   const end = Date.now() + timeout;
@@ -210,9 +214,23 @@ async function xgone(kind, timeout = 8_000) {
   } while (Date.now() < end);
   return false;
 }
+/** True when the window stays unmapped for the whole `period`. */
+async function xstaysGone(kind, period) {
+  const end = Date.now() + period;
+  do {
+    if ((await xviewable(kind.title)).some(kind.test)) return false;
+    await delay(150);
+  } while (Date.now() < end);
+  return true;
+}
 /** The X window that has keyboard focus. */
 async function xfocus() {
   return xdo('getwindowfocus', '-f').catch(() => '');
+}
+async function xfocusIs(id, timeout = 5_000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end && (await xfocus()) !== id) await delay(150);
+  return (await xfocus()) === id;
 }
 /**
  * The whole X screen, as the person would see it: proof the windows are really mapped and stacked, which
@@ -230,9 +248,12 @@ async function xscreen(name) {
   screenshots[name] = { run: current, ...stats };
   assert.ok(stats.colors > 1 && stats.differsFromBackground > 0, `${name} is a blank screen`);
 }
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+const near = (a, b, slack = 1) => Math.abs(a - b) <= slack;
 
-// The tray needs a host. This watcher owns org.kde.StatusNotifierWatcher on the private bus, records
-// each item Electron registers and, on "dump", reads its properties and dbusmenu labels back.
+// A StatusNotifier host, so a tray icon would have somewhere to register. This watcher owns
+// org.kde.StatusNotifierWatcher on the private bus and reports each item an app registers; Dum has
+// no tray, so the list must stay empty.
 const TRAY_WATCHER = String.raw`
 import json, sys
 import gi
@@ -267,51 +288,13 @@ def prop(conn, sender, path, iface, name):
         return GLib.Variant("b", True)
     return GLib.Variant("i", 0)
 bus.register_object("/StatusNotifierWatcher", Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], method, prop, None)
-def labels(node, out):
-    _id, props, kids = node
-    if "label" in props:
-        out.append(props["label"])
-    for kid in kids:
-        labels(kid, out)
-    return out
-def dump():
-    found = []
-    for service, obj in items:
-        entry = {"service": service, "path": obj}
-        try:
-            props = bus.call_sync(service, obj, "org.freedesktop.DBus.Properties", "GetAll", GLib.Variant("(s)", ("org.kde.StatusNotifierItem",)), None, 0, 5000, None).unpack()[0]
-            entry["id"] = props.get("Id")
-            entry["title"] = props.get("Title")
-            entry["status"] = props.get("Status")
-            tip = props.get("ToolTip")
-            entry["tooltip"] = [tip[2], tip[3]] if tip else None
-            pixmaps = props.get("IconPixmap") or []
-            entry["iconSizes"] = [[p[0], p[1]] for p in pixmaps]
-            entry["iconName"] = props.get("IconName")
-            menu = props.get("Menu")
-            if menu:
-                layout = bus.call_sync(service, menu, "com.canonical.dbusmenu", "GetLayout", GLib.Variant("(iias)", (0, -1, [])), None, 0, 5000, None).unpack()
-                entry["menu"] = labels(layout[1], [])
-        except Exception as error:
-            entry["error"] = str(error)
-        found.append(entry)
-    say({"event": "dump", "items": found})
 def stdin(channel, condition):
     line = sys.stdin.readline()
     if not line:
         loop.quit()
         return False
     if line.strip() == "dump":
-        dump()
-    if line.strip() == "activate":
-        done = 0
-        for service, obj in items:
-            try:
-                bus.call_sync(service, obj, "org.kde.StatusNotifierItem", "Activate", GLib.Variant("(ii)", (0, 0)), None, 0, 5000, None)
-                done += 1
-            except Exception:
-                pass  # an item from an app instance that has quit
-        say({"event": "activated", "items": done})
+        say({"event": "dump", "items": [{"service": s, "path": o} for s, o in items]})
     return True
 def owned(conn, name):
     say({"event": "ready"})
@@ -360,20 +343,14 @@ async function privateBus() {
   const watcher = spawn(tools.python3, [script], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: address } });
   services.push(watcher);
   const events = lines(watcher.stdout);
-  await events.next((l) => l.includes('"ready"'), 'tray watcher');
+  await events.next((l) => l.includes('"ready"'), 'StatusNotifier watcher');
   return {
     address,
     events,
     async dump() {
       const from = events.seen.length;
       watcher.stdin.write('dump\n');
-      return JSON.parse(await events.next((l) => l.includes('"dump"'), 'tray dump', { from, timeout: 30_000 })).items;
-    },
-    /** A left click on the tray icon, as a StatusNotifier host delivers it. */
-    async activate() {
-      const from = events.seen.length;
-      watcher.stdin.write('activate\n');
-      return JSON.parse(await events.next((l) => l.includes('"activated"'), 'tray activate', { from })).items;
+      return JSON.parse(await events.next((l) => l.includes('"dump"'), 'watcher dump', { from, timeout: 30_000 })).items;
     },
   };
 }
@@ -385,14 +362,14 @@ async function privateBus() {
  * Observer.frame (a frame for the host) and the tick send, with how many ticks saw the screen change; in
  * host-client.js, the host's frame requests and credential requests (every Claude or ChatGPT model call
  * starts with one). Only the inspector the Electron binary already offers is used; the app has no test
- * hook. `evaluate` runs an expression in main, for the harness's own screen activity. Null when this
- * binary doesn't allow --inspect (a fused package).
+ * hook. `evaluate` runs an expression in main, for counting its windows and for the harness's own screen
+ * activity. Null when this binary doesn't allow --inspect (a fused package).
  */
 async function counters(endpoint, desktopDir) {
   if (!endpoint) return null;
   const observer = (await readFile(join(desktopDir, 'observer.js'), 'utf8')).split('\n');
   const client = (await readFile(join(desktopDir, 'host-client.js'), 'utf8')).split('\n');
-  const frameAt = observer.findIndex((l) => /^\s*async frame\(checkId\)\s*\{/.test(l));
+  const frameAt = observer.findIndex((l) => /^\s*async frame\(\)\s*\{/.test(l));
   const sendAt = observer.findIndex((l) => /this\.o\.send\(\{/.test(l));
   assert.ok(frameAt > 0 && sendAt > 0, 'observer.js has Observer.frame and the tick send');
   const frameRequestAt = client.findIndex((l) => /case "frame-request":/.test(l));
@@ -427,14 +404,20 @@ async function counters(endpoint, desktopDir) {
   ]);
   assert.ok(resolved.every(Boolean), 'breakpoints resolved in the loaded observer.js and host-client.js');
   const evaluate = async (expression) => {
-    const { result, exceptionDetails } = await send('Runtime.evaluate', { expression, returnByValue: true, includeCommandLineAPI: true });
+    const { result, exceptionDetails } = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, includeCommandLineAPI: true });
     if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
     return result.value;
   };
   return {
     read: async () => JSON.parse(await evaluate(`JSON.stringify(globalThis.__dumSmoke ?? ${zero})`)),
     evaluate,
-    close: () => socket.close(),
+    /** Detaches from main's inspector; Node holds an exiting process open while a session is attached. */
+    close: () => new Promise((done) => {
+      if (socket.readyState === WebSocket.CLOSED) return done();
+      socket.addEventListener('close', () => done(), { once: true });
+      socket.close();
+      setTimeout(done, 3_000);
+    }),
   };
 }
 
@@ -450,6 +433,8 @@ async function install(name) {
   await Promise.all(Object.values(dirs).map((d) => mkdir(d, { recursive: true })));
   return dirs;
 }
+
+const VIEWS = ['window', 'circle', 'bubble'];
 
 async function launch(dirs, appDir) {
   const env = {
@@ -498,8 +483,9 @@ async function launch(dirs, appDir) {
       const target = await browser.waitForTarget((t) => t.url().includes(`view=${view}`), { timeout: 30_000 });
       return target.page();
     };
-    const [panel, command, bubble] = await Promise.all([page('panel'), page('command'), page('bubble')]);
-    await panel.waitForFunction(() => typeof window.dum?.invoke === 'function');
+    const [win, circle, bubble] = await Promise.all(VIEWS.map(page));
+    await win.waitForFunction(() => typeof window.dum?.invoke === 'function');
+    await circle.waitForSelector('button.circle');
     const appDist = packaged ? null : join(appDir, 'dist/desktop');
     let count = null;
     if (appDist && inspector) {
@@ -509,7 +495,7 @@ async function launch(dirs, appDir) {
         limits.push(`main inspector unavailable: ${error.message}`);
       }
     }
-    return { child, browser, panel, command, bubble, count, exit: exit.promise, diagnostic: () => diagnostic };
+    return { child, browser, win, circle, bubble, count, exit: exit.promise, diagnostic: () => diagnostic };
   } catch (error) {
     child.kill();
     await exit.promise;
@@ -521,7 +507,7 @@ async function launch(dirs, appDir) {
 }
 
 async function invoke(request) {
-  return active.panel.evaluate((r) => window.dum.invoke(r), request);
+  return active.win.evaluate((r) => window.dum.invoke(r), request);
 }
 async function snapshot() {
   const reply = await invoke({ type: 'snapshot' });
@@ -536,42 +522,121 @@ async function until(predicate, label, timeout = 15_000) {
     if (predicate(last)) return last;
     await delay(150);
   }
-  throw new Error(`${label} did not arrive (zones ${last?.zones.zones.length}, active ${last?.activeZone?.breadcrumb.map((b) => b.name).join(' › ') ?? 'none'}, look "${last?.look.status}")`);
-}
-async function visible(page, label, want = true, timeout = 10_000) {
-  await page.waitForFunction((v) => (document.visibilityState === 'visible') === v, { timeout }, want).catch(() => {
-    throw new Error(`${label} ${want ? 'never became visible' : 'stayed visible'}`);
-  });
+  throw new Error(`${label} did not arrive (zones ${last?.zones.zones.length}, active ${last?.activeZone?.breadcrumb.map((b) => b.name).join(' › ') ?? 'none'}, direction ${last?.direction?.status ?? 'none'}/${last?.direction?.attempt?.phase ?? '-'}, look ${last?.look.status}/${last?.look.reason})`);
 }
 async function focused(page, label, timeout = 10_000) {
   await page.waitForFunction(() => document.hasFocus(), { timeout }).catch(() => { throw new Error(`${label} never got keyboard focus`); });
+}
+/** Clicks the first button inside `scope` whose visible text is `text`. */
+async function press(page, scope, text) {
+  const hit = await page.evaluate((s, t) => {
+    const button = [...document.querySelectorAll(`${s} button`)].find((b) => b.innerText.trim() === t && !b.disabled && b.offsetParent !== null);
+    button?.click();
+    return !!button;
+  }, scope, text);
+  assert.ok(hit, `no visible enabled "${text}" button in ${scope}`);
 }
 async function stop() {
   if (!active) return;
   const instance = active;
   active = null;
-  instance.count?.close();
-  await instance.panel.evaluate(() => window.dum.invoke({ type: 'quit' })).catch(() => {});
+  await instance.count?.close();
+  await instance.win.evaluate(() => window.dum.invoke({ type: 'quit' })).catch(() => {});
   const abort = new AbortController();
   try {
-    const result = await Promise.race([instance.exit, delay(15_000, undefined, { signal: abort.signal }).then(() => { instance.child.kill(); throw new Error('desktop did not quit cleanly'); })]);
+    const result = await Promise.race([instance.exit, delay(15_000, undefined, { signal: abort.signal }).then(() => {
+      const tail = instance.diagnostic().split('\n').filter((l) => l && !/dbus|DevTools listening|Debugger listening|learn\/getting-started/.test(l)).slice(-12).join('\n');
+      instance.child.kill();
+      throw new Error(`desktop did not quit within 15 s of Quit; its last stderr:\n${tail}`);
+    })]);
     assert.equal(result.code, 0, `desktop exit: ${result.code ?? result.signal}`);
   } finally {
     abort.abort();
     instance.browser.disconnect();
   }
 }
+/** The working window on screen and focused, the way the hotkey would leave it. */
+async function openWindow() {
+  await invoke({ type: 'show-surface', surface: 'window' });
+  await focused(active.win, 'working window');
+  if (linux) assert.ok(await xshown(X_WINDOW), 'the working window X window was not mapped');
+}
+const credentialCalls = async () => (active.count ? (await active.count.read()).credentialRequests : 0);
 
 // -- journey pieces -----------------------------------------------------------------------
 
 const GOAL = 'I want to get comfortable with recursion and data structures in Python';
-const CHILD = { name: 'Data Structures', goal: 'Binary trees and their traversals', language: 'python' };
+const CHILD = { name: 'Trees', goal: 'Binary trees and their traversals', language: 'python' };
 const DRAFT = 'how do I walk a tree without recursion';
-const LOOK_BLOCKED = 'paused while dum is busy or waiting on you';
-const LOOK_CALLS = ['taking a look', "the last look didn't work - it tries again on the next change"];
+const OUTCOME = 'An iterative in-order walk for walk.py';
+const DEBUG_QUESTION = 'Which look model is running?';
+/** The circle's place, as the spec puts it: 8 DIP in from the right edge, 35% down the usable range. */
+function defaultCircleAt(area) {
+  return { x: area.x + area.w - 8 - 64, y: Math.round(area.y + 8 + 0.35 * (area.h - 16 - 64)) };
+}
+let screenArea = null;
+let circleAfterDrag = null;
+
+async function surfaces() {
+  await step('exactly three renderer pages: the working window, the circle and the bubble; no panel or command bar', async () => {
+    const urls = active.browser.targets().filter((t) => t.type() === 'page').map((t) => new URL(t.url()).searchParams.get('view'));
+    assert.deepEqual([...urls].sort(), [...VIEWS].sort(), `pages: ${urls.join(', ')}`);
+    return urls.join(', ');
+  }, { critical: true });
+  await step('sandboxed renderers: no Node in the window, circle or bubble', async () => {
+    for (const page of [active.win, active.circle, active.bubble]) {
+      assert.deepEqual(await page.evaluate(() => ({ process: typeof process, require: typeof require })), { process: 'undefined', require: 'undefined' });
+    }
+  });
+  await step('each surface has only its own bridge, and the circle cannot ask for the window\'s data', async () => {
+    const circleApi = await active.circle.evaluate(() => ({ dum: typeof window.dum, circle: typeof window.dumCircle?.invoke, bubble: typeof window.dumBubble }));
+    assert.deepEqual(circleApi, { dum: 'undefined', circle: 'function', bubble: 'undefined' });
+    const refused = await active.circle.evaluate(() => window.dumCircle.invoke({ type: 'snapshot' }));
+    assert.equal(refused.ok, false, 'the circle got a snapshot');
+    const view = await active.circle.evaluate(() => window.dumCircle.invoke({ type: 'circle-view' }));
+    assert.equal(view.ok, true, view.error);
+    assert.deepEqual(Object.keys(view.view).sort(), ['open', 'paused', 'reason', 'state'], 'the circle sees only its face');
+    const bubbleApi = await active.bubble.evaluate(() => ({ dum: typeof window.dum, circle: typeof window.dumCircle, bubble: typeof window.dumBubble, invoke: typeof window.dumBubble?.invoke }));
+    assert.deepEqual(bubbleApi, { dum: 'undefined', circle: 'undefined', bubble: 'object', invoke: 'undefined' });
+    return `circle face ${view.view.state}/${view.view.reason}`;
+  });
+  await step('main owns exactly three BrowserWindows', async () => {
+    if (!active.count) return void limits.push('BrowserWindow count not read: main inspector unavailable');
+    const windows = await active.count.evaluate(`require('electron').BrowserWindow.getAllWindows().map((w) => { const b = w.getBounds(); return b.width + 'x' + b.height; })`);
+    assert.equal(windows.length, 3, `windows: ${windows.join(', ')}`);
+    return windows.join(', ');
+  });
+  if (!linux) {
+    unexercised('one circle on screen at its default place', 'needs an X display');
+    return;
+  }
+  await step('one circle X window, 64×64, at the default place: 8 DIP from the right edge, 35% down', async () => {
+    const [w, h] = (await xdo('getdisplaygeometry')).split(/\s+/).map(Number);
+    screenArea = { x: 0, y: 0, w, h };
+    const circle = await xshown(X_CIRCLE, 10_000);
+    assert.ok(circle, 'no 64×64 Dum window was mapped');
+    const circles = (await xviewable('^Dum$')).filter(X_CIRCLE.test);
+    assert.equal(circles.length, 1, `circles: ${JSON.stringify(circles)}`);
+    const want = defaultCircleAt(screenArea);
+    assert.ok(near(circle.x, want.x) && near(circle.y, want.y), `circle at ${circle.x},${circle.y}; the default is ${want.x},${want.y}`);
+    assert.equal((await xviewable('^Dum - command bar$')).length, 0, 'a command bar window is mapped');
+    return `circle at ${circle.x},${circle.y} on a ${w}×${h} screen`;
+  });
+  await step('the circle shows Dum\'s face on a dark disk, labeled as a button', async () => {
+    const face = await active.circle.evaluate(() => {
+      const b = document.querySelector('button.circle');
+      return { label: b.getAttribute('aria-label'), canvas: !!b.querySelector('canvas[aria-hidden="true"], canvas'), text: b.innerText.replace('!', '').trim() };
+    });
+    assert.match(face.label, /^Dum — .+\. (Open|Hide) Dum$/);
+    assert.ok(face.canvas, 'no face canvas');
+    assert.equal(face.text, '', 'the circle shows no text');
+    await shoot(active.circle, `${current}-circle.png`, { omitBackground: true });
+    return face.label;
+  });
+}
 
 async function firstRun(dirs) {
-  const { panel } = active;
+  const { win } = active;
   await step('fresh profile: no zones, no backend chosen, screen look on by default', async () => {
     const s = await snapshot();
     assert.equal(s.zones.zones.length, 0);
@@ -580,127 +645,313 @@ async function firstRun(dirs) {
     assert.equal(s.agent.chosen, null);
     assert.deepEqual(s.settings.look, { apps: true, screen: true });
     assert.deepEqual(s.agent.backends.find((b) => b.id === 'claude')?.methods, ['anthropic-key'], 'Claude takes only an Anthropic API key');
+    // Local servers sit at fixed 127.0.0.1 ports that no profile setting isolates; say so when one answered.
+    const ready = s.agent.backends.filter((b) => b.ready !== null && b.id !== 'claude');
+    if (ready.length) limits.push(`[${current}] a local model server on this machine answered (${ready.map((b) => `${b.label}: ${b.message}`).join('; ')}); Agent setup listed it and read its model list, nothing was chosen, so no model was called`);
     return `backends ${s.agent.backends.map((b) => `${b.id}[${b.methods.join('|')}]`).join(', ')}`;
   }, { critical: true });
   if (linux) {
-    // Electron reports a show:false window as "visible" to its page, so the X server is the witness.
-    const shown = await step('first launch puts the panel on screen by itself (X window mapped)', async () => {
-      const hit = await xshown(X_PANEL, 10_000);
-      assert.ok(hit, 'the panel X window was never mapped within 10 s of a fresh launch; nothing is on screen until the tray icon is clicked');
-      return `${hit.w}x${hit.h} at ${hit.x},${hit.y}`;
-    });
-    if (!shown) {
-      await step('clicking the tray icon opens the panel', async () => {
-        assert.equal(await bus.activate(), 1, 'one tray item to click');
-        const hit = await xshown(X_PANEL, 10_000);
-        assert.ok(hit, 'the panel X window was not mapped after the tray click');
-        await xscreen(`${current}-screen-first-run.png`);
-      }, { critical: true });
-    }
+    await step('first launch opens the one working window by itself, beside the circle', async () => {
+      const window = await xshown(X_WINDOW, 10_000);
+      assert.ok(window, 'the working window was never mapped within 10 s of a fresh launch');
+      assert.equal((await xviewable('^Dum$')).filter(X_WINDOW.test).length, 1, 'one working window');
+      const circle = await xshown(X_CIRCLE, 0);
+      assert.ok(circle, 'the circle is still on screen');
+      assert.ok(!overlap(window, circle), 'the window covers the circle');
+      const gap = window.x >= circle.x ? window.x - (circle.x + circle.w) : circle.x - (window.x + window.w);
+      assert.equal(gap, 12, `the window is ${gap} DIP from the circle, not 12`);
+      const centered = near(window.y + window.h / 2, circle.y + circle.h / 2) || window.y === screenArea.y + 8 || window.y + window.h === screenArea.y + screenArea.h - 8;
+      assert.ok(centered, `window ${window.y}+${window.h} isn't centered on the circle at ${circle.y}+${circle.h}`);
+      await xscreen(`${current}-screen-first-run.png`);
+      return `${window.w}×${window.h} at ${window.x},${window.y}, ${window.x < circle.x ? 'left' : 'right'} of the circle`;
+    }, { critical: true });
   }
-  await step('the panel asks what you are trying to learn, focused for typing', async () => {
-    await visible(panel, 'panel');
-    await panel.waitForSelector('.first-run:not([hidden]) h1');
-    assert.equal(await panel.$eval('.first-run h1', (el) => el.textContent), 'What are you trying to learn?');
-    await panel.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'What are you trying to learn?', { timeout: 10_000 });
-    if (linux) {
-      const window = await xshown(X_PANEL);
-      assert.equal(await xfocus(), window?.id, 'the panel has X keyboard focus');
-    }
-    await shoot(panel, `${current}-first-run.png`);
+  await step('the window asks what you are trying to learn, focused for typing', async () => {
+    await win.waitForSelector('.first-run:not([hidden]) h1');
+    assert.equal(await win.$eval('.first-run h1', (el) => el.textContent), 'What are you trying to learn?');
+    await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'What are you trying to learn?', { timeout: 10_000 });
+    if (linux) assert.ok(await xfocusIs((await xshown(X_WINDOW)).id), 'the working window has X keyboard focus');
   }, { critical: true });
-  await step('typing the goal and Return creates and enters the root zone, without a model', async () => {
-    await panel.keyboard.type(GOAL);
-    await panel.keyboard.press('Enter');
+  await step('the window is Zones → Current context → Chat, top to bottom, in tab order', async () => {
+    const sections = await win.evaluate(() => [...document.querySelectorAll('.window > section')].map((s) => ({
+      name: s.getAttribute('aria-label') ?? document.getElementById(s.getAttribute('aria-labelledby') ?? '')?.textContent ?? '',
+      top: s.getBoundingClientRect().top,
+      height: s.getBoundingClientRect().height,
+    })));
+    assert.deepEqual(sections.map((s) => s.name), ['Zones', 'Current context', 'Chat']);
+    assert.ok(sections.every((s, i) => s.height > 0 && (i === 0 || s.top >= sections[i - 1].top + sections[i - 1].height - 1)), `positions: ${JSON.stringify(sections)}`);
+    const chatHead = await win.$$eval('.chat-head button, .chat-head select', (els) => els.map((e) => e.getAttribute('aria-label') ?? e.innerText.trim()));
+    assert.ok(chatHead.includes('Mode') && chatHead.some((t) => /Skills \/ Records/.test(t)) && chatHead.includes('Move circle'), `chat header: ${chatHead.join(', ')}`);
+    await shoot(win, `${current}-window-first-run.png`);
+    return sections.map((s) => `${s.name}@${Math.round(s.top)}`).join(' → ');
+  });
+  await step('the goal and Return create the root zone and start goal alignment on it; with no model the host keeps it waiting', async () => {
+    const calls = await credentialCalls();
+    await win.keyboard.type(GOAL);
+    await win.keyboard.press('Enter');
     const s = await until((v) => v.activeZone && v.zones.zones.length === 1, 'root zone');
     assert.equal(s.activeZone.goal, GOAL);
-    assert.equal(s.activeZone.breadcrumb.length, 1);
     assert.equal(s.settings.agent, null);
     const stored = JSON.parse(await readFile(join(dirs.h, 'zones.json'), 'utf8'));
     assert.equal(stored.activeZoneId, s.activeZone.id);
-    assert.equal(stored.zones[0].goal, GOAL);
-    await panel.waitForSelector('.first-run[hidden]');
-    await shoot(panel, `${current}-root-zone.png`);
-    return `zone ${s.activeZone.breadcrumb[0].name}`;
+    assert.equal(stored.zones[0].goal, GOAL, 'the goal is saved locally');
+    // The window asks the host to start alignment right after the create; the host's own answer is the record.
+    const end = Date.now() + 10_000;
+    let read;
+    do {
+      read = await invoke({ type: 'alignment-read', zoneId: s.activeZone.id });
+      assert.equal(read.ok, true, read.error);
+      if (read.direction.status !== 'aligning') break;
+      await delay(200);
+    } while (Date.now() < end);
+    assert.equal(read.direction.zoneId, s.activeZone.id, 'the alignment is the new zone\'s own');
+    assert.equal(read.direction.status, 'needs-backend', `alignment ${read.direction.status}/${read.direction.attempt?.phase}`);
+    assert.equal(read.direction.attempt?.phase, 'needs-backend');
+    assert.equal(read.direction.current, null, 'no direction was agreed without you');
+    assert.equal(await credentialCalls(), calls, 'a model was asked for');
+    return `zone ${s.activeZone.breadcrumb[0].name}, host alignment ${read.direction.status}`;
   }, { critical: true });
+  await step('the window\'s snapshot learns that alignment waits for a model', async () => {
+    const s = await until((v) => v.direction?.status === 'needs-backend', 'needs-backend in the snapshot', 10_000);
+    assert.equal(s.direction.zoneId, s.activeZone.id);
+  });
+  await step('Chat shows the goal alignment card: your goal, waiting for a model, nothing invented', async () => {
+    await win.waitForSelector('.decisions .card.alignment', { timeout: 10_000 });
+    await shoot(win, `${current}-alignment.png`);
+    const card = await win.$eval('.decisions .card.alignment', (el) => ({ label: el.getAttribute('aria-label'), text: el.innerText, buttons: [...el.querySelectorAll('button')].map((b) => b.innerText.trim()) }));
+    const context = await win.$eval('.context', (el) => el.innerText);
+    assert.equal(card.label, 'Goal alignment');
+    assert.ok(card.text.includes(GOAL), 'the card names the goal');
+    assert.ok(context.includes(`Your goal: ${GOAL}`), 'Current context shows the goal');
+    assert.equal(await win.$$eval('.decisions .options .option', (els) => els.length), 0, 'options appeared with no model');
+    assert.match(card.text, /Alignment waits for a model\. Your goal is saved/, `the card shows: ${card.text.replace(/\s+/g, ' ')} [${card.buttons.join(' / ')}]`);
+    assert.deepEqual(card.buttons, ['Who powers Dum?', 'Not now']);
+    assert.match(context, /Alignment waits for a model/);
+    return card.buttons.join(' / ');
+  });
 }
 
-async function zones() {
-  const { panel } = active;
-  let root;
-  let child;
-  await step('keyboard: tab list arrows to Zones and opens it', async () => {
-    await panel.focus('#tab-chat');
-    await panel.keyboard.press('ArrowRight');
-    assert.equal(await panel.evaluate(() => document.activeElement?.id), 'tab-zones');
-    await panel.keyboard.press('Enter');
-    await panel.waitForFunction(() => document.querySelector('#pane-title')?.textContent === 'Zones' && !document.querySelector('#pane').hidden);
-  }, { critical: true });
-  await step('keyboard: a nested zone is created inside the root from the Zones tree', async () => {
-    root = (await snapshot()).activeZone;
-    await panel.keyboard.press('Tab'); // New zone
-    await panel.keyboard.press('Tab'); // the tree item
-    assert.equal(await panel.evaluate(() => document.activeElement?.getAttribute('role')), 'treeitem');
-    await panel.keyboard.press('Tab'); // New zone inside (Enter is disabled on the current zone)
-    assert.match(await panel.evaluate(() => document.activeElement?.textContent ?? ''), /New zone inside/);
-    await panel.keyboard.press('Enter');
-    await panel.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Name');
-    await panel.keyboard.type(CHILD.name);
-    await panel.keyboard.press('Tab');
-    await panel.keyboard.type(CHILD.goal);
-    await panel.keyboard.press('Tab');
-    await panel.keyboard.type(CHILD.language);
-    await panel.keyboard.press('Enter');
-    const s = await until((v) => v.zones.zones.length === 2 && v.activeZone?.breadcrumb.length === 2, 'nested zone entered');
-    child = s.activeZone;
-    assert.deepEqual(child.breadcrumb.map((b) => b.name), [root.breadcrumb[0].name, CHILD.name]);
+/** A zone made inside the root without entering it: its alignment is labeled with that zone and touches nothing in the active one. */
+async function otherZone() {
+  const { win } = active;
+  await step('a zone created inside the root without entering it gets its own labeled alignment; the active zone stays', async () => {
+    const before = await snapshot();
+    await press(win, '.zones-head', 'Manage');
+    await win.waitForSelector('.zone-tree-box.managing [role=treeitem]');
+    await win.click('[role=treeitem]');
+    await press(win, '.zone-tools', 'Inside');
+    await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Name');
+    await win.keyboard.type(CHILD.name);
+    await win.focus('.zone-form textarea[aria-label=Goal]');
+    await win.keyboard.type(CHILD.goal);
+    await win.focus('.zone-form input[aria-label=Language]');
+    await win.keyboard.type(CHILD.language);
+    await win.evaluate(() => {
+      const enter = [...document.querySelectorAll('.zone-form label.check')].find((l) => l.innerText.includes('Enter it now'))?.querySelector('input');
+      if (enter?.checked) enter.click();
+    });
+    await press(win, '.zone-form', 'Create');
+    const s = await until((v) => v.zones.zones.length === 2, 'the zone inside');
+    const child = s.zones.zones.find((z) => z.id !== before.activeZone.id);
+    assert.equal(child.parentId, before.activeZone.id);
     assert.equal(child.goal, CHILD.goal);
-    assert.equal(child.language, CHILD.language);
-    assert.deepEqual(child.ancestorGoals.map((g) => g.goal), [GOAL]);
-    await panel.waitForFunction((name) => document.querySelector('.crumb-text')?.textContent?.endsWith(name), {}, CHILD.name);
-    return `breadcrumb ${child.breadcrumb.map((b) => b.name).join(' › ')}`;
+    assert.equal(s.activeZone.id, before.activeZone.id, 'the zone you were in stays active');
+    assert.equal(s.binding.inputToken, before.binding.inputToken, 'the active zone\'s binding is unchanged');
+    assert.equal(s.direction.zoneId, before.activeZone.id, 'the active zone\'s alignment is still its own');
+    const label = `Goal alignment for ${before.activeZone.breadcrumb[0].name} › ${CHILD.name}`;
+    await win.waitForFunction((l) => [...document.querySelectorAll('.decisions .card.alignment')].some((c) => c.getAttribute('aria-label') === l && !/reading your goal/.test(c.innerText)), { timeout: 10_000 }, label);
+    const text = await win.$eval(`.decisions .card.alignment[aria-label="${label}"]`, (el) => el.innerText);
+    assert.match(text, /not the zone you're in/);
+    assert.ok(text.includes(CHILD.goal), 'the card names that zone\'s goal');
+    await win.evaluate(() => document.querySelector('.decisions')?.scrollIntoView());
+    await shoot(win, `${current}-other-zone-alignment.png`);
+    await win.keyboard.press('Escape'); // closes Manage, not the window
+    await win.waitForSelector('.zone-tree-box:not(.managing)');
+    assert.equal((await snapshot()).window.visible, true, 'Esc hid the window instead of closing Manage');
+    return label;
+  });
+}
+
+async function noTray() {
+  if (!linux) {
+    unexercised('no tray icon', 'read over a private D-Bus StatusNotifier watcher on Linux only');
+    return;
+  }
+  await step('no tray: nothing registers with the StatusNotifier host', async () => {
+    await delay(2_000);
+    const items = await bus.dump();
+    assert.deepEqual(items, [], `registered: ${JSON.stringify(items)}`);
+    assert.equal(bus.events.seen.filter((l) => l.includes('"registered"')).length, 0);
+    return 'zero items';
+  });
+}
+
+/** Real pointer input on the circle through XTest: the round hit region, click, hold and drag. */
+async function circleGestures(dirs) {
+  const { circle: page, count } = active;
+  if (!linux) {
+    unexercised('circle click, hold and drag', 'needs XTest (xdotool) on an X display');
+    return;
+  }
+  const presses = () => page.evaluate(() => window.__smokePresses.splice(0));
+  await page.evaluate(() => {
+    window.__smokePresses = [];
+    window.addEventListener('pointerdown', (e) => window.__smokePresses.push({ x: e.clientX, y: e.clientY }), { capture: true });
+  });
+  await step('Esc hides only the working window; the circle stays', async () => {
+    const window = await xshown(X_WINDOW);
+    await xdo('windowfocus', '--sync', window.id);
+    await active.win.focus('textarea.composer-input');
+    await xdo('key', 'Escape');
+    assert.ok(await xgone(X_WINDOW), 'the working window stayed mapped');
+    assert.ok(await xshown(X_CIRCLE, 0), 'the circle went with it');
+    assert.equal((await snapshot()).window.visible, false);
   }, { critical: true });
-  await step('keyboard: arrows move, Left/Right collapse and expand, Enter enters zones', async () => {
-    const selected = () => panel.evaluate(() => document.activeElement?.closest('[role=treeitem]')?.querySelector('.zone-name')?.textContent);
-    await panel.waitForSelector('[role=treeitem][tabindex="0"]');
-    await panel.focus('[role=treeitem][tabindex="0"]');
-    const start = await selected();
-    if (start !== root.breadcrumb[0].name) await panel.keyboard.press('ArrowUp');
-    assert.equal(await selected(), root.breadcrumb[0].name);
-    await panel.keyboard.press('ArrowDown');
-    assert.equal(await selected(), CHILD.name);
-    assert.equal(await panel.$eval('[role=treeitem][aria-selected=true]', (el) => el.getAttribute('aria-level')), '2');
-    await panel.keyboard.press('ArrowLeft'); // to the parent
-    assert.equal(await selected(), root.breadcrumb[0].name);
-    await panel.keyboard.press('ArrowLeft'); // collapse it
-    assert.equal(await panel.$$eval('[role=treeitem]', (els) => els.length), 1);
-    assert.equal(await panel.$eval('[role=treeitem]', (el) => el.getAttribute('aria-expanded')), 'false');
-    await panel.keyboard.press('ArrowRight'); // expand
-    assert.equal(await panel.$$eval('[role=treeitem]', (els) => els.length), 2);
-    await panel.keyboard.press('Enter');
-    await until((v) => v.activeZone?.id === root.id, 'root entered with Enter');
-    await panel.focus('[role=treeitem][tabindex="0"]');
-    await panel.keyboard.press('ArrowDown');
-    await panel.keyboard.press('Enter');
-    await until((v) => v.activeZone?.id === child.id, 'child entered with Enter');
+  if (!count) {
+    unexercised('circle click, hold and drag', 'needs main\'s inspector for the desk window that lets Electron track the pointer under Xvfb');
+    return;
+  }
+  // Under Xvfb, Electron's screen.getCursorScreenPoint() only follows the pointer while one of its own
+  // windows has X focus or is under the pointer; on a desktop there is always an app under the circle.
+  // This transparent, unfocusable full-screen window stands in for that app, below the circle, and
+  // records the clicks that reach it. The harness creates it through main's inspector; Dum has no hook.
+  const deskClicks = async () => JSON.parse(await count.evaluate('globalThis.__dumSmokeDesk.webContents.executeJavaScript("JSON.stringify(window.clicks.splice(0))")'));
+  await step('a transparent desk window under the circle stands in for the app the person is in', async () => {
+    await count.evaluate(`(async () => {
+      const { BrowserWindow, screen } = require('electron');
+      const desk = new BrowserWindow({ ...screen.getPrimaryDisplay().bounds, show: false, frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, focusable: false, skipTaskbar: true, webPreferences: { sandbox: true, contextIsolation: true } });
+      await desk.loadURL('data:text/html,' + encodeURIComponent('<title>smoke desk</title><body style="margin:0;background:transparent"><script>window.clicks=[];addEventListener("mousedown",(e)=>clicks.push([e.screenX,e.screenY]))</script>'));
+      desk.showInactive();
+      globalThis.__dumSmokeDesk = desk;
+    })()`);
+    // Xvfb has no window manager to keep the floating circle above a newer window (Electron's moveTop
+    // asks the window manager), so the harness raises the circle itself, as a window manager would.
+    await xdo('windowraise', (await xshown(X_CIRCLE, 0)).id);
+    limits.push('Under Xvfb, Electron only tracks the pointer over or while focusing one of its own windows, and there is no window manager: the circle steps ran over a harness-made transparent desk window (created through main\'s inspector) with the circle raised by XRaiseWindow. The round hit region\'s timing and click-through on macOS are not shown here.');
+    await xdo('mousemove', '20', '20');
+    await delay(300);
+    const cursor = await count.evaluate(`JSON.stringify(require('electron').screen.getCursorScreenPoint())`);
+    assert.deepEqual(JSON.parse(cursor), { x: 20, y: 20 }, 'Electron still does not see the pointer');
+    await xdo('click', '1');
+    await delay(300);
+    assert.deepEqual(await deskClicks(), [[20, 20]], 'the desk did not get a plain click');
+  }, { critical: true });
+  let at = await xshown(X_CIRCLE);
+  await step('the transparent corner of the circle window passes clicks through to the app under it and opens nothing', async () => {
+    await presses();
+    await xdo('mousemove', String(at.x + 2), String(at.y + 2));
+    await delay(250); // the 16 ms hit-region timer lets go of the pointer outside the disk
+    await xdo('click', '1');
+    await delay(500);
+    assert.deepEqual(await presses(), [], 'the circle page saw a press in its corner');
+    assert.deepEqual(await deskClicks(), [[at.x + 2, at.y + 2]], 'the click did not reach the app under the corner');
+    assert.ok(await xstaysGone(X_WINDOW, 1_500), 'a corner click opened the working window');
+    return `click at ${at.x + 2},${at.y + 2} reached the window underneath`;
   });
-  await step('keyboard: F2 renames the nested zone without changing its id', async () => {
-    await panel.focus('[role=treeitem][tabindex="0"]');
-    if ((await panel.evaluate(() => document.activeElement?.querySelector('.zone-name')?.textContent)) !== CHILD.name) await panel.keyboard.press('ArrowDown');
-    await panel.keyboard.press('F2');
-    await panel.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Name');
-    // No select-all chord: Ctrl+A selects all only off macOS (on macOS it moves to the line start).
-    // Like a Finder rename, F2 must already have selected the whole name, so typing replaces it.
-    const field = await panel.evaluate(() => ({ value: document.activeElement.value, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd }));
-    assert.deepEqual(field, { value: CHILD.name, start: 0, end: CHILD.name.length }, 'F2 selects the whole name');
-    await panel.keyboard.type('Trees');
-    await panel.keyboard.press('Enter');
-    const s = await until((v) => v.activeZone?.breadcrumb.at(-1)?.name === 'Trees', 'renamed zone');
-    assert.equal(s.activeZone.id, child.id);
-    assert.equal(s.zones.zones.length, 2);
-    CHILD.name = 'Trees';
-    await shoot(panel, `${current}-zones-nested.png`);
+  await step('a short click on the disk opens the working window beside the circle, focused on the composer', async () => {
+    await xdo('mousemove', String(at.x + 32), String(at.y + 32));
+    await delay(250);
+    await xdo('click', '1');
+    const window = await xshown(X_WINDOW);
+    assert.equal((await presses()).length, 1, 'the press did not reach the circle');
+    assert.deepEqual(await deskClicks(), [], 'the disk let the click through');
+    assert.ok(window, 'the click did not open the working window');
+    assert.ok(await xfocusIs(window.id), 'the working window has X keyboard focus');
+    await active.win.waitForFunction(() => document.activeElement?.matches('textarea.composer-input'), { timeout: 5_000 });
+    assert.ok(!overlap(window, at), 'the window covers the circle');
+    const s = await snapshot();
+    assert.equal(s.window.visible, true);
+    return `${window.w}×${window.h} at ${window.x},${window.y}`;
   });
+  /** Electron's own idea of which Dum window has focus, by size. */
+  const electronFocus = () => count.evaluate(`require('electron').BrowserWindow.getAllWindows().filter((w) => w.isFocused()).map((w) => w.getBounds().width + 'x' + w.getBounds().height).join(',') || 'none'`);
+  /** A check's starting point, not part of what it checks: the working window closed. */
+  const closeWindow = async () => {
+    if (!(await xgone(X_WINDOW, 0))) await invoke({ type: 'dismiss-surface', surface: 'window' });
+    assert.ok(await xgone(X_WINDOW), 'the working window could not be closed before this check');
+  };
+  await step('clicking the circle while the window has focus hides it', async () => {
+    const window = await xshown(X_WINDOW, 0);
+    assert.ok(window && (await xfocusIs(window.id)), 'the window was not open and focused');
+    await delay(300); // past §2's 250 ms toggle debounce: this is a second click, not a double click
+    const before = await electronFocus();
+    await xdo('mousedown', '1');
+    await delay(150);
+    const during = { x: (await xfocus()) === window.id ? 'window' : await xfocus(), electron: await electronFocus() };
+    await xdo('mouseup', '1');
+    assert.equal((await presses()).length, 1, 'the press did not reach the circle');
+    assert.ok(await xgone(X_WINDOW), `the window stayed open (Electron focus before the press: ${before}; during it: X ${during.x}, Electron ${during.electron})`);
+  });
+  await step('a long stationary hold on the circle does nothing', async () => {
+    await closeWindow();
+    await xdo('mousedown', '1');
+    await delay(900);
+    await xdo('mouseup', '1');
+    assert.equal((await presses()).length, 1, 'the press did not reach the circle');
+    assert.ok(await xstaysGone(X_WINDOW, 1_500), 'a hold opened the window');
+    const now = await xshown(X_CIRCLE, 0);
+    assert.ok(now && now.x === at.x && now.y === at.y, 'a hold moved the circle');
+  });
+  await closeWindow().catch(() => {});
+  const before = await count.read();
+  await step('a real drag moves the circle with the pointer, opens nothing and saves its place once', async () => {
+    const dx = -240;
+    const dy = 160;
+    await xdo('mousemove', String(at.x + 32), String(at.y + 32));
+    await delay(250);
+    await xdo('mousedown', '1');
+    for (let i = 1; i <= 20; i++) {
+      await xdo('mousemove', String(at.x + 32 + Math.round((dx * i) / 20)), String(at.y + 32 + Math.round((dy * i) / 20)));
+      await delay(30);
+    }
+    await delay(200);
+    await xdo('mouseup', '1');
+    await delay(500);
+    const moved = await xshown(X_CIRCLE, 0);
+    assert.ok(moved, 'the circle disappeared');
+    assert.ok(near(moved.x, at.x + dx, 2) && near(moved.y, at.y + dy, 2), `circle at ${moved.x},${moved.y}; dragged to ${at.x + dx},${at.y + dy}`);
+    assert.ok(await xstaysGone(X_WINDOW, 1_500), 'the drag opened the window');
+    const stored = JSON.parse(await readFile(join(dirs.profile, 'settings.json'), 'utf8'));
+    assert.equal(stored.version, 3);
+    assert.equal(stored.circle.placements.length, 1, `placements: ${JSON.stringify(stored.circle.placements)}`);
+    const [placement] = stored.circle.placements;
+    assert.equal(placement.displayId, stored.circle.lastChosenDisplayId);
+    const u = (moved.x - (screenArea.x + 8)) / (screenArea.w - 16 - 64);
+    const v = (moved.y - (screenArea.y + 8)) / (screenArea.h - 16 - 64);
+    assert.ok(near(placement.u, u, 0.01) && near(placement.v, v, 0.01), `saved u,v ${placement.u},${placement.v}; on screen ${u.toFixed(3)},${v.toFixed(3)}`);
+    assert.equal(stored.settings.agent, null, 'the drag left preferences alone');
+    circleAfterDrag = moved;
+    at = moved;
+    await shoot(page, `${current}-circle-dragged.png`, { omitBackground: true });
+    return `moved to ${moved.x},${moved.y}; saved u=${placement.u.toFixed(3)} v=${placement.v.toFixed(3)} on display ${placement.displayId}`;
+  });
+  await step('the circle animating and dragged over an unchanged screen: no look tick sees a change', async () => {
+    const end = Date.now() + 15_000;
+    while (Date.now() < end && (await count.read()).ticks < before.ticks + 3) await delay(500);
+    const n = await count.read();
+    assert.ok(n.ticks >= before.ticks + 3, `only ${n.ticks - before.ticks} look ticks arrived`);
+    assert.equal(n.changed, before.changed, `${n.changed - before.changed} ticks saw Dum's own circle as a screen change`);
+    assert.equal(n.frameRequests, before.frameRequests);
+    return `${n.ticks - before.ticks} ticks, ${n.changed - before.changed} with changes`;
+  });
+  await step('after the drag a click opens the window beside the circle\'s new place', async () => {
+    await closeWindow();
+    await xdo('mousemove', String(at.x + 32), String(at.y + 32));
+    await delay(250);
+    await xdo('click', '1');
+    const window = await xshown(X_WINDOW);
+    assert.ok(window, 'the window did not open');
+    assert.ok(!overlap(window, at), 'the window covers the circle');
+    const gap = window.x >= at.x ? window.x - (at.x + at.w) : at.x - (window.x + window.w);
+    assert.equal(gap, 12, `the window is ${gap} DIP from the circle`);
+    await xdo('windowraise', window.id); // a window manager raises a window that shows
+    await xscreen(`${current}-screen-window.png`);
+    await invoke({ type: 'dismiss-surface', surface: 'window' });
+    assert.ok(await xgone(X_WINDOW));
+    return `${window.x < at.x ? 'left' : 'right'} of the circle`;
+  });
+  await closeWindow().catch(() => {});
+  await count.evaluate('globalThis.__dumSmokeDesk.destroy()');
 }
 
 /** An Electron accelerator as xdotool key names: CommandOrControl+Shift+D → ctrl+shift+d. */
@@ -709,94 +960,126 @@ function xkeys(accelerator) {
   return accelerator.split('+').map((part) => names[part] ?? part.toLowerCase()).join('+');
 }
 
-/** The real global shortcut, typed through X; Esc gives focus back to the panel. */
-async function commandBar() {
-  const { panel, command } = active;
+/** The real global shortcut, typed through X, and Esc. */
+async function keyboard() {
+  const { win } = active;
   if (!linux) {
-    unexercised('hotkey → command bar → typing → Esc', 'needs XTest (xdotool) on an X display');
+    unexercised('hotkey → window → typing → Esc', 'needs XTest (xdotool) on an X display');
+    await openWindow();
     return;
   }
   const keys = xkeys((await snapshot()).settings.hotkey);
-  await step(`hotkey (${keys}) opens the focused command bar; typing goes into it`, async () => {
-    const panelWindow = await xshown(X_PANEL);
-    assert.ok(panelWindow, 'the panel is on screen before the hotkey');
-    await panel.evaluate(() => document.querySelector('#tab-chat')?.click());
-    await xdo('windowfocus', '--sync', panelWindow.id);
+  await step(`with no Dum window in front, the hotkey (${keys}) opens the window with the composer focused; typing goes into it`, async () => {
+    assert.ok(await xgone(X_WINDOW, 0), 'the window was already open');
     await xdo('key', '--clearmodifiers', keys);
-    const window = await xshown(X_COMMAND);
-    assert.ok(window, 'the command bar X window was not mapped');
-    await visible(command, 'command bar');
-    await focused(command, 'command bar');
-    assert.equal(await xfocus(), window.id, 'the command bar has X keyboard focus');
-    await command.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Message to Dum');
+    const window = await xshown(X_WINDOW);
+    assert.ok(window, 'the working window was not mapped');
+    await focused(win, 'working window');
+    assert.ok(await xfocusIs(window.id), 'the working window has X keyboard focus');
+    await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Message to Dum');
     await xdo('type', '--delay', '20', DRAFT);
-    await command.waitForFunction((t) => document.activeElement?.value === t, { timeout: 10_000 }, DRAFT);
-    await shoot(command, `${current}-command-typed.png`);
-    await xscreen(`${current}-screen-command.png`);
-    return `command bar ${window.w}x${window.h} at ${window.x},${window.y}`;
+    await win.waitForFunction((t) => document.activeElement?.value === t, { timeout: 10_000 }, DRAFT);
+    return `window ${window.w}×${window.h} at ${window.x},${window.y}`;
   });
-  await step('Esc hides the command bar, keeps the draft and gives focus back to the panel', async () => {
+  await step('Esc hides the working window, keeps the draft and sends nothing; the circle stays', async () => {
     await xdo('key', 'Escape');
-    assert.ok(await xgone(X_COMMAND), 'the command bar X window stayed mapped');
-    const panelWindow = await xshown(X_PANEL);
-    const end = Date.now() + 5_000;
-    while (Date.now() < end && (await xfocus()) !== panelWindow?.id) await delay(150);
-    assert.equal(await xfocus(), panelWindow?.id, 'X keyboard focus went back to the panel');
-    await focused(panel, 'panel after Esc');
+    assert.ok(await xgone(X_WINDOW), 'the working window stayed mapped');
+    assert.ok(await xshown(X_CIRCLE, 0), 'the circle went too');
     const s = await until((v) => v.draft.text === DRAFT, 'draft kept in main');
     assert.equal(s.state.transcript.some((e) => e.kind === 'user'), false, 'nothing was sent');
+    assert.equal(s.state.busy, false, 'nothing is running');
   });
-  await step('the hotkey again reopens the command bar with the same draft; Esc closes it', async () => {
+  await step('the hotkey reopens the same window with the same draft', async () => {
     await xdo('key', '--clearmodifiers', keys);
-    assert.ok(await xshown(X_COMMAND), 'the command bar X window was not mapped');
-    await command.waitForFunction((t) => document.querySelector('textarea')?.value === t, { timeout: 10_000 }, DRAFT);
-    await shoot(command, `${current}-command-reopened.png`);
-    await xdo('key', 'Escape');
-    assert.ok(await xgone(X_COMMAND), 'the command bar X window stayed mapped');
+    const window = await xshown(X_WINDOW);
+    assert.ok(window, 'the working window was not mapped');
+    assert.ok(await xfocusIs(window.id), 'the working window has X keyboard focus');
+    await win.waitForFunction((t) => document.querySelector('textarea.composer-input')?.value === t, { timeout: 10_000 }, DRAFT);
+    await shoot(win, `${current}-window-reopened.png`);
   });
+  await step('Esc closes an inner chooser first and leaves the window open', async () => {
+    await press(win, '.composer', 'Share');
+    await win.waitForSelector('.chooser-box:not([hidden]) [role=group]');
+    await xdo('key', 'Escape');
+    await win.waitForSelector('.chooser-box[hidden]', { timeout: 5_000 });
+    assert.ok(await xshown(X_WINDOW, 0), 'the window closed with the chooser');
+  });
+  await step('the hotkey while the window has focus hides it', async () => {
+    const window = await xshown(X_WINDOW);
+    assert.ok(await xfocusIs(window.id), 'the window lost focus');
+    await xdo('key', '--clearmodifiers', keys);
+    assert.ok(await xgone(X_WINDOW), 'the focused hotkey left the window open');
+    assert.equal((await snapshot()).draft.text, DRAFT);
+  });
+  await xdo('key', '--clearmodifiers', keys);
+  assert.ok(await xshown(X_WINDOW), 'the hotkey did not reopen the window');
+  await focused(win, 'working window');
 }
 
-async function whoPowersDum() {
-  const { panel } = active;
-  await step('"Who powers Dum?" appears at the first model-backed request; nothing is sent', async () => {
-    const before = await snapshot();
-    // The Zones steps leave the Zones pane open over the conversation; a message is typed there.
-    // (On Linux the command bar steps already brought the conversation back.)
-    await panel.focus('#tab-chat');
-    await panel.keyboard.press('Enter');
-    await panel.waitForFunction(() => !document.querySelector('.chat')?.hidden && document.activeElement?.matches('textarea.composer-input'), { timeout: 10_000 });
-    if (before.draft.text !== DRAFT) await panel.keyboard.type(DRAFT);
-    await panel.waitForFunction((t) => document.querySelector('textarea.composer-input')?.value === t, { timeout: 10_000 }, DRAFT);
-    await panel.keyboard.press('Enter');
-    await panel.waitForSelector('.agent-setup:not([hidden]) h2', { timeout: 10_000 });
-    assert.equal(await panel.$eval('.agent-setup h2', (el) => el.textContent), 'Who powers Dum?');
-    assert.match(await panel.$eval('.agent-note', (el) => (el.hidden ? '' : el.textContent)), /Choose who powers Dum first/);
+/** No backend: Help me decide and the handoff never make up options or a handoff, and nothing is sent. */
+async function decisions(dirs) {
+  const { win } = active;
+  await step('Help me decide with no backend opens Agent setup; no card, no handoff, nothing sent', async () => {
+    const calls = await credentialCalls();
+    await press(win, '.decisions .outcome-bar', 'Help me decide');
+    await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'The outcome you need next');
+    await win.evaluate(() => { document.activeElement.value = ''; });
+    await win.keyboard.type(OUTCOME);
+    await win.keyboard.press('Enter');
+    await win.waitForSelector('.agent-setup:not([hidden]) h2', { timeout: 10_000 });
+    assert.equal(await win.$eval('.agent-setup h2', (el) => el.textContent), 'Who powers Dum?');
     const s = await snapshot();
     assert.equal(s.agent.chosen, null);
-    assert.equal(s.draft.text, DRAFT, 'the message stays in the draft');
-    assert.equal(s.state.transcript.some((e) => e.kind === 'user'), false, 'nothing was sent');
-    await shoot(panel, `${current}-agent-setup.png`);
-    // Local servers sit at fixed 127.0.0.1 ports that no profile setting isolates; say so when one answered.
-    const ready = s.agent.backends.filter((b) => b.ready !== null && b.id !== 'claude');
-    if (ready.length) limits.push(`[${current}] a local model server on this machine answered (${ready.map((b) => `${b.label}: ${b.message}`).join('; ')}); the sheet listed it and read its model list, nothing was chosen, so no model was called`);
+    assert.equal(s.decision, null, 'a decision card appeared with no model');
+    assert.equal(s.handoff, null, 'a handoff appeared with no model');
+    assert.equal(s.draft.text, DRAFT, 'the draft changed');
+    assert.equal(s.state.transcript.some((e) => e.kind === 'user'), false, 'something was sent');
+    assert.equal(await win.$$eval('.decisions .card.decision, .decisions .card.handoff', (els) => els.length), 0);
+    assert.equal(await credentialCalls(), calls, 'a model was asked for');
+    await shoot(win, `${current}-agent-setup.png`);
     return `rows: ${s.agent.backends.map((b) => `${b.id} ${b.ready ? 'ready' : 'not set up'}`).join(', ')}`;
+  });
+  await step('the host refuses decision help with no backend, says why, and makes no card', async () => {
+    const s = await snapshot();
+    const r = await invoke({ type: 'decision-help', binding: s.binding, outcome: OUTCOME });
+    assert.equal(r.ok, false, 'decision help answered without a model');
+    assert.match(r.error, /decision help is unavailable: choose who powers Dum/);
+    const after = await snapshot();
+    assert.equal(after.decision, null);
+    assert.equal(after.handoff, null);
+    return r.error;
+  });
+  await step('no handoff can be chosen or run without a card, and nothing was written', async () => {
+    const s = await snapshot();
+    // Well-formed ids for a card and handoff that don't exist, so the host's own rule answers, not the schema.
+    const select = await invoke({ type: 'handoff-select', binding: s.binding, decisionId: randomUUID(), revision: 0, optionId: randomUUID() });
+    assert.equal(select.ok, false, 'a handoff was chosen from no card');
+    assert.doesNotMatch(select.error, /doesn't accept/, 'the request shape was refused, not the missing card');
+    const runIt = await invoke({ type: 'handoff-run', binding: s.binding, handoffId: randomUUID(), revision: 0, draftRevision: s.draft.revision });
+    assert.equal(runIt.ok, false, 'a handoff ran from nothing');
+    assert.doesNotMatch(runIt.error, /doesn't accept/, 'the request shape was refused, not the missing handoff');
+    const after = await snapshot();
+    assert.equal(after.handoff, null);
+    assert.equal(after.draft.text, DRAFT, 'the refused Do this consumed the draft');
+    assert.equal(after.changes.length, 0);
+    assert.ok(!existsSync(join(dirs.h, 'handoffs')) || (await readdir(join(dirs.h, 'handoffs'), { recursive: true })).every((f) => !f.endsWith('.json')), 'a handoff record was written');
+    return `${select.error} / ${runIt.error}`;
   });
   await step('Claude offers only the API-key field', async () => {
     const radio = '.agent-setup input[name="backend-setup"][value="claude"]';
-    await panel.waitForSelector(radio, { timeout: 15_000 });
-    await panel.focus(radio);
-    await panel.keyboard.press('Space');
-    await panel.waitForFunction((r) => document.querySelector(r)?.checked, {}, radio);
-    const methods = await panel.$$eval('.agent-setup .methods input[type=radio]', (els) => els.map((el) => el.value));
-    const text = await panel.$eval('.agent-setup', (el) => el.innerText);
+    await win.waitForSelector(radio, { timeout: 15_000 });
+    await win.focus(radio);
+    await win.keyboard.press('Space');
+    await win.waitForFunction((r) => document.querySelector(r)?.checked, {}, radio);
+    const methods = await win.$$eval('.agent-setup .methods input[type=radio]', (els) => els.map((el) => el.value));
+    const text = await win.$eval('.agent-setup', (el) => el.innerText);
     assert.deepEqual(methods, [], 'one method: no method choice is offered');
     assert.doesNotMatch(text, /Sign in with Claude|subscription/i);
-    await panel.waitForSelector('.agent-setup input[aria-label="Anthropic API key"]', { timeout: 10_000 });
-    await shoot(panel, `${current}-agent-claude.png`);
+    await win.waitForSelector('.agent-setup input[aria-label="Anthropic API key"]', { timeout: 10_000 });
+    await shoot(win, `${current}-agent-claude.png`);
     return 'anthropic-key only';
   });
   await step('main refuses the removed Claude subscription login as an unknown method', async () => {
-    // The login method Dum removed; the renderer protocol no longer parses it.
     const r = await invoke({ type: 'agent-login', backend: 'claude', method: 'claude-subscription' });
     assert.equal(r.ok, false, 'the removed sign-in was accepted');
     assert.match(r.error, /doesn't accept \(method\)/);
@@ -804,33 +1087,209 @@ async function whoPowersDum() {
   });
 }
 
-async function lookAndFollow(dirs) {
-  const { panel, count } = active;
-  await step('Settings › Look: screen look is on; a settings save persists agent: null', async () => {
-    await panel.evaluate(() => document.querySelector('#tab-settings')?.click());
-    await panel.waitForFunction(() => document.querySelector('#pane-title')?.textContent === 'Settings');
-    const boxes = await panel.$$eval('[aria-labelledby=look-title] input[type=checkbox]', (els) => els.map((el) => el.checked));
-    assert.deepEqual(boxes, [true, true], 'apps and screen boxes');
-    // Turn app look off and on through the visible box; each is a real settings write.
-    const apps = '[aria-labelledby=look-title] label.check:nth-of-type(1) input';
-    await panel.click(apps);
-    await until((v) => v.settings.look.apps === false, 'apps look off');
-    await panel.click(apps);
-    const s = await until((v) => v.settings.look.apps === true, 'apps look on');
-    const stored = JSON.parse(await readFile(join(dirs.profile, 'settings.json'), 'utf8'));
-    assert.equal(stored.settings.agent, null);
-    assert.deepEqual(stored.settings.look, { apps: true, screen: true });
-    assert.equal(s.settings.look.screen, true);
-    return `look status "${s.look.status}", screen permission ${s.look.screenPermission}`;
+/** Settings is a sheet in Chat with exactly §5's list. */
+async function settings() {
+  const { win } = active;
+  await step('Settings opens inside Chat with Zones and Current context still above it', async () => {
+    await win.click('.zones-head button[aria-label="Settings"]');
+    await win.waitForFunction(() => document.querySelector('#aux-title')?.textContent === 'Settings' && !document.querySelector('.aux').hidden);
+    const layout = await win.evaluate(() => ({
+      inChat: !!document.querySelector('.chat .chat-region .aux.sheet .settings'),
+      zones: document.querySelector('.zones-section').offsetParent !== null,
+      context: document.querySelector('.context').offsetParent !== null,
+      chatHidden: document.querySelector('.chat-main').hidden,
+      focus: document.activeElement?.id,
+    }));
+    assert.deepEqual(layout, { inChat: true, zones: true, context: true, chatHidden: true, focus: 'aux-title' });
+  }, { critical: true });
+  await step('Settings holds exactly: Agent, Look, Shortcuts, Open at login, Use personal context, Set up voice, Debug chat, version and Quit', async () => {
+    const rows = await win.$eval('.aux .settings', (el) => [...el.children].map((c) => {
+      if (c.tagName === 'DETAILS') return `disclosure ${c.querySelector('summary').innerText.trim()}`;
+      if (c.classList.contains('settings-foot')) return `footer ${c.innerText.trim().replace(/\s+/g, ' ')}`;
+      const check = c.querySelector(':scope > label.check span');
+      if (check) return `switch ${check.innerText.trim()}`;
+      return `button ${c.querySelector(':scope > button').innerText.trim()}`;
+    }));
+    const s = await snapshot();
+    assert.deepEqual(rows, [
+      'disclosure Agent',
+      'disclosure Look',
+      'disclosure Shortcuts',
+      'switch Open at login',
+      'switch Use personal context',
+      'button Set up voice',
+      'disclosure Debug chat',
+      `footer Dum ${s.version} · ${s.platform} Quit Dum`,
+    ]);
+    return rows.join(' | ');
   });
+  await step('every control outside Agent and Debug chat is a §5 control; no theme, topmost, workspace, mode, follow or web tree', async () => {
+    const controls = await win.$eval('.aux .settings', (el) => {
+      const outside = (c) => !c.closest('.agent-sheet') && !c.closest('.debug');
+      return [...el.querySelectorAll('button, input, select, textarea')].filter(outside).map((c) => {
+        // textContent: a collapsed disclosure renders no innerText.
+        if (c.tagName === 'BUTTON') return `button ${c.textContent.trim()}`;
+        const label = c.getAttribute('aria-label') ?? c.closest('label')?.textContent.trim();
+        return `${c.tagName === 'INPUT' ? c.type : c.tagName.toLowerCase()} ${label}`;
+      });
+    });
+    assert.deepEqual(controls, [
+      'checkbox Apps: notice when you switch apps',
+      'checkbox Screen: notice screen changes and send the look model one fresh frame per changed tick',
+      'button Open Screen Recording settings',
+      'text Open Dum',
+      'text Hold to talk',
+      'text Send the draft',
+      'checkbox Open at login',
+      'checkbox Use personal context',
+      'button Set up voice',
+      'button Quit Dum',
+    ]);
+    const text = await win.$eval('.aux .settings', (el) => el.textContent);
+    assert.doesNotMatch(text, /theme|always on top|all workspaces|Follow a folder|Web tree|Sync now|Mode: /i);
+    return `${controls.length} controls`;
+  });
+  await step('disclosures start collapsed except the needed recovery (no agent chosen opens Agent)', async () => {
+    const open = await win.$$eval('.aux .settings > details', (els) => els.map((d) => `${d.querySelector('summary').innerText.trim()}:${d.open}`));
+    assert.deepEqual(open, ['Agent:true', 'Look:false', 'Shortcuts:false', 'Debug chat:false']);
+  });
+  await step('Look explains the 3-second look with its status and permission; Shortcuts shows the three defaults', async () => {
+    await win.evaluate(() => { for (const d of document.querySelectorAll('.aux .settings > details')) if (/Look|Shortcuts/.test(d.querySelector('summary').innerText)) d.open = true; });
+    const look = await win.$eval('.aux .settings > details:nth-of-type(2)', (el) => el.innerText);
+    assert.match(look, /Every 3 seconds/);
+    assert.match(look, /Looking is on\./);
+    assert.match(look, process.platform === 'darwin' ? /Screen Recording: / : /Screen Recording: no permission needed on this system\./);
+    const keys = await win.$$eval('.aux .settings input.hotkey', (els) => els.map((e) => `${e.getAttribute('aria-label')}=${e.value}`));
+    const want = process.platform === 'darwin'
+      ? ['Open Dum=⌘⇧D', 'Hold to talk=⌃⌥Space', 'Send the draft=⌘⇧↩']
+      : ['Open Dum=Ctrl + Shift + D', 'Hold to talk=Control + Option + Space', 'Send the draft=Ctrl + Shift + Return'];
+    assert.deepEqual(keys, want, `shortcuts: ${keys.join(', ')}`);
+    await win.evaluate(() => document.querySelector('.aux .settings > details:nth-of-type(2)')?.scrollIntoView());
+    await shoot(win, `${current}-settings-look-shortcuts.png`);
+    // The whole list at once: every disclosure collapsed for the picture, then Agent as it was.
+    await win.evaluate(() => { for (const d of document.querySelectorAll('.aux .settings > details')) d.open = false; });
+    await win.evaluate(() => document.querySelector('.aux .settings')?.scrollIntoView());
+    await shoot(win, `${current}-settings.png`);
+    await win.evaluate(() => document.querySelector('.aux .settings .settings-foot')?.scrollIntoView());
+    await shoot(win, `${current}-settings-end.png`);
+    await win.evaluate(() => { document.querySelector('.aux .settings > details:nth-of-type(1)').open = true; });
+    return keys.join(', ');
+  });
+  await step('moved controls live where §5 puts them: Mode in Chat, Pause in Current context, follow in Context, web tree in Skills', async () => {
+    const where = await win.evaluate(() => ({
+      mode: !!document.querySelector('.chat-head select[aria-label=Mode]'),
+      pause: [...document.querySelectorAll('.context .section-head button')].some((b) => /Pause looking|Resume looking/.test(b.getAttribute('aria-label') ?? '')),
+    }));
+    assert.deepEqual(where, { mode: true, pause: true });
+    await press(win, '.aux-head', '‹ Back');
+    await win.waitForFunction(() => document.querySelector('.aux').hidden);
+    await press(win, '.chat-head', 'Skills / Records');
+    await press(win, '.chat-head .menu-list', 'Skills');
+    await win.waitForFunction(() => document.querySelector('#aux-title')?.textContent === 'Skills');
+    const web = await win.$$eval('.aux .web-tree button', (bs) => bs.map((b) => b.textContent.trim()));
+    for (const label of ['Link', 'Sync now', 'New link', 'Unlink']) assert.ok(web.includes(label), `Skills › Web tree lacks ${label}: ${web.join(', ')}`);
+    await press(win, '.aux-head', '‹ Back');
+    await press(win, '.context', 'Context / followed folders');
+    await win.waitForFunction(() => /Records/.test(document.querySelector('#aux-title')?.textContent ?? ''));
+    assert.ok(await win.evaluate(() => [...document.querySelectorAll('.aux button')].some((b) => b.innerText.includes('Follow a folder'))), 'Context has no Follow a folder');
+    await press(win, '.aux-head', '‹ Back');
+    return 'mode, pause, web tree and follow found';
+  });
+}
+
+/** Settings → Debug chat with no agent: its own draft, needs-backend, nothing sent. */
+async function debugChat() {
+  const { win } = active;
+  await win.click('.zones-head button[aria-label="Settings"]');
+  await win.waitForFunction(() => document.querySelector('#aux-title')?.textContent === 'Settings');
+  const debugBox = '.aux .settings > details:nth-of-type(4)';
+  const chipText = () => win.$eval(`${debugBox} .debug [role=status]`, (el) => el.textContent.trim());
+  await step('Debug chat opens its own session and stays ready while the window keeps updating', async () => {
+    await win.click(`${debugBox} > summary`);
+    await win.waitForSelector(`${debugBox} textarea[aria-label="Question about Dum"]`, { visible: true });
+    await win.waitForFunction((b) => document.querySelector(`${b} .debug [role=status]`)?.textContent.trim() === 'ready', { timeout: 5_000 }, debugBox).catch(() => {});
+    assert.equal(await chipText(), 'ready', 'the debug chat never showed ready');
+    // Look ticks and other host changes redraw the window every few seconds.
+    await delay(7_000);
+    const s = await snapshot();
+    assert.equal(await chipText(), 'ready', `after a few seconds the debug chat shows "${await chipText()}" (snapshot debug: ${JSON.stringify(s.debug)})`);
+    return 'ready';
+  });
+  let uiSent = false;
+  await step('typing a debug question and Return with no agent shows needs-backend in the debug chat', async () => {
+    const calls = await credentialCalls();
+    await win.focus(`${debugBox} textarea`);
+    await win.keyboard.type(DEBUG_QUESTION);
+    const sendEnabled = await win.$eval(`${debugBox} .debug button[type=submit]`, (b) => !b.disabled);
+    await win.keyboard.press('Enter');
+    const s = await until((v) => v.debug?.state === 'needs-backend', `needs-backend (Send was ${sendEnabled ? 'enabled' : 'disabled'}, the chip said "${await chipText()}")`, 5_000);
+    uiSent = true;
+    assert.deepEqual(s.debug.entries, [], 'the question was recorded or answered');
+    assert.equal(s.draft.text, DRAFT, 'the zone draft changed');
+    assert.equal(s.state.transcript.some((e) => e.kind === 'user'), false, 'the question went to the zone chat');
+    assert.equal(await credentialCalls(), calls, 'a model was asked for');
+  });
+  await step('the host answers a debug send with no agent with needs-backend, records nothing and calls no model', async () => {
+    const calls = await credentialCalls();
+    const opened = await invoke({ type: 'debug-open' });
+    assert.equal(opened.ok, true, opened.error);
+    if (opened.debug.state === 'idle') {
+      const sent = await invoke({ type: 'debug-send', binding: opened.debug.binding, text: DEBUG_QUESTION });
+      assert.equal(sent.ok, true, sent.error);
+    }
+    const s = await until((v) => v.debug?.state === 'needs-backend', 'needs-backend in the snapshot', 5_000);
+    assert.deepEqual(s.debug.entries, []);
+    assert.equal(s.draft.text, DRAFT, 'the zone draft changed');
+    assert.equal(await credentialCalls(), calls, 'a model was asked for');
+    await win.waitForFunction((b) => /needs a model/.test(document.querySelector(`${b} .debug [role=status]`)?.textContent ?? ''), { timeout: 5_000 }, debugBox);
+    const notice = await win.$eval(`${debugBox} .debug .notice`, (el) => (el.hidden ? '' : el.innerText));
+    assert.match(notice, /The debug chat uses Dum's model\. Set one up; your question stays here\./);
+    await win.evaluate((b) => document.querySelector(b)?.scrollIntoView(), debugBox);
+    await shoot(win, `${current}-debug-chat.png`);
+    return notice.replace(/\s+/g, ' ');
+  });
+  if (uiSent) {
+    await step('the debug question stays in the debug draft after needs-backend (§6: setup preserves the debug draft)', async () => {
+      const draft = await win.$eval(`${debugBox} textarea`, (el) => el.value);
+      assert.equal(draft, DEBUG_QUESTION, `the debug draft is ${JSON.stringify(draft)}`);
+    });
+  } else {
+    unexercised('the debug question stays in the debug draft after needs-backend', 'the debug chat\'s own Send never reached the host');
+  }
+  await step('Set up Agent from the debug chat opens Settings › Agent', async () => {
+    await press(win, `${debugBox} .debug .notice`, 'Set up Agent');
+    const open = await win.$eval('.aux .settings > details:nth-of-type(1)', (d) => d.open);
+    assert.equal(open, true);
+  });
+  await step('Esc in Settings closes Settings back to Chat, even with a Chat form left open under it', async () => {
+    const formBefore = await win.$$eval('.decisions .card-form', (els) => els.length);
+    await win.focus('#aux-title');
+    await win.keyboard.press('Escape');
+    await delay(300);
+    const after = await win.evaluate(() => ({ aux: !document.querySelector('.aux').hidden, form: document.querySelectorAll('.decisions .card-form').length }));
+    if (after.aux) {
+      // Leave Settings for the steps that follow, whatever the first Esc did.
+      await win.keyboard.press('Escape');
+      await win.waitForFunction(() => document.querySelector('.aux').hidden, { timeout: 5_000 }).catch(() => {});
+    }
+    assert.equal((await snapshot()).window.visible, true, 'Esc hid the window instead of closing Settings');
+    assert.equal(after.aux, false, `the first Esc left Settings open${formBefore && !after.form ? ' and closed the "Your outcome" form hidden in Chat under it instead' : ''}`);
+  });
+}
+
+/** Follow a folder from Current context, then the look with no backend. */
+async function lookAndFollow(dirs) {
+  const { win, count } = active;
   if (!linux) {
     unexercised('followed folder via the native folder picker', 'needs XTest (xdotool) for the native picker');
     return;
   }
   let follow;
-  await step('Follow a folder… opens the native picker; the chosen non-Git folder is followed', async () => {
+  await step('Current context › Context › Follow a folder… opens the native picker; the chosen non-Git folder is followed', async () => {
     assert.equal(existsSync(join(learning, '.git')), false);
-    await panel.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Follow a folder'))?.click());
+    await press(win, '.context', 'Context / followed folders');
+    await win.waitForFunction(() => /Records/.test(document.querySelector('#aux-title')?.textContent ?? ''));
+    await press(win, '.aux', 'Follow a folder…');
     const picker = 'Choose a folder for Dum to follow';
     const dialog = await xwindow(active.child.pid, picker, 'folder picker');
     await xdo('windowfocus', '--sync', dialog);
@@ -844,34 +1303,37 @@ async function lookAndFollow(dirs) {
     const end = Date.now() + 5_000;
     while (Date.now() < end && (await xwindows(active.child.pid, picker)).length) await delay(150);
     assert.equal((await xwindows(active.child.pid, picker)).length, 0, 'the picker closed');
+    assert.ok(await xshown(X_WINDOW, 0), 'the picker hid the working window');
     follow = s.follows[0];
     assert.equal(follow.label, 'learning');
     assert.equal(follow.files, 2, 'walk.py and README.md');
+    await press(win, '.aux-head', '‹ Back');
     return `${follow.label}: ${follow.files} files`;
   });
-  if (!follow) return;
   const statuses = new Set();
   let sampling = true;
   const sampler = (async () => {
     while (sampling && active) {
-      try { statuses.add((await snapshot()).look.status); } catch { /* the run is ending */ }
+      try {
+        const look = (await snapshot()).look;
+        statuses.add(`${look.status}/${look.reason ?? '-'}`);
+      } catch { /* the run is ending */ }
       await delay(250);
     }
   })();
-  // The look stops while a Dum window is in front, so it runs here with every Dum window hidden.
+  // The look stops while a Dum window is in front, so it runs here with only the circle showing.
   let flicker = false;
-  await step('with no Dum window in front, the look ticks', async () => {
-    await invoke({ type: 'dismiss-surface', surface: 'panel' });
-    assert.ok(await xgone(X_PANEL), 'the panel X window stayed mapped');
-    assert.ok(await xgone(X_COMMAND), 'the command bar X window stayed mapped');
+  await step('with only the circle showing, the look ticks', async () => {
+    await invoke({ type: 'dismiss-surface', surface: 'window' });
+    assert.ok(await xgone(X_WINDOW), 'the working window stayed mapped');
     if (!count) {
       limits.push('look ticks, frame requests and credential requests not counted: main inspector unavailable');
-      return 'panel hidden';
+      return 'window hidden';
     }
     const before = (await count.read()).ticks;
     const end = Date.now() + 15_000;
     while (Date.now() < end && (await count.read()).ticks === before) await delay(500);
-    assert.ok((await count.read()).ticks > before, 'no look tick arrived with every Dum window hidden');
+    assert.ok((await count.read()).ticks > before, 'no look tick arrived with the window hidden');
     // The harness's own screen activity: an unfocusable, inactive window over the display under the
     // cursor that alternates black and white, so the look's ticks see the screen change.
     try {
@@ -890,31 +1352,30 @@ async function lookAndFollow(dirs) {
     }
     return `ticks flowing; screen activity ${flicker ? 'on' : 'off'}`;
   });
-  let after;
-  await step('saving a file in the followed folder produces a host FileSignal (new file listed by the host scan)', async () => {
+  await step('saving files in the followed folder reaches the host scan', async () => {
     await writeFile(join(learning, 'walk.py'), `${await readFile(join(learning, 'walk.py'), 'utf8')}\n# iterative next\n`);
     await writeFile(join(learning, 'queue.py'), 'from collections import deque\nqueue = deque()\n');
-    // The host lists followed folders every few ticks; asking for the skill tree makes it send fresh state.
     const end = Date.now() + 45_000;
     let s;
     while (Date.now() < end) {
-      await invoke({ type: 'panel', panel: 'tree' });
+      await invoke({ type: 'view', view: 'tree' });
       s = await snapshot();
       if (s.follows[0]?.files === 3) break;
       await delay(1_000);
     }
     assert.equal(s?.follows[0]?.files, 3, `host still lists ${s?.follows[0]?.files} files`);
-    after = s;
     return 'queue.py appeared in the host follow list';
   });
-  await step('no backend: while the look ticks and the screen changes, it requests no frame and makes no model call', async () => {
+  await step('no backend: while the look ticks and the screen and files change, it requests no frame and makes no model call', async () => {
     const start = count ? await count.read() : null;
     await delay(12_000);
     const s = await snapshot();
     const seen = [...statuses];
     assert.equal(s.agent.chosen, null);
-    assert.ok(!seen.some((v) => LOOK_CALLS.includes(v)), `look statuses showed a model call: ${seen.join(' | ')}`);
-    assert.equal(s.state.transcript.some((e) => e.kind === 'quip'), false, 'no Wizard aside');
+    assert.equal(s.look.status, 'no-backend', `look status ${s.look.status}/${s.look.reason}`);
+    assert.ok(!seen.some((v) => v.startsWith('checking')), `the look claimed a model call: ${seen.join(' | ')}`);
+    assert.equal(s.state.transcript.some((e) => e.kind === 'quip'), false, 'an unprompted Wizard aside appeared');
+    assert.equal(s.decision, null, 'an unsolicited decision card appeared');
     assert.equal(existsSync(join(dirs.claude, 'projects')), false, 'no Claude session was written');
     if (!count) return `statuses: ${seen.join(' | ')}`;
     const n = await count.read();
@@ -926,132 +1387,101 @@ async function lookAndFollow(dirs) {
     assert.equal(n.credentialRequests, 0, `the host asked main for ${n.credentialRequests} credentials (a model call)`);
     return `${n.ticks} look ticks (${n.changed} with screen changes), ${n.frameRequests} frame requests, ${n.frames} frames, ${n.credentialRequests} credential requests; statuses: ${seen.join(' | ')}`;
   });
-  await step('the look status shows the followed-folder FileSignal and that advice needs a backend', async () => {
-    const seen = [...statuses];
-    assert.ok(after, 'no FileSignal was observed');
-    const noticed = seen.filter((v) => /\b[1-9]\d* changed files? noticed\b/.test(v) && /advice needs a backend/.test(v));
-    assert.ok(noticed.length > 0, `look status never told of the saved files: ${seen.map((v) => `"${v}"`).join(', ')}`);
-    assert.ok(!seen.includes(LOOK_BLOCKED), 'with no backend and nothing running, the look never claimed to be paused');
-    return noticed.at(-1);
-  });
   sampling = false;
   await sampler;
   if (flicker) await count.evaluate('globalThis.__dumSmokeFlicker()');
-  await invoke({ type: 'show-surface', surface: 'panel' });
-  await visible(panel, 'panel');
-  await step('Settings › Look shows the look status and the followed folder', async () => {
-    await panel.evaluate(() => document.querySelector('#tab-settings')?.click());
-    await panel.waitForFunction(() => document.querySelector('#pane-title')?.textContent === 'Settings');
-    await panel.waitForFunction(() => /learning/.test(document.querySelector('.follows')?.textContent ?? ''));
-    const text = await panel.$eval('[aria-labelledby=look-title]', (el) => el.innerText);
-    const status = (await snapshot()).look.status;
-    assert.ok(text.includes(status), 'the status line is drawn');
-    await panel.evaluate(() => document.querySelector('#look-title')?.scrollIntoView());
-    await shoot(panel, `${current}-look-status.png`);
-    return `"${status}"`;
-  });
-  await step('Settings › Web tree: link, sync, new link and unlink are there; Sync now before a link says so', async () => {
-    const labels = await panel.$$eval('[aria-labelledby=web-title] button', (bs) => bs.map((b) => b.textContent.trim()));
-    for (const label of ['Link', 'Sync now', 'New link', 'Unlink']) assert.ok(labels.includes(label), `no ${label} button: ${labels.join(', ')}`);
-    assert.ok(await panel.$('[aria-labelledby=web-title] input[aria-label=Server]'), 'no Server field');
-    await panel.focus('[aria-labelledby=web-title] input[aria-label=Server]');
-    await panel.keyboard.press('Tab');
-    await panel.keyboard.press('Tab');
-    assert.equal(await panel.evaluate(() => document.activeElement?.textContent?.trim()), 'Sync now', 'Sync now is reached by Tab');
-    await panel.keyboard.press('Enter');
-    await panel.waitForFunction(() => /not linked - link a web tree in Settings first/.test(document.querySelector('.errors')?.textContent ?? ''), { timeout: 10_000 });
-    await panel.evaluate(() => document.querySelector('#web-title')?.scrollIntoView());
-    await shoot(panel, `${current}-web-tree.png`);
-    return 'refused: not linked';
+  await step('Current context shows the look status: no backend, and Pause', async () => {
+    await openWindow();
+    const s = await snapshot();
+    await win.waitForFunction(() => /^no backend/.test(document.querySelector('.context .look-state')?.textContent ?? ''), { timeout: 10_000 });
+    const label = await win.$eval('.context .look-state', (el) => el.textContent);
+    assert.equal(await win.$eval('.context .section-head button[aria-label="Pause looking"]', (b) => b.innerText.trim()), 'Pause');
+    await press(win, '.context .section-head', 'Details');
+    const details = await win.$eval('.context .look-details', (el) => el.innerText);
+    assert.match(details, /Status\s+no backend/);
+    await shoot(win, `${current}-look-status.png`);
+    await press(win, '.context .section-head', 'Details');
+    return `"${label}" (${s.look.status}/${s.look.reason})`;
   });
 }
 
-async function tray() {
-  if (!linux) {
-    unexercised('tray icon and menu', 'read over a private D-Bus StatusNotifier watcher on Linux only');
-    return;
-  }
-  await step('the tray icon exists, names the zone and offers the menu', async () => {
-    const zone = (await snapshot()).activeZone.breadcrumb.map((b) => b.name).join(' › ');
-    let items = [];
-    const end = Date.now() + 15_000;
-    while (Date.now() < end) {
-      items = (await bus.dump()).filter((i) => !i.error && i.menu?.includes('Quit Dum'));
-      if (items.some((i) => JSON.stringify(i.tooltip ?? i.title).includes(zone))) break;
-      await delay(500);
-    }
-    assert.equal(items.length, 1, `registered tray items: ${JSON.stringify(await bus.dump())}`);
-    const [item] = items;
-    assert.ok(JSON.stringify([item.tooltip, item.title]).includes(`Dum · ${zone}`), `tooltip ${JSON.stringify(item.tooltip)}`);
-    for (const label of ['Ask Dum…', 'Open Panel', 'Switch Zone', 'Pause the Look', 'Quit Dum']) assert.ok(item.menu.includes(label), `menu lacks ${label}: ${item.menu.join(', ')}`);
-    assert.ok(item.iconSizes.length > 0 || item.iconName, 'the item has an icon');
-    return `tooltip ${JSON.stringify(item.tooltip)}; menu ${item.menu.filter(Boolean).join(' / ')}`;
-  });
-}
-
-/** The send-draft shortcut with no backend: main shows the refusal in the cursor bubble. */
+/** The bubble and the circle together: the send-draft shortcut with no backend speaks in the bubble. */
 async function bubble() {
-  const { panel, bubble: page } = active;
-  await step('the bubble page is read-only: no request bridge', async () => {
-    const api = await page.evaluate(() => ({ dum: typeof window.dum, bubble: typeof window.dumBubble, invoke: typeof window.dumBubble?.invoke }));
-    assert.deepEqual(api, { dum: 'undefined', bubble: 'object', invoke: 'undefined' });
-  });
+  const { win, bubble: page } = active;
   if (!linux) {
-    unexercised('bubble shows at the cursor and is click-through', 'needs XTest (xdotool)');
+    unexercised('bubble shows at the cursor, beside the circle, and is click-through', 'needs XTest (xdotool)');
     return;
   }
   const send = xkeys((await snapshot()).settings.sendDraftHotkey);
   let bubbleWindow;
-  let panelWindow;
-  await step(`the Send-draft shortcut (${send}) with no backend shows the cursor bubble, keeps focus and sends nothing`, async () => {
-    await panel.evaluate(() => document.querySelector('#tab-chat')?.click());
-    panelWindow = await xshown(X_PANEL);
-    assert.ok(panelWindow, 'the panel is on screen');
-    await xdo('windowfocus', '--sync', panelWindow.id);
-    // The bubble opens below-right of the cursor; with the cursor in the panel's upper left it lands on the panel.
-    await xdo('mousemove', String(panelWindow.x + 30), String(panelWindow.y + 150));
+  let window;
+  await step(`the Send-draft shortcut (${send}) with no backend shows the cursor bubble; the circle stays, focus stays, nothing is sent`, async () => {
+    window = await xshown(X_WINDOW);
+    assert.ok(window, 'the working window is on screen');
+    await xdo('windowfocus', '--sync', window.id);
+    // The bubble opens below-right of the cursor; with the cursor in the window's upper left it lands on the window.
+    await xdo('mousemove', String(window.x + 30), String(window.y + 150));
     await xdo('key', '--clearmodifiers', send);
     bubbleWindow = await xshown(X_BUBBLE);
     assert.ok(bubbleWindow, 'the bubble X window was not mapped');
     await page.waitForSelector('.bubble:not([hidden]) .bubble-text', { timeout: 10_000 });
     const text = await page.$eval('.bubble', (el) => el.innerText);
     assert.ok(text.trim(), 'the bubble has text');
-    assert.equal(await xfocus(), panelWindow.id, 'X keyboard focus stayed on the panel');
+    assert.doesNotMatch(text, /command bar/i);
+    assert.ok(await xshown(X_CIRCLE, 0), 'the circle went away while the bubble showed');
+    assert.equal(await xfocus(), window.id, 'X keyboard focus stayed on the working window');
     assert.equal(await page.evaluate(() => document.hasFocus()), false, 'the bubble page never has focus');
     const now = await snapshot();
     assert.equal(now.state.transcript.some((e) => e.kind === 'user'), false, 'nothing was sent');
+    assert.equal(now.draft.text, DRAFT, 'the draft stays');
     // The page capture is the evidence: Xvfb has no compositing manager, so the transparent window is mapped
     // and takes no clicks, but its pixels don't appear in an X screen grab.
     await shoot(page, `${current}-bubble.png`, { omitBackground: true });
-    if (!limits.some((l) => l.startsWith('Xvfb has no compositing'))) limits.push('Xvfb has no compositing manager: the transparent bubble window is mapped and click-through, but its pixels are shown from the page capture, not an X screen grab');
-    return `"${text.trim().replace(/\s+/g, ' ')}", ${bubbleWindow.w}x${bubbleWindow.h} at ${bubbleWindow.x},${bubbleWindow.y}`;
+    if (!limits.some((l) => l.startsWith('Xvfb has no compositing'))) limits.push('Xvfb has no compositing manager: the transparent bubble window is mapped and click-through, but its pixels are shown from its page capture, not an X screen grab');
+    return `"${text.trim().replace(/\s+/g, ' ')}", ${bubbleWindow.w}×${bubbleWindow.h} at ${bubbleWindow.x},${bubbleWindow.y}`;
   });
   if (!bubbleWindow) return;
-  await step('the bubble is click-through: a real click on it lands on the panel underneath', async () => {
+  await step('the bubble is click-through: a real click on it lands on the working window underneath', async () => {
     const install = () => {
       window.__smokeClicks = [];
       const swallow = (e) => { window.__smokeClicks.push({ type: e.type, x: e.screenX, y: e.screenY }); e.preventDefault(); e.stopImmediatePropagation(); };
       for (const type of ['mousedown', 'mouseup', 'click']) window.addEventListener(type, swallow, { capture: true });
     };
-    await panel.evaluate(install);
+    await win.evaluate(install);
     await page.evaluate(install);
     const b = bubbleWindow;
-    const p = panelWindow;
+    const p = window;
     const x = Math.max(b.x, p.x) + 12;
     const y = Math.max(b.y, p.y) + 12;
-    assert.ok(x < b.x + b.w && x < p.x + p.w && y < b.y + b.h && y < p.y + p.h, 'bubble and panel overlap');
+    assert.ok(x < b.x + b.w && x < p.x + p.w && y < b.y + b.h && y < p.y + p.h, 'bubble and window overlap');
     await xdo('mousemove', String(x), String(y));
     await xdo('click', '1');
     await delay(500);
-    const onPanel = await panel.evaluate(() => window.__smokeClicks);
+    const onWindow = await win.evaluate(() => window.__smokeClicks);
     const onBubble = await page.evaluate(() => window.__smokeClicks);
     assert.equal(onBubble.length, 0, `the bubble caught ${JSON.stringify(onBubble)}`);
-    assert.ok(onPanel.some((c) => c.type === 'mousedown'), `the panel saw ${JSON.stringify(onPanel)}`);
+    assert.ok(onWindow.some((c) => c.type === 'mousedown'), `the window saw ${JSON.stringify(onWindow)}`);
     assert.ok(await xshown(X_BUBBLE, 0), 'the bubble was still on screen during the click');
-    return `click at ${x},${y} reached the panel`;
+    await win.evaluate(() => { window.__smokeClicks = null; });
+    return `click at ${x},${y} reached the window`;
   });
   await step('the bubble expires on its own', async () => {
     await page.waitForSelector('.bubble[hidden]', { timeout: 15_000 });
+    assert.ok(await xgone(X_BUBBLE), 'the bubble X window stayed mapped');
+  });
+  await step('with the cursor beside the circle, the bubble steps off the circle', async () => {
+    const circle = await xshown(X_CIRCLE, 0);
+    assert.ok(circle, 'no circle');
+    await xdo('windowfocus', '--sync', window.id);
+    // Below-right of a cursor just up-left of the circle would cover it.
+    await xdo('mousemove', String(circle.x - 10), String(circle.y - 10));
+    await xdo('key', '--clearmodifiers', send);
+    const shown = await xshown(X_BUBBLE);
+    assert.ok(shown, 'the bubble X window was not mapped');
+    assert.ok(!overlap(shown, circle), `bubble ${JSON.stringify(shown)} covers circle ${JSON.stringify(circle)}`);
+    assert.ok(await xshown(X_CIRCLE, 0), 'the circle went away');
+    await page.waitForSelector('.bubble[hidden]', { timeout: 15_000 });
+    return `bubble at ${shown.x},${shown.y}; circle at ${circle.x},${circle.y}`;
   });
 }
 
@@ -1072,20 +1502,19 @@ try {
     assert.ok(!JSON.stringify(s.agent.backends).toLowerCase().includes('git '), 'no backend status mentions Git');
     return `PATH=${bin} (empty)`;
   });
-  await step('sandboxed renderers: no Node in the panel, command bar or bubble', async () => {
-    for (const page of [active.panel, active.command, active.bubble]) {
-      assert.deepEqual(await page.evaluate(() => ({ process: typeof process, require: typeof require })), { process: 'undefined', require: 'undefined' });
-    }
-  });
+  await surfaces();
   await firstRun(dirs);
-  await zones();
-  await commandBar();
-  await whoPowersDum();
+  await otherZone();
+  await noTray();
+  await circleGestures(dirs);
+  await keyboard();
+  await decisions(dirs);
+  await settings();
+  await debugChat();
   await lookAndFollow(dirs);
-  await tray();
   await bubble();
   const before = await snapshot();
-  await stop();
+  await step('Quit Dum exits cleanly with code 0', () => stop());
 
   current = `${current}-relaunch`;
   active = await launch(dirs, repo);
@@ -1093,17 +1522,34 @@ try {
     const s = await until((v) => v.activeZone, 'restored zone');
     assert.equal(s.activeZone.id, before.activeZone.id);
     assert.deepEqual(s.activeZone.breadcrumb.map((b) => b.name), before.activeZone.breadcrumb.map((b) => b.name));
+    assert.equal(s.zones.zones.length, before.zones.zones.length);
     assert.notEqual(s.zoneEpoch, before.zoneEpoch);
     assert.notEqual(s.binding.inputToken, before.binding.inputToken);
     assert.equal(s.settings.agent, null);
     assert.equal(s.settings.look.screen, true);
     assert.equal(s.follows.length, before.follows.length);
     assert.equal(s.shares.length, 0);
-    await invoke({ type: 'show-surface', surface: 'panel' });
-    await visible(active.panel, 'panel');
-    await shoot(active.panel, `${current}-panel.png`);
+    assert.equal(s.direction?.zoneId, s.activeZone.id);
+    assert.equal(s.direction?.current, null, 'a direction appeared without you');
   });
-  await stop();
+  if (linux) {
+    await step('relaunch: one circle, back where it was dragged; the window stays closed (not a first run)', async () => {
+      const circle = await xshown(X_CIRCLE, 10_000);
+      assert.ok(circle, 'no circle after relaunch');
+      assert.equal((await xviewable('^Dum$')).filter(X_CIRCLE.test).length, 1);
+      assert.ok(circleAfterDrag, 'the drag step did not run');
+      assert.ok(near(circle.x, circleAfterDrag.x) && near(circle.y, circleAfterDrag.y), `circle at ${circle.x},${circle.y}; it was dragged to ${circleAfterDrag.x},${circleAfterDrag.y}`);
+      assert.ok(await xstaysGone(X_WINDOW, 3_000), 'the working window opened by itself');
+      assert.deepEqual(await bus.dump(), [], 'a tray item registered');
+      return `circle at ${circle.x},${circle.y}`;
+    });
+  }
+  await step('relaunch: the window opens at the restored zone', async () => {
+    await openWindow();
+    await active.win.waitForFunction(() => document.querySelector('.first-run')?.hidden === true);
+    await shoot(active.win, `${current}-window.png`);
+  });
+  await step('Quit Dum exits cleanly with code 0', () => stop());
 } catch (error) {
   record('run', false, error?.stack ?? error);
 } finally {
@@ -1121,8 +1567,9 @@ try {
     active = null;
   }
   for (const s of services) s.kill();
-  if (!linux) limits.push('XTest, the private D-Bus tray watcher and native-dialog automation are Linux-only; those checks are marked not exercised');
-  limits.push('This run does not establish macOS Screen Recording, full-screen Spaces, focus return to another app, push-to-talk voice or login items.');
+  if (!linux) limits.push('XTest, the private D-Bus StatusNotifier watcher and native-dialog automation are Linux-only; those checks are marked not exercised');
+  limits.push('The decision and handoff steps ran the no-backend path only: no scripted or real model composed alignment options, decision cards or a handoff, and no Do this ran.');
+  limits.push('This run does not establish macOS Screen Recording, the round hit region\'s timing on macOS, Spaces or full-screen apps, VoiceOver, focus return to another app, push-to-talk voice or login items.');
   const failed = checks.filter((c) => c.ok === false);
   await writeFile(join(output, 'report.json'), `${JSON.stringify({
     platform: process.platform,

@@ -1,5 +1,7 @@
 # Dum LLM setup design
 
+> **Note, 2026-10-08.** This design is history. Where it names the revamp's panel, command bar, tray or Wizard asides, those surfaces are gone. For the circle, the one window, the Settings list and debug chat, see [circle-design.md](circle-design.md); for the rules, [architecture.md](architecture.md); for current backend behavior, the README and the code. The text below is left as it was.
+
 Status: design for the revamp. No slice is implemented, and no native Mac or real-model check has been run for it. The owner's decisions of 2026-10-08 are folded into the body; §10 lists what is still open.
 
 Terms follow `docs/architecture.md`: functions the model calls are **actions** (a **tool** is a skill kind), a file Dum writes on command is a **change**, and **practice** means suggested projects only. Provider API fields with "tool" in the name (`tools: []`, `availableTools`, `delta.tool_calls`) keep their wire names. **The look** is the 3-second local check in §6.1; a **look call** is a model call it triggers, made with the **look model** (§6.2).

@@ -38,7 +38,11 @@ function wizardReply(prompt: string): string {
     const answered = prompt.includes("ANSWERED QUESTIONS");
     return JSON.stringify({
       reflection: "Here's what I think you want to become able to do: write small Python programs on your own.",
-      questions: answered ? [] : [{ text: "Have you printed output before?", changesPlan: "It decides whether to start from printing or variables." }],
+      questions: answered ? [] : [
+        { text: "Have you printed output before?", changesPlan: "It decides whether to start from printing or variables." },
+        // A goal that needs two answers, so one answer leaves the attempt still clarifying.
+        ...(prompt.includes("GOAL: learn Two") ? [{ text: "Do you want a script or a library?", changesPlan: "It decides what the first project produces." }] : []),
+      ],
       options: [
         { kind: "project", title: "Build a greeting script", builds: [{ name: "variables", lang: "python" }], advancesGoal: "It exercises the basics the goal names.", contextIds: goal ? [goal] : [], tradeoff: "It is small, so it covers little.", anchor: null },
         { kind: "decision", title: "Pick a first data structure", builds: [{ name: "lists", lang: "python" }], advancesGoal: "It sets what you practice next.", contextIds: [], tradeoff: "It delays writing a whole program.", anchor: null },
@@ -731,6 +735,32 @@ if (process.env.DUM_FAKE_HOST === "1") {
     assert.notEqual(refreshed.handoff.id, fresh.handoff.id);
     assert.equal(refreshed.needsRefresh, false);
     assert.equal(readFileSync(join(f.work, "hello.py"), "utf8"), "print('hi')\n");
+  }));
+
+  test("every alignment step publishes the active zone's alignment: a partial answer, Not now and no backend", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const host = launch();
+    await host.start(f);
+    const created = await host.create("Two", null);
+    const zone = created.zone!;
+    await host.ready(zone.id);
+    let direction = (await host.ok({ op: "alignment-step", binding: created.direction!.binding, action: "start" })).direction!;
+    assert.equal(direction.attempt!.questions.length, 2);
+    // One of two answers: the attempt keeps clarifying, and the window sees the answer without another event.
+    const first = direction.attempt!.questions[0]!;
+    direction = (await host.ok({ op: "alignment-step", binding: direction.binding, action: "answer", questionId: first.id, text: "yes" })).direction!;
+    assert.equal(direction.attempt!.phase, "clarify");
+    let s = await host.until((e) => e.direction?.attempt?.questions[0]?.answer === "yes");
+    assert.equal(s.direction!.binding.directionRevision, direction.binding.directionRevision);
+    // Not now: deferred is published.
+    direction = (await host.ok({ op: "alignment-step", binding: direction.binding, action: "defer" })).direction!;
+    s = await host.until((e) => e.direction?.status === "deferred");
+    assert.equal(s.direction!.current, null);
+    // No backend: starting again keeps a pending attempt that waits for a model, and the state says so.
+    await host.ok({ op: "agent-select", choice: null });
+    direction = (await host.ok({ op: "alignment-step", binding: direction.binding, action: "start" })).direction!;
+    assert.equal(direction.status, "needs-backend");
+    s = await host.until((e) => e.direction?.status === "needs-backend");
+    assert.equal(s.direction!.attempt!.phase, "needs-backend");
   }));
 
   test("New session keeps the agreed direction, starts an empty trail and rotates the epoch; debug and diagnostics bypass the queue", { timeout: 60_000 }, () => withHosts(async (f, launch) => {

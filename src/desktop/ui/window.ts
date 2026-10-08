@@ -238,6 +238,7 @@ export function windowView() {
     iconButton("hide", "Hide (Esc)", () => void client.call({ type: "dismiss-surface", surface: "window" })),
   );
   const zoneBox = h("div", { class: "zone-tree-box", id: "zone-tree-box" }, zones.el);
+  const zonesSection = h("section", { class: "zones-section", "aria-label": "Zones" }, zonesHead, switcher.el, zoneBox);
 
   // -- Current context --------------------------------------------------------------
 
@@ -426,15 +427,23 @@ export function windowView() {
     e.preventDefault();
     if (switcher.isOpen) return switcher.close();
     if (!menu.hidden) return toggleMenu(false);
-    if (composer.escape() || zones.escape() || decisions.escape() || context.escape()) return;
-    if (aux === "story" && story.escape()) return;
-    if (managing) {
+    const closeManaging = () => {
+      if (!managing) return false;
       managing = false;
       render();
       manageBtn.focus();
-      return;
+      return true;
+    };
+    // Zones and Current context stay visible above an open view, so Esc there closes their own inner thing.
+    if (zonesSection.contains(document.activeElement) && (zones.escape() || closeManaging())) return;
+    if (context.el.contains(document.activeElement) && context.escape()) return;
+    if (aux) {
+      // An open view hides Chat: its forms wait behind it and never take this Esc.
+      if (aux === "settings" && settings.escape()) return;
+      if (aux === "story" && story.escape()) return;
+      return closeAux(true);
     }
-    if (aux) return closeAux(true);
+    if (composer.escape() || decisions.escape() || zones.escape() || context.escape() || closeManaging()) return;
     void client.call({ type: "dismiss-surface", surface: "window" });
   });
   document.addEventListener("click", (e) => {
@@ -448,7 +457,7 @@ export function windowView() {
     h(
       "div",
       { class: "window" },
-      h("section", { class: "zones-section", "aria-label": "Zones" }, zonesHead, switcher.el, zoneBox),
+      zonesSection,
       client.errors,
       context.el,
       chat,

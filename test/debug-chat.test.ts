@@ -62,8 +62,13 @@ function harness(script: () => Step[]) {
   const runtime = join(home, "debug", "runtime");
   mkdirSync(runtime, { recursive: true });
   let changes = 0;
-  const chat = new DebugChat(agent, diagnostics, runtime, () => { changes++; });
-  return { chat, agent, diagnostics, seen, runtime, changes: () => changes };
+  /** What the host would post as debug-state: the view read inside the change listener. */
+  const published: DebugView[] = [];
+  const chat: DebugChat = new DebugChat(agent, diagnostics, runtime, () => {
+    changes++;
+    published.push(chat.view());
+  });
+  return { chat, agent, diagnostics, seen, runtime, published, changes: () => changes };
 }
 
 function hashTree(dir: string): Record<string, string> {
@@ -215,6 +220,7 @@ test("idle 30 minutes expires the session; New starts a fresh one", async (t) =>
   const before = h.changes();
   mock.timers.tick(DIAGNOSTIC_LIMITS.debugIdleMs);
   assert.ok(h.changes() > before, "expiry is published");
+  assert.equal(h.published.at(-1)!.state, "expired");
   const expired = h.chat.view();
   assert.equal(expired.state, "expired");
   assert.equal(h.chat.open().state, "expired");
@@ -222,6 +228,32 @@ test("idle 30 minutes expires the session; New starts a fresh one", async (t) =>
   const fresh = h.chat.reset();
   assert.equal(fresh.state, "idle");
   assert.notEqual(fresh.binding.debugSessionId, view.binding.debugSessionId);
+});
+
+test("open, reset and close each publish the current view to the change listener", async () => {
+  const h = harness(() => []);
+  const opened = h.chat.open();
+  assert.deepEqual(h.published.at(-1), opened, "the host gets debug-state on open");
+  const reset = h.chat.reset();
+  assert.deepEqual(h.published.at(-1), reset);
+  const count = h.published.length;
+  await h.chat.close();
+  assert.equal(h.published.length, count + 1);
+  assert.notEqual(h.published.at(-1)!.binding.debugSessionId, reset.binding.debugSessionId, "close publishes the invalidated binding");
+});
+
+test("an expiry noticed on read, before the idle timer fires, is published", (t) => {
+  mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  t.after(() => mock.timers.reset());
+  const h = harness(() => []);
+  h.chat.open();
+  const count = h.published.length;
+  mock.timers.tick(DIAGNOSTIC_LIMITS.debugIdleMs);
+  assert.equal(h.chat.view().state, "expired");
+  assert.equal(h.published.length, count + 1);
+  assert.equal(h.published.at(-1)!.state, "expired");
+  h.chat.view();
+  assert.equal(h.published.length, count + 1, "expiry publishes once");
 });
 
 test("missing backend asks for Agent setup without sending or recording the draft", async () => {

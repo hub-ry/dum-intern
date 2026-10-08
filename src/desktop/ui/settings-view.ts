@@ -141,6 +141,15 @@ export class SettingsView {
     this.debugBox.open = false;
   }
 
+  /** Esc inside an open disclosure collapses it and puts focus on its title; true when it did. */
+  escape(): boolean {
+    const box = document.activeElement?.closest("details.disclosure");
+    if (!(box instanceof HTMLDetailsElement) || !box.open || !this.el.contains(box)) return false;
+    box.open = false;
+    box.querySelector("summary")?.focus();
+    return true;
+  }
+
   update(s: Snapshot) {
     const mac = s.platform === "darwin";
     this.agentSheet.update(s);

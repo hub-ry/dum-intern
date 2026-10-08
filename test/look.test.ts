@@ -8,15 +8,11 @@ import { decode, look, MAX_IMAGE_BYTES, MAX_OBSERVATION } from "../src/look.ts";
 import { Store } from "../src/store.ts";
 import { createRegistry } from "../src/agent/registry.ts";
 import type { AgentBackend, AgentEvent, UserTurn } from "../src/agent/types.ts";
-import type { RequestBinding } from "../src/share-types.ts";
 import type { SharedImage } from "../src/store-types.ts";
-import type { ZoneContext } from "../src/zone-types.ts";
 
 process.env.DUM_CONTEXT = "off";
 
 const id = randomUUID();
-const zone: ZoneContext = { id, revision: 1, breadcrumb: [{ id, name: "Web" }], goal: "Learn CSS grid", ancestorGoals: [], language: "", focusSkills: [], notes: [] };
-const binding: RequestBinding = { zoneId: id, zoneEpoch: "epoch-1", inputToken: "token-1", requestId: "request-1" };
 const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("rest of a picture")]);
 const picture: SharedImage = { mimeType: "image/png", data: PNG_BYTES.toString("base64"), label: "Terminal - zsh" };
 
@@ -53,7 +49,7 @@ test("only a real, bounded PNG is looked at", () => {
 
 test("the look sends the picture once to the helper model and returns a bounded description and its digest", async () => {
   const h = helper(says(`a terminal — ${"x".repeat(MAX_OBSERVATION + 50)}`));
-  const seen = await look(picture, "why does this fail?", { agent: h.agent, cwd: "/tmp", zone, binding });
+  const seen = await look(picture, "why does this fail?", { agent: h.agent, cwd: "/tmp" });
   assert.equal(seen.sha, createHash("sha256").update(PNG_BYTES).digest("hex"));
   assert.equal(seen.observation.length, MAX_OBSERVATION + 1);
   assert.ok(seen.observation.startsWith("a terminal - x"), "dashes are plain");
@@ -65,7 +61,7 @@ test("the look sends the picture once to the helper model and returns a bounded 
 
 test("a helper that can't read pictures refuses the look", async () => {
   const h = helper(says("never"), false);
-  await assert.rejects(look(picture, "", { agent: h.agent, cwd: "/tmp", zone, binding }), /eyes can't see pictures - choose a helper model that can see pictures/);
+  await assert.rejects(look(picture, "", { agent: h.agent, cwd: "/tmp" }), /eyes can't see pictures - choose a helper model that can see pictures/);
   assert.equal(h.inputs.length, 0);
 });
 
@@ -73,7 +69,7 @@ test("a failed look becomes a note, and nothing it might have seen is kept", asy
   const h = helper(async function* () { yield { type: "end", error: "the model is overloaded", interrupted: false }; });
   const s = new Store({ id, name: "Web" }, "understand");
   s.onAttach = async (image, note) => {
-    const seen = await look(image, note, { agent: h.agent, cwd: "/tmp", zone, binding });
+    const seen = await look(image, note, { agent: h.agent, cwd: "/tmp" });
     s.shot(image.label, seen.observation, seen.sha);
   };
   const next = s.askNext();

@@ -371,7 +371,7 @@ async function start(): Promise<void> {
   work.on("blur", () => {
     // Settle first: a blur from the circle, a native picker or a Dum window isn't the person leaving.
     setImmediate(() => {
-      if (holds > 0 || gesture.active || !work.isVisible() || work.isFocused() || BrowserWindow.getFocusedWindow() !== null) return;
+      if (quitting || holds > 0 || gesture.active || !work.isVisible() || work.isFocused() || BrowserWindow.getFocusedWindow() !== null) return;
       // They chose another app: hide, and don't take them back to the one Dum captured.
       void serial(() => hide(false));
     });
@@ -439,18 +439,23 @@ async function start(): Promise<void> {
   // -- host, capture, voice, look -----------------------------------------------
 
   let router: Router | null = null;
-  let pending = false;
+  /**
+   * The one deferred publish, coalescing changes within a turn. Quit cancels it: once Quit starts,
+   * Electron destroys the windows, and a publish that read them during teardown would throw
+   * ("Object has been destroyed") with the JavaScript environment going away, which leaves the
+   * main process running after `quit`.
+   */
+  let publish: NodeJS.Immediate | null = null;
   let circleSent = "";
   const broadcast = () => {
-    if (pending) return;
-    pending = true;
-    setImmediate(() => {
-      pending = false;
-      if (!router) return;
-      if (!work.isDestroyed()) work.webContents.send("dum:snapshot", router.snapshot());
+    if (publish || quitting) return;
+    publish = setImmediate(() => {
+      publish = null;
+      if (!router || quitting) return;
+      work.webContents.send("dum:snapshot", router.snapshot());
       const view: CircleView = router.circle();
       const json = JSON.stringify(view);
-      if (json !== circleSent && !circleWindow.isDestroyed()) {
+      if (json !== circleSent) {
         circleSent = json;
         circleWindow.webContents.send("dum:circle", view);
       }
@@ -837,6 +842,8 @@ async function start(): Promise<void> {
   app.on("before-quit", (event) => {
     if (closing === null) {
       quitting = true;
+      clearImmediate(publish ?? undefined);
+      publish = null;
       event.preventDefault();
       clearTimeout(restartTimer ?? undefined);
       clearInterval(frames ?? undefined);

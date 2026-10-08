@@ -194,6 +194,8 @@ export class Observer {
       let screen: Tick["screen"] = null;
       if (this.look.screen) {
         const shot = await this.o.thumbnail().catch(() => null);
+        // Closed while capturing (Quit): Dum's windows may already be gone, so nothing more is read.
+        if (this.closed) return;
         const next = shot ? { grid: grid(shot.bitmap), mask: maskCells(shot.display, shot.bitmap, this.o.own()), displayId: shot.displayId } : null;
         // Raw grids compared, skipping cells Dum covered on either tick: a moved circle uncovers
         // nothing artificial. Another display starts over.

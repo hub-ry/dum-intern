@@ -539,6 +539,8 @@ export class DesktopController {
       };
       return { done: null, call: { init, zone, attempt, revision, decisionInput } };
     });
+    // Every branch above wrote this zone's alignment (begin, draft, defer, needs-backend): publish it now.
+    this.changed();
     if (!prepared.call) return prepared.done!;
     const { init, zone, attempt, revision, decisionInput } = prepared.call;
     const abort = new AbortController();

@@ -272,3 +272,16 @@ test("a frame for the host has Dum's current windows painted out before encoding
   assert.equal(sent.data[0], 128);
   assert.equal(sent.data[4], 0);
 });
+
+test("a tick still capturing when the observer closes reads no window rects and sends nothing", async () => {
+  const capture = Promise.withResolvers<Shot | null>();
+  let ownCalls = 0;
+  const r = rig({ thumbnail: () => capture.promise, own: () => { ownCalls++; throw new Error("Object has been destroyed"); } });
+  await r.fire();
+  r.observer.close();
+  capture.resolve(shot(solid(0)));
+  await turn();
+  await turn();
+  assert.equal(ownCalls, 0, "Dum's windows are not read after close");
+  assert.equal(r.ticks.length, 0);
+});

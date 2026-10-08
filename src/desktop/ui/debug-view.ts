@@ -26,6 +26,10 @@ export class DebugView {
   private stopBtn = h("button", { type: "button", class: "btn ghost small", title: "Stop (⌘. while here)", onclick: () => void this.stop() }, icon("stop"), "Stop");
   private view: DebugState | null = null;
   private key = "";
+  /** The host has published a debug view in a snapshot at least once. */
+  private published = false;
+  /** The question in flight to the host and the newest entry id before it, until it shows up in the log. */
+  private sent: { text: string; after: number } | null = null;
 
   constructor(private client: Client) {
     const form = h(
@@ -66,7 +70,7 @@ export class DebugView {
   async open() {
     if (this.view) return;
     const r = await this.client.call({ type: "debug-open" });
-    if (r.ok && r.debug) this.update(r.debug);
+    if (r.ok && r.debug) this.apply(r.debug);
   }
 
   /** ⌘. while the debug chat has focus: stops only this flight. */
@@ -75,12 +79,28 @@ export class DebugView {
     if (v?.state === "busy") await this.client.call({ type: "debug-stop", binding: v.binding });
   }
 
+  /**
+   * The host's published debug view. A null before the host has published one doesn't wipe the view a
+   * debug-open or debug-reset reply already showed; a null after one means the host closed it.
+   */
   update(view: DebugState | null) {
+    if (view) this.published = true;
+    else if (!this.published) return;
+    this.apply(view);
+  }
+
+  private apply(view: DebugState | null) {
     this.view = view;
     const key = JSON.stringify(view);
     if (key !== this.key) {
       this.key = key;
       this.draw(view);
+    }
+    // The question leaves the box only once the host took it for a flight: your new entry is in the log.
+    // Needs-backend records nothing, so the question stays here for after Agent setup.
+    if (this.sent && view?.entries.some((e) => e.from === "you" && e.id > this.sent!.after)) {
+      if (this.draft.value.trim() === this.sent.text) this.draft.value = "";
+      this.sent = null;
     }
     this.sync();
   }
@@ -117,16 +137,17 @@ export class DebugView {
     const text = this.draft.value.trim();
     if (!v || v.state !== "idle" || !text) return;
     if (new TextEncoder().encode(text).length > MAX_BYTES) return this.client.showError("That question is too long for the debug chat.");
+    this.sent = { text, after: Math.max(-1, ...v.entries.map((e) => e.id)) };
     const r = await this.client.call({ type: "debug-send", binding: v.binding, text });
-    if (r.ok) {
-      this.draft.value = "";
-      this.sync();
-    }
+    if (r.ok && r.snapshot?.debug) this.update(r.snapshot.debug);
+    // The host answers after the flight, so an accepted question has already left the box by now.
+    this.sent = null;
   }
 
   private async reset(clearDraft: boolean) {
     const r = await this.client.call({ type: "debug-reset" });
-    if (r.ok && r.debug) this.update(r.debug);
+    if (r.ok && r.debug) this.apply(r.debug);
+    this.sent = null;
     if (r.ok && clearDraft) {
       this.draft.value = "";
       this.sync();

@@ -1,5 +1,7 @@
 # Dum revamp: zones, menu bar, command bar, voice
 
+> **Superseded, 2026-10-08.** This is the history of the earlier revamp. Its menu bar (tray), command bar, panel, subscription sign-in and Wizard asides are gone. Dum is now one floating circle and one working window built around delegation; see [circle-design.md](circle-design.md) for the current contract and [architecture.md](architecture.md) for the rules. The text below is left as it was.
+
 Status: implementation design, not an implemented or verified feature. Ryan's eight decisions in the revamp request take precedence over the corner-pair and terminal instructions in `docs/overhaul-goal.md:Current intent` and `CONTRIBUTING.md:Product rules`. Paths and signatures below are target contracts unless explicitly marked **Current**. This design changes no product code.
 
 ## 1. Summary: the product in one screen

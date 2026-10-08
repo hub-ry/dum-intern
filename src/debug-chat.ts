@@ -85,9 +85,11 @@ export class DebugChat {
     this.#changed = changed;
   }
 
+  /** Publishes the open view, so the host posts debug-state and the window shows it. */
   open(): DebugView {
     this.#checkIdle();
     if (!this.#expired) this.#touch();
+    this.#changed();
     return this.view();
   }
 
@@ -240,18 +242,17 @@ export class DebugChat {
   #touch(): void {
     this.#activeAt = Date.now();
     clearTimeout(this.#idle);
-    this.#idle = setTimeout(() => {
-      this.#checkIdle();
-      this.#changed();
-    }, L.debugIdleMs);
+    this.#idle = setTimeout(() => this.#checkIdle(), L.debugIdleMs);
     this.#idle.unref?.();
   }
 
+  /** Expires an idle session once, and publishes that, whichever path notices first. */
   #checkIdle(): void {
     if (this.#flight || this.#expired || Date.now() - this.#activeAt < L.debugIdleMs) return;
     this.#expired = true;
     this.#entries = [];
     this.#dropped = 0;
+    this.#changed();
   }
 }
 
