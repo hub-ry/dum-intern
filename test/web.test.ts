@@ -114,16 +114,25 @@ test("the server keeps a tree at a private link, edits it under the rules, and n
 test("public docs serve typed assets without making private trees cacheable or exposing source paths", async () => {
   const s = await server();
   try {
-    for (const path of ["/", "/install", "/philosophy", "/how-it-works", "/subjects"]) {
+    const navs = new Map<string, string>();
+    for (const path of ["/", "/install", "/philosophy", "/docs", "/builds", "/subjects"]) {
       const page = await fetch(`${s.base}${path}`);
       assert.equal(page.status, 200);
       assert.equal(page.headers.get("content-type"), "text/html; charset=utf-8");
       assert.equal(page.headers.get("x-robots-tag"), null);
       assert.equal(page.headers.get("cache-control"), "public, max-age=300");
+      const csp = page.headers.get("content-security-policy") ?? "";
+      assert.equal(csp.includes("frame-src https://www.youtube-nocookie.com"), path === "/builds", `${path}: only /builds may embed YouTube`);
+      const html = await page.text();
+      const nav = /<nav[\s\S]*?<\/nav>/.exec(html)?.[0] ?? "";
+      assert.ok(nav.includes('href="/docs"'), `${path} has the shared nav`);
+      assert.ok(!html.includes("<!--NAV-->") && !html.includes("<!--BUILDS-->"), `${path} has no unfilled placeholder`);
+      navs.set(path, nav.replace(' aria-current="page"', ""));
       const head = await fetch(`${s.base}${path}`, { method: "HEAD" });
       assert.equal(head.status, 200);
       assert.equal(await head.text(), "");
     }
+    assert.equal(new Set(navs.values()).size, 1, "every page shows the same nav; only the current link is marked");
     const font = await fetch(`${s.base}/site/hack-regular.woff2`);
     assert.equal(font.headers.get("content-type"), "font/woff2");
     assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString("ascii"), "wOF2", "the browser receives binary font bytes, not JSON");

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import * as sync from "../sync.ts";
 import { view } from "./view.ts";
+import { parseBuilds, renderBuilds } from "./builds.ts";
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -37,7 +38,7 @@ type Stored = { version: number; snapshot: sync.Snapshot; created: string; updat
 
 const STATIC: Record<string, string> = { "page.js": "text/javascript", "page.css": "text/css" };
 
-const SITE_PAGES: Record<string, string> = { "/": "index.html", "/install": "install.html", "/philosophy": "philosophy.html", "/how-it-works": "how-it-works.html", "/subjects": "subjects.html" };
+const SITE_PAGES: Record<string, string> = { "/": "index.html", "/install": "install.html", "/philosophy": "philosophy.html", "/docs": "docs.html", "/builds": "builds.html", "/subjects": "subjects.html" };
 const SITE_ASSETS: Record<string, string> = {
   "site.css": "text/css; charset=utf-8",
   "game.js": "text/javascript; charset=utf-8",
@@ -54,6 +55,18 @@ const SITE_HEADERS = {
   "cache-control": "public, max-age=300",
   "x-content-type-options": "nosniff",
 };
+// Builds embeds YouTube videos, which needs a frame source and, for YouTube to play, the page origin as referrer.
+const BUILDS_HEADERS = {
+  ...SITE_HEADERS,
+  "content-security-policy": SITE_HEADERS["content-security-policy"] + "; frame-src https://www.youtube-nocookie.com",
+  "referrer-policy": "strict-origin-when-cross-origin",
+};
+
+/** Every page gets the same nav; only the current page's link is marked, so nothing moves between pages. */
+function withNav(html: string, nav: string, route: string): string {
+  if (!html.includes("<!--NAV-->")) throw new Error(`site page for ${route} has no <!--NAV--> placeholder`);
+  return html.replace("<!--NAV-->", nav.replace(`href="${route}"`, `href="${route}" aria-current="page"`));
+}
 
 const HEADERS = {
   "content-security-policy":
@@ -75,7 +88,12 @@ export function createServer(o: Options): Server {
   const page = readFileSync(`${here}page.html`, "utf8");
   const statics = Object.fromEntries(Object.keys(STATIC).map((f) => [f, readFileSync(`${here}${f}`, "utf8")]));
   const site = new URL("../site/", import.meta.url);
-  const sitePages = Object.fromEntries(Object.entries(SITE_PAGES).map(([route, file]) => [route, readFileSync(new URL(file, site))]));
+  const nav = readFileSync(new URL("nav.html", site), "utf8");
+  const builds = renderBuilds(parseBuilds(readFileSync(new URL("builds.json", site), "utf8")));
+  const sitePages = Object.fromEntries(Object.entries(SITE_PAGES).map(([route, file]) => {
+    const html = withNav(readFileSync(new URL(file, site), "utf8"), nav, route);
+    return [route, Buffer.from(route === "/builds" ? html.replace("<!--BUILDS-->", builds) : html)];
+  }));
   const siteAssets = Object.fromEntries(Object.keys(SITE_ASSETS).map((file) => [`/site/${file}`, { body: readFileSync(new URL(file, site)), type: SITE_ASSETS[file]! }]));
   const file = (id: string) => `${o.data}/${id}.json`;
   const locks = new Map<string, Promise<unknown>>();
@@ -139,7 +157,7 @@ export function createServer(o: Options): Server {
     const m = req.method ?? "GET";
     const sitePage = sitePages[url.pathname];
     if ((m === "GET" || m === "HEAD") && sitePage) {
-      res.writeHead(200, { ...SITE_HEADERS, "content-type": "text/html; charset=utf-8" });
+      res.writeHead(200, { ...(url.pathname === "/builds" ? BUILDS_HEADERS : SITE_HEADERS), "content-type": "text/html; charset=utf-8" });
       return res.end(m === "HEAD" ? undefined : sitePage);
     }
     const siteAsset = siteAssets[url.pathname];

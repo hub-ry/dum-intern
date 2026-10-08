@@ -41,6 +41,9 @@ nav {
   justify-content: space-between;
   gap: 24px;
   border-bottom: 1px solid var(--overlay);
+  /* Pinned so page-level font sizes can't shift the bar between pages. */
+  font-size: 16px;
+  line-height: 1.55;
 }
 .nav-logo { color: var(--text); font-size: 15px; font-weight: 650; letter-spacing: -.04em; text-decoration: none; }
 .nav-links { display: flex; align-items: center; gap: 25px; margin: 0; padding: 0; list-style: none; }
@@ -80,6 +83,14 @@ hr.section-divider { height: 0; margin: 34px 0; border: 0; border-top: 1px solid
 .setup-prompt-head .dl-meta { margin: 0; }
 .copy-button { padding: 4px 8px; border: 1px solid var(--overlay); background: transparent; color: var(--subtle); font: inherit; font-size: 11px; cursor: pointer; }
 .copy-button:hover { border-color: var(--text); color: var(--text); }
+.jump-link { margin: -14px 0 28px; font-size: 13px; }
+.terminal-setup { scroll-margin-top: 24px; }
+
+/* Builds: recordings of things built with Dum */
+.build { margin: 34px 0 0; padding-top: 22px; border-top: 1px solid var(--overlay); }
+.build h2 { margin: 0 0 2px; }
+.build .dl-meta { margin: 0 0 12px; }
+.build-video { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--overlay); background: var(--surface); }
 
 /* Dum's jumping game: a wide, shallow strip in front of the mountains. */
 .game-section { position: relative; flex: none; width: min(100%, 760px); height: 120px; margin: 0 auto; overflow: hidden; border: 1px solid #56526e; }
@@ -94,9 +105,6 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
 
 /* Homepage */
 .home-page { --home-ink: #e0def4; --home-muted: #c1bdd0; --home-faint: #a19cb4; display: flex; flex-direction: column; min-height: 100vh; min-height: 100svh; font-size: 15px; }
-.home-page .home-nav { width: min(1120px, calc(100% - 48px)); }
-.home-page .nav-logo { font-size: 15px; }
-.home-page .nav-links a { font-size: 12px; }
 /* Fills the viewport: the hero takes the spare height and stays centred in it; the footer sits on the bottom edge. */
 .home-main { display: flex; flex: 1; flex-direction: column; width: min(1120px, calc(100% - 48px)); max-width: 1120px; padding: 0; }
 .hero { display: grid; flex: 1 0 auto; grid-template-columns: .93fr 1.07fr; align-items: center; align-content: center; gap: 54px; padding: 64px 0 48px; }
@@ -127,7 +135,7 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
   .video-slot { max-width: 650px; }
 }
 @media (max-width: 560px) {
-  nav, .home-page .home-nav { width: calc(100% - 32px); min-height: 52px; flex-wrap: wrap; gap: 9px 12px; padding: 9px 0; }
+  nav { width: calc(100% - 32px); min-height: 52px; flex-wrap: wrap; gap: 9px 12px; padding: 9px 0; }
   .nav-links { order: 3; width: 100%; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
   .nav-links a { font-size: 11px; }
   main, .home-main { width: calc(100% - 32px); }
