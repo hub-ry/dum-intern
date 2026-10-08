@@ -19,6 +19,7 @@
     "replay": "tsx tools/replay.ts",
     "web": "tsx src/web/server.ts",
     "site:favicon": "tsx tools/site-favicon.mjs",
+    "site:add-build": "tsx tools/add-build.mjs",
     "test": "node --import tsx --test test/*.test.ts",
     "desktop:build": "node tools/desktop-build.mjs",
     "desktop": "npm run desktop:build && electron .",
