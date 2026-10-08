@@ -8,7 +8,7 @@ import { ZoneRegistrySchema, ZoneContextSchema, ChangeReceiptSchema } from "../s
 import { ResourcePathSchema, ShareGrantSchema } from "../src/share-types.ts";
 import { LedgerSchema } from "../src/evidence-types.ts";
 import { TickSchema } from "../src/observe-types.ts";
-import { RequestSchema, DEFAULT_PREFERENCES, desktopPreferencesSchema } from "../src/desktop/protocol.ts";
+import { RequestSchema, DEFAULT_PREFERENCES, DesktopPreferencesSchema } from "../src/desktop/protocol.ts";
 import { HostRequestSchema, HostEventSchema } from "../src/desktop/host-protocol.ts";
 import { VoiceEventSchema, FocusEventSchema } from "../src/desktop/native-protocol.ts";
 
@@ -44,10 +44,13 @@ const context = {
 const binding = { zoneId: childId, zoneEpoch: "e1", inputToken: "t1", requestId: "r1" };
 const choice = {
   backend: "claude",
-  login: "claude-subscription",
-  intern: { backend: "claude", model: "claude-opus-4-1", effort: "high" },
-  helper: { backend: "claude", model: "claude-haiku-4-5", effort: null },
+  login: "anthropic-key",
+  intern: { backend: "claude", model: "opus", effort: "high" },
+  helper: { backend: "claude", model: "fable", effort: "high" },
+  look: { backend: "claude", model: "haiku", effort: "low" },
 };
+/** The Claude subscription login Dum removed: it no longer parses as a login method. */
+const subscription = { ...choice, login: "claude-subscription" };
 const sha = createHash("sha256").update("x").digest("hex");
 const ok = (schema: { safeParse(v: unknown): { success: boolean } }, value: unknown) =>
   assert.equal(schema.safeParse(value).success, true, JSON.stringify(value).slice(0, 300));
@@ -131,6 +134,9 @@ test("legacy and removed requests are gone", () => {
     { type: "open-record", record: "course" }, { type: "runtime-check" }, { type: "runtime-login" },
     { type: "runtime-login-open" }, { type: "runtime-login-code", code: "abc" }, { type: "runtime-login-cancel" },
     { type: "move-companion", dx: 1, dy: 1 }, { type: "toggle-panel" }, { type: "mode", mode: "understand" },
+    { type: "agent-login-open" }, { type: "agent-login-code", code: "abcdefgh#12345678" },
+    { type: "agent-login", backend: "claude", method: "claude-subscription" },
+    { type: "agent-select", choice: subscription },
   ]) bad(RequestSchema, r);
 });
 
@@ -146,22 +152,24 @@ test("only agent-key carries a secret", () => {
 test("fresh settings look at apps and the screen, with no backend chosen", () => {
   assert.deepEqual(DEFAULT_PREFERENCES.look, { apps: true, screen: true });
   assert.equal(DEFAULT_PREFERENCES.agent, null);
-  ok(desktopPreferencesSchema("public"), DEFAULT_PREFERENCES);
-  bad(desktopPreferencesSchema("public"), { ...DEFAULT_PREFERENCES, agent: choice });
-  ok(desktopPreferencesSchema("local"), { ...DEFAULT_PREFERENCES, agent: choice });
-  bad(desktopPreferencesSchema("local"), { ...DEFAULT_PREFERENCES, hotkey: "D" });
-  bad(desktopPreferencesSchema("local"), { ...DEFAULT_PREFERENCES, wizardAdvice: true });
+  ok(DesktopPreferencesSchema, DEFAULT_PREFERENCES);
+  ok(DesktopPreferencesSchema, { ...DEFAULT_PREFERENCES, agent: choice });
+  bad(DesktopPreferencesSchema, { ...DEFAULT_PREFERENCES, agent: subscription });
+  bad(DesktopPreferencesSchema, { ...DEFAULT_PREFERENCES, agent: { backend: "claude", login: "anthropic-key", intern: choice.intern, helper: choice.helper } });
+  bad(DesktopPreferencesSchema, { ...DEFAULT_PREFERENCES, hotkey: "D" });
+  bad(DesktopPreferencesSchema, { ...DEFAULT_PREFERENCES, wizardAdvice: true });
 });
 
 const personal = { path: "", text: "", warning: "" };
 const base = { epoch: "e1", id: "q1" };
 
-test("host requests: initialize enforces the flavor, legacy ops are gone", () => {
+test("host requests: initialize takes only a valid key-based choice, legacy ops are gone", () => {
   const init = { ...base, op: "initialize", home, claudeExecutable: null, personal };
-  ok(HostRequestSchema, { ...init, flavor: "local", settings: { ...DEFAULT_PREFERENCES, agent: choice } });
-  bad(HostRequestSchema, { ...init, flavor: "public", settings: { ...DEFAULT_PREFERENCES, agent: choice } });
-  ok(HostRequestSchema, { ...init, flavor: "public", settings: DEFAULT_PREFERENCES });
-  bad(HostRequestSchema, { ...init, flavor: "public", home: "relative/dir", settings: DEFAULT_PREFERENCES });
+  ok(HostRequestSchema, { ...init, settings: { ...DEFAULT_PREFERENCES, agent: choice } });
+  ok(HostRequestSchema, { ...init, settings: DEFAULT_PREFERENCES });
+  bad(HostRequestSchema, { ...init, settings: { ...DEFAULT_PREFERENCES, agent: subscription } });
+  bad(HostRequestSchema, { ...init, home: "relative/dir", settings: DEFAULT_PREFERENCES });
+  bad(HostRequestSchema, { ...base, op: "agent-select", choice: subscription });
   for (const op of ["open", "wizard-advice", "quip", "wizard-screen", "wizard-screen-cancel"]) bad(HostRequestSchema, { ...base, op });
   bad(HostRequestSchema, { ...base, op: "open", root: home, personal });
 });
@@ -193,7 +201,7 @@ test("host events are validated too", () => {
     ],
     prompt: { type: "question", question: "did you write it?", why: "proof", purpose: "attest" },
     busy: false, status: "", stage: { kind: "conversation" }, unlocked: 3,
-    models: { intern: { backend: "claude", model: "claude-opus-4-1", effort: "high" }, helper: null },
+    models: { intern: { backend: "claude", model: "claude-opus-4-1", effort: "high" }, helper: null, look: null },
   };
   const event = {
     type: "state", epoch: "e1", zoneEpoch: "z1", state, tree: { tracks: [], off: [], count: 0, usableBuilt: 0 }, registry, activeZone: context,
@@ -204,7 +212,7 @@ test("host events are validated too", () => {
   bad(HostEventSchema, wire({ ...event, zoneEpoch: undefined }));
   bad(HostEventSchema, wire({ ...event, state: { ...state, prompt: { type: "plan", plan: "x" } } }));
   bad(HostEventSchema, wire({ ...event, state: { ...state, repo: home } }));
-  ok(HostEventSchema, { type: "reply", epoch: "e1", id: "q1", ok: true, result: { models: [{ id: "m", label: "M", efforts: [], images: false, actions: true, verified: false }] } });
+  ok(HostEventSchema, { type: "reply", epoch: "e1", id: "q1", ok: true, result: { models: [{ id: "m", resolved: "m-1", label: "M", efforts: [], images: false, actions: true, verified: false }] } });
   bad(HostEventSchema, { type: "reply", epoch: "e1", id: "q1", ok: true, result: { secret: "x" } });
   ok(HostEventSchema, { type: "credential-request", epoch: "e1", requestId: "c1", need: "chatgpt-access" });
   bad(HostEventSchema, { type: "credential-request", epoch: "e1", requestId: "c1", need: "chatgpt-refresh" });

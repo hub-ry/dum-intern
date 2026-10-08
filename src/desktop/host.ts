@@ -11,8 +11,8 @@ if (!epoch) throw new Error("a teaching host must be started by Dum");
 
 serve({
   epoch,
-  backends: ({ flavor, claudeExecutable, credential }) => [
-    ...(claudeExecutable ? [claudeBackend({ executable: claudeExecutable, flavor, credential })] : []),
+  backends: ({ claudeExecutable, credential }) => [
+    ...(claudeExecutable ? [claudeBackend({ executable: claudeExecutable, credential })] : []),
     chatgptBackend({ credential }),
     localBackend(),
   ],

@@ -71,7 +71,7 @@ export function chatgptSetup(o: { credentials: Credentials }): BackendSetup {
   return {
     id: "chatgpt",
     async status(): Promise<BackendStatus> {
-      const base = { id: "chatgpt" as const, label: "ChatGPT", installed: true, methods: ["chatgpt"] as const, loginRunning: attempt !== null, loginNeedsCode: false };
+      const base = { id: "chatgpt" as const, label: "ChatGPT", installed: true, methods: ["chatgpt"] as const, loginRunning: attempt !== null };
       if (attempt) return { ...base, ready: null, message: "Finish signing in to ChatGPT in your browser" };
       const record = await readRecord(credentials);
       if (!record?.refreshToken) {

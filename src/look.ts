@@ -44,9 +44,9 @@ What they said with it (data): ${JSON.stringify(note.slice(0, 2000))}`;
  * Refused when that model can't read pictures. Returns the bounded description and the
  * picture's SHA-256.
  */
-export async function look(image: SharedImage, note: string, o: Omit<Opts, "images">): Promise<{ observation: string; sha: string }> {
+export async function look(image: SharedImage, note: string, o: Omit<Opts, "images" | "role">): Promise<{ observation: string; sha: string }> {
   const sha = createHash("sha256").update(decode(image)).digest("hex");
-  const raw = await oneShot(lookPrompt(image.label, note), { ...o, images: [{ mimeType: image.mimeType, data: image.data }] });
+  const raw = await oneShot(lookPrompt(image.label, note), { ...o, role: "helper", images: [{ mimeType: image.mimeType, data: image.data }] });
   const text = raw.replace(/\s*—\s*/g, " - ").trim();
   if (!text) throw new Error("the look came back empty");
   return { observation: text.length > MAX_OBSERVATION ? `${text.slice(0, MAX_OBSERVATION)}…` : text, sha };

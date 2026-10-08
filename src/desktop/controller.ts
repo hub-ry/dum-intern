@@ -10,23 +10,22 @@ import * as context from "../context.ts";
 import * as skills from "../skills.ts";
 import * as boundary from "../boundary.ts";
 import * as web from "../web.ts";
-import * as wizard from "../wizard.ts";
 import { acquire } from "../session-lock.ts";
 import { Evidence } from "../evidence.ts";
 import { Follows } from "../follow.ts";
 import { SharedFiles, bound } from "../shared-files.ts";
 import { listChanges, revertChange } from "../changes.ts";
-import { Ambient, type AmbientStatus } from "../ambient.ts";
+import { Ambient, observe, type LookView } from "../ambient.ts";
 import { Store, Cancelled, parseCommand } from "../store.ts";
 import { prepare, run, type Ctx } from "../session.ts";
-import { Practice, active as practicing } from "../practice.ts";
+import { Practice } from "../practice.ts";
 import { treeText } from "../tree.ts";
 import { createRegistry, RELEASED, type Registry } from "../agent/registry.ts";
-import { agentChoiceSchema } from "../agent/schema.ts";
+import { AgentChoiceSchema, ROLES } from "../agent/schema.ts";
 import { createState, readState, statePath } from "../state-files.ts";
 import { view, type View } from "../web/view.ts";
 import { HostRequestSchema, type HostEvent, type HostRequest, type HostResult } from "./host-protocol.ts";
-import type { AgentBackend, AgentChoice, BackendId, CredentialNeed, CredentialSource, Flavor, LoginMethod, ModelOption, Picture } from "../agent/types.ts";
+import type { AgentBackend, AgentChoice, BackendId, CredentialNeed, CredentialSource, LoginMethod, ModelOption, Picture } from "../agent/types.ts";
 import type { FileSignal, Tick } from "../observe-types.ts";
 import type { InputBinding, RequestBinding, ResourcePath, ShareGrant } from "../share-types.ts";
 import type { SharedImage } from "../store-types.ts";
@@ -41,7 +40,7 @@ const PATCH_BYTES = 1024 * 1024;
 const MORE = "the full patch is kept with the change";
 const NO_PERSONAL: context.Context = { path: "", text: "", warning: "" };
 
-const LOOK_STATUS: Record<Exclude<AmbientStatus, "unadvised">, string> = {
+const LOOK_STATUS: Record<Exclude<LookView["status"], "unadvised">, string> = {
   watching: "watching for changes",
   checking: "taking a look",
   blocked: "paused while dum is busy or waiting on you",
@@ -51,19 +50,29 @@ const LOOK_STATUS: Record<Exclude<AmbientStatus, "unadvised">, string> = {
 /** The commands that call a model; every other command, and the panels, work before any backend is chosen. */
 const MODEL_COMMANDS: Record<string, true> = { projects: true, submit: true };
 
-/** The look in words. Without a backend it still watches, says what it has noticed, and calls nothing. */
+/**
+ * The look in words: what it's doing, why the look model gets no pictures if it doesn't, and the
+ * latest observation. Without a backend it still watches, says what it has noticed, and calls nothing.
+ */
 function lookText(live: Live): string {
-  if (live.look !== "unadvised") return LOOK_STATUS[live.look];
-  const folders = live.follows.list().length;
-  const files = live.signals.size;
-  const noticed = folders
-    ? `${folders} followed folder${folders === 1 ? "" : "s"}, ${files} changed file${files === 1 ? "" : "s"} noticed`
-    : "no folder followed yet";
-  return `watching (${noticed}) - advice needs a backend: choose one in Who powers Dum?`;
+  const { status, seen, noPictures } = live.look;
+  if (status === "unadvised") {
+    const folders = live.follows.list().length;
+    const files = live.signals.size;
+    const noticed = folders
+      ? `${folders} followed folder${folders === 1 ? "" : "s"}, ${files} changed file${files === 1 ? "" : "s"} noticed`
+      : "no folder followed yet";
+    return `watching (${noticed}) - advice needs a backend: choose one in Who powers Dum?`;
+  }
+  return [
+    LOOK_STATUS[status],
+    noPictures ? `the look model gets no pictures: ${noPictures}` : "",
+    seen ? `last saw: ${seen}` : "",
+  ].filter(Boolean).join(" - ");
 }
 
 /** What the host builds its backends from; main never sees these. */
-export type BackendFactory = (o: { flavor: Flavor; claudeExecutable: string | null; credential: CredentialSource }) => AgentBackend[];
+export type BackendFactory = (o: { claudeExecutable: string | null; credential: CredentialSource }) => AgentBackend[];
 
 export type ControllerOptions = {
   epoch: string;
@@ -77,7 +86,6 @@ export type ControllerOptions = {
 
 type Init = {
   home: string;
-  flavor: Flavor;
   registry: Registry;
   evidence: Evidence;
   release: () => void;
@@ -111,7 +119,7 @@ type Live = {
   changes: ChangeReceipt[];
   /** Followed-file signals since the last diff, latest per path. */
   signals: Map<ResourcePath, FileSignal>;
-  look: AmbientStatus;
+  look: LookView;
   /** Token for "no prompt is taking input": never accepted by a prompt. */
   idle: string;
 };
@@ -185,7 +193,7 @@ export class DesktopController {
 
   private async ordered(r: Exclude<HostRequest, { op: "credential" | "observe-frame" | "observe-tick" | "agent-models" | "interrupt" | "close" }>): Promise<HostResult | undefined> {
     switch (r.op) {
-      case "initialize": this.initialize(r.home, r.flavor, r.claudeExecutable, r.personal, r.settings); return undefined;
+      case "initialize": this.initialize(r.home, r.claudeExecutable, r.personal, r.settings); return undefined;
       case "zone-create": return { zone: await this.createZone(r.zone, r.enter) };
       case "zone-enter": await this.openZone(r.zoneId, r.expectedRevision); return undefined;
       case "zone-update": return { zone: this.updateZone(r.zoneId, r.patch, r.expectedRevision) };
@@ -211,16 +219,16 @@ export class DesktopController {
   // -- setup ------------------------------------------------------------------
 
   /** Take H for this host, build the backends and the registry, apply main's settings copy, and open the active zone. */
-  initialize(home: string, flavor: Flavor, claudeExecutable: string | null, personal: context.Context, settings: DesktopPreferences): void {
+  initialize(home: string, claudeExecutable: string | null, personal: context.Context, settings: DesktopPreferences): void {
     if (this.init) throw new Error("this host is already set up");
     // Every module that keeps state resolves H through skills.home(); this host serves exactly one.
     process.env.DUM_HOME = home;
     const release = acquire(home);
     try {
-      const backends = this.o.backends({ flavor, claudeExecutable, credential: (need, signal) => this.askCredential(need, signal) });
+      const backends = this.o.backends({ claudeExecutable, credential: (need, signal) => this.askCredential(need, signal) });
       const released = new Set((Object.keys(RELEASED) as BackendId[]).filter((id) => RELEASED[id]));
       const init: Init = {
-        home, flavor, registry: createRegistry(backends, released), evidence: new Evidence(home), release, personal, settings, agentError: null,
+        home, registry: createRegistry(backends, released), evidence: new Evidence(home), release, personal, settings, agentError: null,
       };
       this.applyAgent(init, settings.agent, false);
       this.zoneList = zones.listZones();
@@ -679,14 +687,14 @@ export class DesktopController {
   }
 
   /**
-   * Main's copy of the choice. Refused when this flavor doesn't offer it or its backend isn't
-   * here; a refused choice changes nothing, except at setup, where it's kept as the reason the
-   * conversation can't start until a choice is made again.
+   * Main's copy of the choice. Refused when it doesn't parse or its backend isn't here; a refused
+   * choice changes nothing, except at setup, where it's kept as the reason the conversation can't
+   * start until a choice is made again.
    */
   private applyAgent(init: Init, choice: AgentChoice | null, strict: boolean): void {
     try {
-      // Main validated it for its flavor already; the host's own flavor decides again (rule 7).
-      if (choice && !agentChoiceSchema(init.flavor).safeParse(choice).success) throw new Error(`that choice isn't offered in a ${init.flavor} build`);
+      // Main validated it already; the host checks its own copy again.
+      if (choice && !AgentChoiceSchema.safeParse(choice).success) throw new Error("that choice of who powers Dum isn't valid");
       init.registry.set(choice);
     } catch (err) {
       if (strict) throw err;
@@ -697,8 +705,7 @@ export class DesktopController {
     }
     init.agentError = null;
     init.settings = { ...init.settings, agent: choice };
-    this.live?.store.setModel("intern", choice?.intern ?? null);
-    this.live?.store.setModel("helper", choice?.helper ?? null);
+    for (const role of ROLES) this.live?.store.setModel(role, choice?.[role] ?? null);
   }
 
   private askCredential(need: CredentialNeed, signal: AbortSignal): Promise<{ value: string; expiresAt: number | null } | null> {
@@ -788,8 +795,7 @@ export class DesktopController {
     const saved = memory.load(init.home, zone.id);
     store.restoreTranscript(saved.entries);
     const stopMemory = memory.attach(init.home, zone.id, store);
-    store.setModel("intern", init.settings.agent?.intern ?? null);
-    store.setModel("helper", init.settings.agent?.helper ?? null);
+    for (const role of ROLES) store.setModel(role, init.settings.agent?.[role] ?? null);
     const tree = skills.read();
     store.setUnlocked(tree.skills.length);
     this.treeView = view(tree);
@@ -819,7 +825,7 @@ export class DesktopController {
     const live: Live = {
       zone, epoch: randomUUID(), store, follows, ambient: null as unknown as Ambient, stop: new AbortController(),
       detach: () => { unsubscribe(); stopMemory(); }, done: Promise.resolve(), pending: null, running: null, next: null,
-      changes: [], signals: new Map(), look: "watching", idle: randomUUID(),
+      changes: [], signals: new Map(), look: { status: "watching", seen: null, noPictures: "" }, idle: randomUUID(),
     };
     live.ambient = this.ambient(init, live);
     this.refreshChanges(init, live);
@@ -867,29 +873,37 @@ export class DesktopController {
         return live.follows.diff(signals);
       },
       frame: () => this.frame(),
-      context: () => (mine() ? { zone: live.zone, binding: this.hostBinding(live), practicing: practicing(init.home, live.zone.id) } : null),
-      imagesAllowed: () => {
-        if (!init.settings.look.screen) return false;
+      context: () => (mine() ? { zone: live.zone, binding: this.hostBinding(live) } : null),
+      pictures: async () => {
+        if (!init.settings.look.screen) return { ok: false, why: "" };
         try {
-          const selector = init.registry.selector("helper");
-          return init.registry.backend(selector.backend).capabilities(selector).images;
-        } catch {
-          return false;
+          const choice = init.registry.chosen();
+          const signal = AbortSignal.any([live.stop.signal, AbortSignal.timeout(60_000)]);
+          const caps = await init.registry.backend(choice.look.backend).capabilities(choice.look, choice.login, signal);
+          return { ok: caps.images, why: caps.noImages };
+        } catch (err) {
+          return { ok: false, why: (err as Error).message };
         }
       },
-      check: (input, signal) => live.store.helper((stop) => wizard.ambient(input, {
+      check: (input, signal) => live.store.helper((stop) => observe(input, {
         agent: init.registry,
         cwd: dirname(statePath(init.home, `zones/${input.zone.id}/runtime/cwd`)),
         signal: AbortSignal.any([signal, stop]),
       })),
+      notes: () => {
+        try {
+          return memory.notes(init.home, live.zone.id).split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
+        } catch {
+          return [];
+        }
+      },
       record: async (result, input) => {
         // A result for another zone, epoch or context revision is about something they've moved on from.
         if (!mine() || input.binding.zoneEpoch !== live.epoch || input.zone.revision !== live.zone.revision) return;
         if (result.note) memory.remember(init.home, live.zone.id, result.note);
-        if (result.aside) live.store.quip(result.aside);
       },
-      status: (status) => {
-        live.look = status;
+      status: (view) => {
+        live.look = view;
         if (mine()) this.changed();
       },
     });

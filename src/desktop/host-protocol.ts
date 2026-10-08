@@ -2,13 +2,13 @@
 // The host owns zones, sessions and every model call; main owns settings, credentials and native surfaces.
 
 import { z } from "zod";
-import { BackendIdSchema, FlavorSchema, LoginMethodSchema, ModelOptionSchema, PictureSchema, agentChoiceSchema } from "../agent/schema.ts";
+import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema, ModelOptionSchema, PictureSchema } from "../agent/schema.ts";
 import { TickSchema } from "../observe-types.ts";
 import { IdSchema, InputBindingSchema, RequestBindingSchema, ShareGrantSchema, TokenSchema } from "../share-types.ts";
 import { ChangeReceiptSchema, FollowGrantSchema, ShaSchema, SkillRefSchema, ZoneContextSchema, ZoneRegistrySchema, ZoneSchema } from "../zone-types.ts";
 import {
   CommandNameSchema, ModeSchema, PanelSchema, RecordSchema, RespondDecisionSchema, ShareKindSchema, SkillEditOpSchema,
-  TreeSyncSchema, ZoneContextTextSchema, ZoneCreateSchema, ZonePatchSchema, desktopPreferencesSchema,
+  TreeSyncSchema, ZoneContextTextSchema, ZoneCreateSchema, ZonePatchSchema, DesktopPreferencesSchema,
 } from "./protocol.ts";
 import type { CredentialNeed, ModelOption } from "../agent/types.ts";
 import type { ShareGrant } from "../share-types.ts";
@@ -32,20 +32,16 @@ export const PersonalSchema = z.object({ path: z.string().max(8192), text: z.str
 
 export const HostRequestSchema = z.discriminatedUnion("op", [
   z.object({
-    ...base, op: z.literal("initialize"), home: absolute, flavor: FlavorSchema, claudeExecutable: absolute.nullable(),
-    personal: PersonalSchema, settings: desktopPreferencesSchema("local"),
-  }).strict().superRefine((r, ctx) => {
-    if (r.settings.agent && !agentChoiceSchema(r.flavor).safeParse(r.settings.agent).success) {
-      ctx.addIssue({ code: "custom", path: ["settings", "agent"], message: `that choice isn't offered in a ${r.flavor} build` });
-    }
-  }),
+    ...base, op: z.literal("initialize"), home: absolute, claudeExecutable: absolute.nullable(),
+    personal: PersonalSchema, settings: DesktopPreferencesSchema,
+  }).strict(),
   z.object({ ...base, op: z.literal("zone-create"), zone: ZoneCreateSchema, enter: z.boolean() }).strict(),
   z.object({ ...base, op: z.literal("zone-enter"), zoneId: IdSchema, expectedRevision: revision }).strict(),
   z.object({ ...base, op: z.literal("zone-update"), zoneId: IdSchema, patch: ZonePatchSchema, expectedRevision: revision }).strict(),
   z.object({ ...base, op: z.literal("zone-context"), zoneId: IdSchema, text: ZoneContextTextSchema, expectedRevision: revision }).strict(),
   z.object({ ...base, op: z.literal("zone-delete"), zoneId: IdSchema, expectedRevision: revision }).strict(),
-  z.object({ ...base, op: z.literal("settings"), settings: desktopPreferencesSchema("local") }).strict(),
-  z.object({ ...base, op: z.literal("agent-select"), choice: agentChoiceSchema("local").nullable() }).strict(),
+  z.object({ ...base, op: z.literal("settings"), settings: DesktopPreferencesSchema }).strict(),
+  z.object({ ...base, op: z.literal("agent-select"), choice: AgentChoiceSchema.nullable() }).strict(),
   z.object({ ...base, op: z.literal("agent-models"), backend: BackendIdSchema, login: LoginMethodSchema }).strict(),
   z.object({
     ...base, op: z.literal("credential"), requestId: TokenSchema,
@@ -151,7 +147,7 @@ export const StateSchema = z.object({
     z.object({ kind: z.literal("conversation") }).strict(),
   ]),
   unlocked: z.number().int().nonnegative(),
-  models: z.object({ intern: modelLabel.nullable(), helper: modelLabel.nullable() }).strict(),
+  models: z.object({ intern: modelLabel.nullable(), helper: modelLabel.nullable(), look: modelLabel.nullable() }).strict(),
 }).strict() satisfies z.ZodType<State>;
 
 const nodeView = z.object({

@@ -4,13 +4,12 @@
 // the focused window and answers the native folder picker; a private D-Bus session with a minimal
 // StatusNotifierWatcher receives the tray icon. Screenshots and report.json go to DUM_SMOKE_OUTPUT.
 //
-// Development run (default): the checkout's `dist/` as built; after a local build, the same compiled
-// output again staged with build-info.json set to "public" (the only thing `--flavor public` changes).
-// DUM_SMOKE_EXECUTABLE runs a packaged binary instead, in whatever flavor it was built.
+// Development run (default): the checkout's `dist/` as built. DUM_SMOKE_EXECUTABLE runs a packaged
+// binary instead.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -382,16 +381,23 @@ async function privateBus() {
 // -- the main process, seen through Node's inspector ---------------------------------------
 
 /**
- * Counts calls in main's compiled observer.js with conditional breakpoints that never pause: Observer.frame
- * (a frame for the host) and the tick send. Only the inspector the Electron binary already offers is used;
- * the app has no test hook. Null when this binary doesn't allow --inspect (a fused package).
+ * Counts calls in main's compiled code with conditional breakpoints that never pause: in observer.js,
+ * Observer.frame (a frame for the host) and the tick send, with how many ticks saw the screen change; in
+ * host-client.js, the host's frame requests and credential requests (every Claude or ChatGPT model call
+ * starts with one). Only the inspector the Electron binary already offers is used; the app has no test
+ * hook. `evaluate` runs an expression in main, for the harness's own screen activity. Null when this
+ * binary doesn't allow --inspect (a fused package).
  */
-async function counters(endpoint, observerFile) {
+async function counters(endpoint, desktopDir) {
   if (!endpoint) return null;
-  const source = (await readFile(observerFile, 'utf8')).split('\n');
-  const frameAt = source.findIndex((l) => /^\s*async frame\(checkId\)\s*\{/.test(l));
-  const sendAt = source.findIndex((l) => /this\.o\.send\(\{/.test(l));
+  const observer = (await readFile(join(desktopDir, 'observer.js'), 'utf8')).split('\n');
+  const client = (await readFile(join(desktopDir, 'host-client.js'), 'utf8')).split('\n');
+  const frameAt = observer.findIndex((l) => /^\s*async frame\(checkId\)\s*\{/.test(l));
+  const sendAt = observer.findIndex((l) => /this\.o\.send\(\{/.test(l));
   assert.ok(frameAt > 0 && sendAt > 0, 'observer.js has Observer.frame and the tick send');
+  const frameRequestAt = client.findIndex((l) => /case "frame-request":/.test(l));
+  const credentialAt = client.findIndex((l) => /case "credential-request":/.test(l));
+  assert.ok(frameRequestAt > 0 && credentialAt > 0, 'host-client.js handles frame and credential requests');
   const socket = new WebSocket(endpoint);
   await new Promise((done, fail) => { socket.onopen = done; socket.onerror = () => fail(new Error('main inspector refused the connection')); });
   let id = 0;
@@ -408,16 +414,26 @@ async function counters(endpoint, observerFile) {
     socket.send(JSON.stringify({ id, method, params }));
   });
   await send('Debugger.enable');
-  const counter = (name) => `((globalThis.__dumSmoke ??= { frames: 0, ticks: 0 }).${name}++, false)`;
-  const url = 'observer\\.js$';
-  const frames = await send('Debugger.setBreakpointByUrl', { urlRegex: url, lineNumber: frameAt + 1, condition: counter('frames') });
-  const ticks = await send('Debugger.setBreakpointByUrl', { urlRegex: url, lineNumber: sendAt, condition: counter('ticks') });
-  assert.ok(frames.locations.length && ticks.locations.length, 'breakpoints resolved in the loaded observer.js');
+  const zero = '{ frames: 0, ticks: 0, changed: 0, frameRequests: 0, credentialRequests: 0 }';
+  const tally = `(globalThis.__dumSmoke ??= ${zero})`;
+  const counter = (name) => `(${tally}.${name}++, false)`;
+  const at = async (url, lineNumber, condition) => (await send('Debugger.setBreakpointByUrl', { urlRegex: url, lineNumber, condition })).locations.length > 0;
+  const resolved = await Promise.all([
+    at('observer\\.js$', frameAt + 1, counter('frames')),
+    // `screen` is the tick's local: null, or the changed-cell count against the previous tick.
+    at('observer\\.js$', sendAt, `(${tally}.ticks++, screen && screen.changedCells > 0 && ${tally}.changed++, false)`),
+    at('host-client\\.js$', frameRequestAt + 1, counter('frameRequests')),
+    at('host-client\\.js$', credentialAt + 1, counter('credentialRequests')),
+  ]);
+  assert.ok(resolved.every(Boolean), 'breakpoints resolved in the loaded observer.js and host-client.js');
+  const evaluate = async (expression) => {
+    const { result, exceptionDetails } = await send('Runtime.evaluate', { expression, returnByValue: true, includeCommandLineAPI: true });
+    if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
+    return result.value;
+  };
   return {
-    async read() {
-      const { result } = await send('Runtime.evaluate', { expression: 'JSON.stringify(globalThis.__dumSmoke ?? { frames: 0, ticks: 0 })', returnByValue: true });
-      return JSON.parse(result.value);
-    },
+    read: async () => JSON.parse(await evaluate(`JSON.stringify(globalThis.__dumSmoke ?? ${zero})`)),
+    evaluate,
     close: () => socket.close(),
   };
 }
@@ -433,17 +449,6 @@ async function install(name) {
   const dirs = { profile: join(root, 'profile'), h: join(root, 'h'), home: join(root, 'home'), claude: join(root, 'claude'), config: join(root, 'config') };
   await Promise.all(Object.values(dirs).map((d) => mkdir(d, { recursive: true })));
   return dirs;
-}
-
-/** The compiled app as a public build: identical output, build-info.json says "public". */
-async function stagePublic() {
-  const app = join(fixture, 'public-app');
-  await mkdir(app);
-  await cp(join(repo, 'dist'), join(app, 'dist'), { recursive: true });
-  await cp(join(repo, 'package.json'), join(app, 'package.json'));
-  await symlink(join(repo, 'node_modules'), join(app, 'node_modules'), 'dir');
-  await writeFile(join(app, 'dist/desktop/build-info.json'), `${JSON.stringify({ flavor: 'public' })}\n`);
-  return app;
 }
 
 async function launch(dirs, appDir) {
@@ -495,7 +500,7 @@ async function launch(dirs, appDir) {
     };
     const [panel, command, bubble] = await Promise.all([page('panel'), page('command'), page('bubble')]);
     await panel.waitForFunction(() => typeof window.dum?.invoke === 'function');
-    const appDist = packaged ? null : join(appDir, 'dist/desktop/observer.js');
+    const appDist = packaged ? null : join(appDir, 'dist/desktop');
     let count = null;
     if (appDist && inspector) {
       try {
@@ -565,7 +570,7 @@ const DRAFT = 'how do I walk a tree without recursion';
 const LOOK_BLOCKED = 'paused while dum is busy or waiting on you';
 const LOOK_CALLS = ['taking a look', "the last look didn't work - it tries again on the next change"];
 
-async function firstRun(dirs, flavor) {
+async function firstRun(dirs) {
   const { panel } = active;
   await step('fresh profile: no zones, no backend chosen, screen look on by default', async () => {
     const s = await snapshot();
@@ -574,8 +579,8 @@ async function firstRun(dirs, flavor) {
     assert.equal(s.settings.agent, null);
     assert.equal(s.agent.chosen, null);
     assert.deepEqual(s.settings.look, { apps: true, screen: true });
-    assert.equal(s.agent.flavor, flavor);
-    return `flavor ${s.agent.flavor}; backends ${s.agent.backends.map((b) => `${b.id}[${b.methods.join('|')}]`).join(', ')}`;
+    assert.deepEqual(s.agent.backends.find((b) => b.id === 'claude')?.methods, ['anthropic-key'], 'Claude takes only an Anthropic API key');
+    return `backends ${s.agent.backends.map((b) => `${b.id}[${b.methods.join('|')}]`).join(', ')}`;
   }, { critical: true });
   if (linux) {
     // Electron reports a show:false window as "visible" to its page, so the X server is the witness.
@@ -751,7 +756,7 @@ async function commandBar() {
   });
 }
 
-async function whoPowersDum(flavor) {
+async function whoPowersDum() {
   const { panel } = active;
   await step('"Who powers Dum?" appears at the first model-backed request; nothing is sent', async () => {
     const before = await snapshot();
@@ -776,8 +781,7 @@ async function whoPowersDum(flavor) {
     if (ready.length) limits.push(`[${current}] a local model server on this machine answered (${ready.map((b) => `${b.label}: ${b.message}`).join('; ')}); the sheet listed it and read its model list, nothing was chosen, so no model was called`);
     return `rows: ${s.agent.backends.map((b) => `${b.id} ${b.ready ? 'ready' : 'not set up'}`).join(', ')}`;
   });
-  const claude = flavor === 'local' ? 'local flavor: Claude offers the subscription sign-in and the API-key field' : 'public flavor: Claude offers only the API-key field';
-  await step(claude, async () => {
+  await step('Claude offers only the API-key field', async () => {
     const radio = '.agent-setup input[name="backend-setup"][value="claude"]';
     await panel.waitForSelector(radio, { timeout: 15_000 });
     await panel.focus(radio);
@@ -785,29 +789,19 @@ async function whoPowersDum(flavor) {
     await panel.waitForFunction((r) => document.querySelector(r)?.checked, {}, radio);
     const methods = await panel.$$eval('.agent-setup .methods input[type=radio]', (els) => els.map((el) => el.value));
     const text = await panel.$eval('.agent-setup', (el) => el.innerText);
-    if (flavor === 'local') {
-      assert.deepEqual([...methods].sort(), ['anthropic-key', 'claude-subscription']);
-      assert.match(text, /Sign in with Claude/);
-      assert.match(text, /Use an Anthropic API key/);
-      const key = '.agent-setup input[name="method-setup-claude"][value="anthropic-key"]';
-      await panel.focus(key);
-      await panel.keyboard.press('Space');
-    } else {
-      assert.deepEqual(methods, [], 'one method: no method choice is offered');
-      assert.doesNotMatch(text, /Sign in with Claude|subscription/i);
-      assert.match(text, /uses Claude with an API key only/);
-    }
+    assert.deepEqual(methods, [], 'one method: no method choice is offered');
+    assert.doesNotMatch(text, /Sign in with Claude|subscription/i);
     await panel.waitForSelector('.agent-setup input[aria-label="Anthropic API key"]', { timeout: 10_000 });
     await shoot(panel, `${current}-agent-claude.png`);
-    return `methods offered: ${methods.join(', ') || 'anthropic-key only'}`;
+    return 'anthropic-key only';
   });
-  if (flavor === 'public') {
-    await step('public flavor: main refuses a subscription sign-in request', async () => {
-      const r = await invoke({ type: 'agent-login', backend: 'claude', method: 'claude-subscription' });
-      assert.equal(r.ok, false, 'subscription sign-in was accepted by a public build');
-      return r.error;
-    });
-  }
+  await step('main refuses the removed Claude subscription login as an unknown method', async () => {
+    // The login method Dum removed; the renderer protocol no longer parses it.
+    const r = await invoke({ type: 'agent-login', backend: 'claude', method: 'claude-subscription' });
+    assert.equal(r.ok, false, 'the removed sign-in was accepted');
+    assert.match(r.error, /doesn't accept \(method\)/);
+    return r.error;
+  });
 }
 
 async function lookAndFollow(dirs) {
@@ -864,6 +858,38 @@ async function lookAndFollow(dirs) {
       await delay(250);
     }
   })();
+  // The look stops while a Dum window is in front, so it runs here with every Dum window hidden.
+  let flicker = false;
+  await step('with no Dum window in front, the look ticks', async () => {
+    await invoke({ type: 'dismiss-surface', surface: 'panel' });
+    assert.ok(await xgone(X_PANEL), 'the panel X window stayed mapped');
+    assert.ok(await xgone(X_COMMAND), 'the command bar X window stayed mapped');
+    if (!count) {
+      limits.push('look ticks, frame requests and credential requests not counted: main inspector unavailable');
+      return 'panel hidden';
+    }
+    const before = (await count.read()).ticks;
+    const end = Date.now() + 15_000;
+    while (Date.now() < end && (await count.read()).ticks === before) await delay(500);
+    assert.ok((await count.read()).ticks > before, 'no look tick arrived with every Dum window hidden');
+    // The harness's own screen activity: an unfocusable, inactive window over the display under the
+    // cursor that alternates black and white, so the look's ticks see the screen change.
+    try {
+      flicker = await count.evaluate(`(() => {
+        const { BrowserWindow, screen } = require('electron');
+        const bounds = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
+        const w = new BrowserWindow({ ...bounds, show: false, frame: false, focusable: false, skipTaskbar: true, backgroundColor: '#000000' });
+        let on = false;
+        const t = setInterval(() => { on = !on; w.setBackgroundColor(on ? '#ffffff' : '#000000'); }, 1000);
+        w.showInactive();
+        globalThis.__dumSmokeFlicker = () => { clearInterval(t); w.destroy(); };
+        return true;
+      })()`);
+    } catch (error) {
+      limits.push(`screen activity not produced (${error.message}): the look's changed-screen path was not exercised`);
+    }
+    return `ticks flowing; screen activity ${flicker ? 'on' : 'off'}`;
+  });
   let after;
   await step('saving a file in the followed folder produces a host FileSignal (new file listed by the host scan)', async () => {
     await writeFile(join(learning, 'walk.py'), `${await readFile(join(learning, 'walk.py'), 'utf8')}\n# iterative next\n`);
@@ -881,22 +907,24 @@ async function lookAndFollow(dirs) {
     after = s;
     return 'queue.py appeared in the host follow list';
   });
-  await step('no backend: the look sends no frame and calls no model', async () => {
-    await delay(4_000);
+  await step('no backend: while the look ticks and the screen changes, it requests no frame and makes no model call', async () => {
+    const start = count ? await count.read() : null;
+    await delay(12_000);
     const s = await snapshot();
     const seen = [...statuses];
     assert.equal(s.agent.chosen, null);
     assert.ok(!seen.some((v) => LOOK_CALLS.includes(v)), `look statuses showed a model call: ${seen.join(' | ')}`);
     assert.equal(s.state.transcript.some((e) => e.kind === 'quip'), false, 'no Wizard aside');
     assert.equal(existsSync(join(dirs.claude, 'projects')), false, 'no Claude session was written');
-    if (!count) {
-      limits.push('frame count not observed: main inspector unavailable');
-      return `statuses: ${seen.join(' | ')}`;
-    }
+    if (!count) return `statuses: ${seen.join(' | ')}`;
     const n = await count.read();
-    assert.ok(n.ticks > 0, 'the look ticked');
+    assert.ok(n.ticks > start.ticks, 'the look ticked');
+    if (flicker) assert.ok(n.changed > start.changed, 'no tick saw the screen change');
+    else if (n.changed === 0) limits.push('no look tick saw the screen change: the no-backend check ran on unchanged frames only');
+    assert.equal(n.frameRequests, 0, `the host asked main for ${n.frameRequests} frames`);
     assert.equal(n.frames, 0, `${n.frames} frames were produced for the host`);
-    return `${n.ticks} look ticks, ${n.frames} frames; statuses: ${seen.join(' | ')}`;
+    assert.equal(n.credentialRequests, 0, `the host asked main for ${n.credentialRequests} credentials (a model call)`);
+    return `${n.ticks} look ticks (${n.changed} with screen changes), ${n.frameRequests} frame requests, ${n.frames} frames, ${n.credentialRequests} credential requests; statuses: ${seen.join(' | ')}`;
   });
   await step('the look status shows the followed-folder FileSignal and that advice needs a backend', async () => {
     const seen = [...statuses];
@@ -908,6 +936,9 @@ async function lookAndFollow(dirs) {
   });
   sampling = false;
   await sampler;
+  if (flicker) await count.evaluate('globalThis.__dumSmokeFlicker()');
+  await invoke({ type: 'show-surface', surface: 'panel' });
+  await visible(panel, 'panel');
   await step('Settings › Look shows the look status and the followed folder', async () => {
     await panel.evaluate(() => document.querySelector('#tab-settings')?.click());
     await panel.waitForFunction(() => document.querySelector('#pane-title')?.textContent === 'Settings');
@@ -1030,14 +1061,10 @@ let version = '';
 let diagnostic = '';
 try {
   if (linux) bus = await privateBus();
-  const flavorOf = async (appDir) => JSON.parse(await readFile(join(appDir, 'dist/desktop/build-info.json'), 'utf8')).flavor;
-  const primaryFlavor = packaged ? null : await flavorOf(repo);
-
-  current = packaged ? 'packaged' : primaryFlavor;
+  current = packaged ? 'packaged' : 'checkout';
   const dirs = await install(current);
   active = await launch(dirs, repo);
   version = (await snapshot()).version;
-  const flavor = (await snapshot()).agent.flavor;
   await step('no Git: a non-Git fixture and an app PATH without git', async () => {
     assert.equal(existsSync(join(bin, 'git')), false);
     assert.equal(existsSync(join(fixture, '.git')) || existsSync(join(learning, '.git')), false);
@@ -1050,10 +1077,10 @@ try {
       assert.deepEqual(await page.evaluate(() => ({ process: typeof process, require: typeof require })), { process: 'undefined', require: 'undefined' });
     }
   });
-  await firstRun(dirs, flavor);
+  await firstRun(dirs);
   await zones();
   await commandBar();
-  await whoPowersDum(flavor);
+  await whoPowersDum();
   await lookAndFollow(dirs);
   await tray();
   await bubble();
@@ -1077,21 +1104,6 @@ try {
     await shoot(active.panel, `${current}-panel.png`);
   });
   await stop();
-
-  if (packaged) {
-    limits.push(`packaged run covers only its own ${flavor} flavor`);
-  } else if (primaryFlavor === 'public') {
-    // The checkout is already a public build: the whole journey above ran public, so no staged copy.
-    limits.push('the checkout is a public build: the local flavor was not exercised in this run');
-  } else {
-    current = 'public';
-    const publicApp = await stagePublic();
-    const publicDirs = await install('public');
-    active = await launch(publicDirs, publicApp);
-    await firstRun(publicDirs, 'public');
-    await whoPowersDum('public');
-    await stop();
-  }
 } catch (error) {
   record('run', false, error?.stack ?? error);
 } finally {

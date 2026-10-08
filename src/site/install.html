@@ -24,8 +24,8 @@
     <li>Voice needs macOS 14 or later on Apple Silicon. Everything voice does also works from
         the keyboard.</li>
     <li>A backend to power Dum. Either your own Anthropic API key for Claude, or models running on
-        your Mac in Ollama or LM Studio. A build you make yourself can also use a Claude
-        subscription. See <a href="/docs#backends">who powers Dum</a>.</li>
+        your Mac in Ollama or LM Studio. Claude takes only an API key, in every build. See
+        <a href="/docs#backends">who powers Dum</a>.</li>
   </ul>
   <p class="note">The app carries its own Claude Code. You don't install anything else to use
      Claude.</p>
@@ -34,7 +34,7 @@
   <p class="note">There's no public release of this version yet. Build it from source below.</p>
   <p>Test builds come out of the
     <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>
-    on pushes to <code>main</code>. They're public builds, ad-hoc signed and not notarized, and
+    on pushes to <code>main</code>. They're ad-hoc signed and not notarized, and
     only signed-in GitHub accounts can download them. The older test prerelease on the releases
     page predates zones and doesn't match these docs.</p>
 
@@ -45,7 +45,8 @@
     <li>macOS asks for Screen Recording permission, for Dum's look. If you say no, Dum looks at
         app switches and saved files only.</li>
     <li>Answer <em>What are you trying to learn?</em> That becomes your first zone.</li>
-    <li>Click <em>Who powers Dum?</em> and pick a backend and models.</li>
+    <li>Click <em>Who powers Dum?</em> and pick a backend, Dum's model, the helper and the look
+        model.</li>
     <li>Press <code>⌘⇧D</code> from anywhere to open the command bar.</li>
   </ol>
   <p class="note">Dum lives in the menu bar. There's no Dock icon.</p>
@@ -59,13 +60,10 @@
   </ul>
 
   <pre><code>npm install
-npm run desktop            # build a local-flavor Dum and launch it from the checkout
-npm run desktop:mac-local  # package a local-flavor Mac app, with voice and the focus helper
-npm run desktop:mac        # package the public-flavor DMG and ZIP</code></pre>
+npm run desktop            # build Dum and launch it from the checkout
+npm run desktop:mac        # package the DMG and ZIP, with voice and the focus helper</code></pre>
 
-  <p>A build you make yourself is local flavor, so it can sign in with a Claude subscription as
-     well as an API key. <code>npm run desktop:mac</code> makes a public build, the kind that
-     gets released, which uses an API key only.</p>
+  <p>Every build, yours or a released one, connects Claude with your own API key only.</p>
 
   <p class="note"><code>npm run desktop</code> runs without Dum's two native helpers, so there's
      no voice, no noticing app switches, and <code>Esc</code> can't hand focus back to the app you

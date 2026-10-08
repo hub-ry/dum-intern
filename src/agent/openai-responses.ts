@@ -48,7 +48,7 @@ const AccessClaims = z.looseObject({ scope: z.string(), aud: z.union([z.string()
 
 export function chatgptBackend(o: { credential: CredentialSource }): AgentBackend {
   const known = new Map<string, ModelOption>();
-  return {
+  const backend: AgentBackend = {
     id: "chatgpt",
     label: "ChatGPT",
     async models(login, signal) {
@@ -58,8 +58,12 @@ export function chatgptBackend(o: { credential: CredentialSource }): AgentBacken
       for (const m of options) known.set(m.id, m);
       return options;
     },
-    capabilities(selector: Selector): Capabilities {
-      return { images: known.get(selector.model)?.images ?? false, interrupt: true, runtimeActionCheck: false };
+    async capabilities(selector, login, signal): Promise<Capabilities> {
+      const option = known.get(selector.model) ?? (await backend.models(login, signal)).find((m) => m.id === selector.model);
+      const images = option?.images ?? false;
+      return {
+        model: selector.model, images, noImages: images ? "" : `${selector.model} can't see pictures`, interrupt: true, runtimeActionCheck: false,
+      };
     },
     async open(session) {
       if (session.login !== "chatgpt") throw new Error(`ChatGPT doesn't sign in with ${session.login}`);
@@ -86,6 +90,7 @@ export function chatgptBackend(o: { credential: CredentialSource }): AgentBacken
       };
     },
   };
+  return backend;
 }
 
 /**
@@ -289,6 +294,7 @@ async function catalog(access: string, signal: AbortSignal): Promise<ModelOption
     .filter((m) => m.visibility === "list")
     .map((m) => ({
       id: m.slug,
+      resolved: m.slug,
       label: m.display_name || m.slug,
       efforts: m.supported_reasoning_levels?.map((l) => l.effort) ?? [],
       images: m.input_modalities?.includes("image") ?? false,

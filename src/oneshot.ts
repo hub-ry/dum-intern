@@ -1,17 +1,19 @@
-// One prompt, one reply, no conversation, no actions: every bounded helper call, on the user's helper model.
+// One prompt, one reply, no conversation, no actions: every bounded call on the user's helper or look model.
 
 import type { Registry } from "./agent/registry.ts";
-import type { Picture } from "./agent/types.ts";
+import type { Picture, Role } from "./agent/types.ts";
 import type { RequestBinding } from "./share-types.ts";
 import type { ZoneContext } from "./zone-types.ts";
 
 export type Opts = {
   agent: Registry;
+  /** Whose model answers: the helper, or the look's model for live looks. */
+  role: Exclude<Role, "intern">;
   /** The zone's empty runtime/ directory. Never the process's own working directory. */
   cwd: string;
   zone: ZoneContext;
   binding: RequestBinding;
-  /** Pictures that go with the prompt. Refused when the helper model can't read pictures. */
+  /** Pictures that go with the prompt. Refused when the role's model can't be sent pictures. */
   images?: readonly Picture[];
   /** Stops the call wherever it is: opening the session or waiting on the reply. */
   signal?: AbortSignal;
@@ -20,16 +22,17 @@ export type Opts = {
 const SYSTEM = "Answer the prompt you're given directly. You have no tools, files or web access in this conversation.";
 
 /**
- * The reply's text, from the registry's helper selector. Choice, login and model failures throw
+ * The reply's text, from the registry's selector for `role`. Choice, login and model failures throw
  * with a readable reason; nothing here falls back to another backend or model. Stopped: "stopped".
  */
 export async function oneShot(prompt: string, o: Opts): Promise<string> {
   if (o.signal?.aborted) throw new Error("stopped");
   const choice = o.agent.chosen();
-  const selector = choice.helper;
+  const selector = choice[o.role];
   const backend = o.agent.backend(selector.backend);
-  if (o.images?.length && !backend.capabilities(selector).images) {
-    throw new Error(`${selector.model} can't look at pictures - choose a helper model that can`);
+  if (o.images?.length) {
+    const caps = await backend.capabilities(selector, choice.login, o.signal ?? AbortSignal.timeout(60_000));
+    if (!caps.images) throw new Error(`${caps.noImages} - choose a ${o.role} model that can see pictures`);
   }
   const abort = new AbortController();
   const stop = () => abort.abort();

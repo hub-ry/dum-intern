@@ -2,11 +2,11 @@
 // The renderer has no Node access; ipc.ts validates with RequestSchema and never duplicates it.
 
 import { z } from "zod";
-import { agentChoiceSchema, BackendIdSchema, LoginMethodSchema } from "../agent/schema.ts";
+import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema } from "../agent/schema.ts";
 import { LookPrefsSchema } from "../observe-types.ts";
 import { IdSchema, InputBindingSchema, RequestBindingSchema, TokenSchema } from "../share-types.ts";
 import { FocusSkillsSchema, LanguageSchema, SkillRefSchema, ZONE_LIMITS, ZoneGoalSchema, ZoneNameSchema } from "../zone-types.ts";
-import type { AgentChoice, BackendId, BackendStatus, Flavor, LoginMethod, ModelOption } from "../agent/types.ts";
+import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption } from "../agent/types.ts";
 import type { Mode } from "../gate.ts";
 import type { LookPrefs } from "../observe-types.ts";
 import type { InputBinding, RequestBinding, ShareGrant } from "../share-types.ts";
@@ -59,19 +59,17 @@ export function accelerator(value: string): boolean {
 const hotkey = z.string().max(80).refine(accelerator, "use a shortcut with Command, Control, Alt or Option plus one key");
 export const ModeSchema = z.enum(["understand", "anti-vibe"]) satisfies z.ZodType<Mode>;
 
-/** Complete preferences; the flavor decides which sign-in methods `agent` may name. */
-export function desktopPreferencesSchema(flavor: Flavor): z.ZodType<DesktopPreferences> {
-  return z.object({
-    hotkey,
-    voiceHotkey: hotkey,
-    sendDraftHotkey: hotkey,
-    launchAtLogin: z.boolean(),
-    personalContext: z.boolean(),
-    look: LookPrefsSchema,
-    mode: ModeSchema,
-    agent: agentChoiceSchema(flavor).nullable(),
-  }).strict();
-}
+/** Complete preferences. */
+export const DesktopPreferencesSchema = z.object({
+  hotkey,
+  voiceHotkey: hotkey,
+  sendDraftHotkey: hotkey,
+  launchAtLogin: z.boolean(),
+  personalContext: z.boolean(),
+  look: LookPrefsSchema,
+  mode: ModeSchema,
+  agent: AgentChoiceSchema.nullable(),
+}).strict() satisfies z.ZodType<DesktopPreferences>;
 
 /** Main owns one draft per zone, plus the first-run goal draft with a null-zone binding. */
 export type DraftState = {
@@ -99,7 +97,7 @@ export type Snapshot = {
   follows: FollowGrant[];
   changes: ChangeReceipt[];
   voice: VoiceState;
-  agent: { flavor: Flavor; backends: BackendStatus[]; chosen: AgentChoice | null };
+  agent: { backends: BackendStatus[]; chosen: AgentChoice | null };
   look: { status: string; paused: boolean; screenPermission: string };
   hotkeyError: string;
   platform: string;
@@ -146,8 +144,6 @@ export type Request =
   | { type: "voice-cancel"; recordingId: string }
   | { type: "agent-check" }
   | { type: "agent-login"; backend: BackendId; method: LoginMethod }
-  | { type: "agent-login-open" }
-  | { type: "agent-login-code"; code: string }
   | { type: "agent-login-cancel" }
   /** The only request that carries a secret; main never echoes it. */
   | { type: "agent-key"; backend: "claude"; key: string }
@@ -166,8 +162,6 @@ export const SkillEditOpSchema = z.enum(["add", "remove"]);
 export const RecordSchema = z.enum(["change", "memory"]);
 const revision = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const surface = z.enum(["panel", "command"]);
-/** The flavor-free shape; main re-validates `agent-select` and `settings` with its own flavor. */
-const choice = agentChoiceSchema("local");
 const utf8Max = (max: number) => z.string().refine((t) => new TextEncoder().encode(t).length <= max, "is too long");
 
 export const ZoneCreateSchema = z.object({
@@ -213,7 +207,7 @@ export const RequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("open-record"), record: RecordSchema, id: IdSchema.optional() }).strict(),
   z.object({ type: z.literal("skill-edit"), op: SkillEditOpSchema, skill: SkillRefSchema }).strict(),
   z.object({ type: z.literal("tree-sync"), sync: TreeSyncSchema }).strict(),
-  z.object({ type: z.literal("settings"), settings: desktopPreferencesSchema("local") }).strict(),
+  z.object({ type: z.literal("settings"), settings: DesktopPreferencesSchema }).strict(),
   z.object({ type: z.literal("capture-sources") }).strict(),
   z.object({ type: z.literal("capture-preview"), sourceId: z.string().min(1).max(256), binding: RequestBindingSchema }).strict(),
   z.object({ type: z.literal("capture-discard"), token: TokenSchema }).strict(),
@@ -225,13 +219,11 @@ export const RequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("voice-cancel"), recordingId: TokenSchema }).strict(),
   z.object({ type: z.literal("agent-check") }).strict(),
   z.object({ type: z.literal("agent-login"), backend: BackendIdSchema, method: LoginMethodSchema }).strict(),
-  z.object({ type: z.literal("agent-login-open") }).strict(),
-  z.object({ type: z.literal("agent-login-code"), code: z.string().min(1).max(4096).regex(/^[\x21-\x7e]+$/, "not a sign-in code") }).strict(),
   z.object({ type: z.literal("agent-login-cancel") }).strict(),
   z.object({ type: z.literal("agent-key"), backend: z.literal("claude"), key: z.string().min(1).max(512).regex(/^[\x21-\x7e]+$/, "not an API key") }).strict(),
   z.object({ type: z.literal("agent-signout"), backend: BackendIdSchema, method: LoginMethodSchema }).strict(),
   z.object({ type: z.literal("agent-models"), backend: BackendIdSchema, login: LoginMethodSchema }).strict(),
-  z.object({ type: z.literal("agent-select"), choice }).strict(),
+  z.object({ type: z.literal("agent-select"), choice: AgentChoiceSchema }).strict(),
   z.object({ type: z.literal("show-surface"), surface }).strict(),
   z.object({ type: z.literal("dismiss-surface"), surface }).strict(),
   z.object({ type: z.literal("quit") }).strict(),

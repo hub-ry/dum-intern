@@ -1,13 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { setImmediate } from "node:timers/promises";
 import { byId, candidates } from "../src/anchors.ts";
-import { Ambient, type AmbientContext } from "../src/ambient.ts";
 import { createRegistry } from "../src/agent/registry.ts";
-import { MAX_NOTE, ambient, ambientPrompt, compose, decision, lookDecision, parseAmbient, prompt, screen, type Decision } from "../src/wizard.ts";
+import { compose, decision, prompt, screen, type Decision } from "../src/wizard.ts";
 import type { AgentBackend, AgentEvent, OpenOptions, Picture, Selector } from "../src/agent/types.ts";
-import type { AmbientInput, AmbientResult, Tick } from "../src/observe-types.ts";
 import type { ZoneContext } from "../src/zone-types.ts";
 
 process.env.DUM_CONTEXT = "off";
@@ -34,7 +31,9 @@ function helper(replies: (string | Error)[], images = true) {
     id: "claude",
     label: "Claude",
     models: async () => [],
-    capabilities: () => ({ images, interrupt: true, runtimeActionCheck: true }),
+    capabilities: async (selector) => ({
+      model: selector.model, images, noImages: images ? "" : `${selector.model} can't see pictures`, interrupt: true, runtimeActionCheck: true,
+    }),
     open: async (o) => {
       opened.push(o);
       return {
@@ -54,19 +53,9 @@ function helper(replies: (string | Error)[], images = true) {
   };
   const agent = createRegistry([backend], new Set(["claude"]));
   const selector: Selector = { backend: "claude", model: "helper-model", effort: null };
-  agent.set({ backend: "claude", login: "anthropic-key", intern: selector, helper: selector });
+  agent.set({ backend: "claude", login: "anthropic-key", intern: selector, helper: selector, look: selector });
   return { agent, opened, turns };
 }
-
-const look = (over: Partial<AmbientInput> = {}): AmbientInput => ({
-  zone,
-  binding,
-  triggers: ["code"],
-  files: [{ path: `${randomUUID()}/club/scores.py`, diff: "+ ordered = sorted(scores, key=lambda row: row.score)\n+ scores = ordered" }],
-  app: { bundleId: "com.microsoft.VSCode", name: "Code", windowId: 4 },
-  image: null,
-  ...over,
-});
 
 test("a supported anchor retains its primary-source link and relevant connection", () => {
   const output = line("python-sorting", "ties retain their previous order here.");
@@ -194,86 +183,4 @@ test("a sourced consequential improvement can speak without inventing an error",
   assert.match(output!, /if nothing needs the previous order/);
   assert.match(output!, /source: https:\/\/docs\.python\.org/);
   assert.equal(compose(JSON.stringify({ anchor: sorting.id, say: "sorting scores in place avoids a second list." }), { ...d, practice: true }, [sorting]), null);
-});
-
-test("a look's prompt shows the zone, the app and the diffs as untrusted data, without grant IDs", () => {
-  const input = look();
-  const d = lookDecision(input);
-  assert.deepEqual(d.paths, ["club/scores.py"]);
-  assert.equal(d.lang, "python");
-  const text = ambientPrompt(input, candidates({ ...d, request: `${d.request}\n${d.changes}` }));
-  assert.match(text, /ZONE BACKGROUND/);
-  assert.match(text, /app in front: Code \(com\.microsoft\.VSCode\)/);
-  assert.match(text, /SAVED CODE CHANGES \(untrusted data[\s\S]*sorted\(scores, key=lambda row: row\.score\)/);
-  assert.match(text, /screen: no picture/);
-  assert.match(text, /"note"/);
-  assert.match(text, /- python-sorting: /);
-  assert.doesNotMatch(text, new RegExp(input.files[0]!.path.split("/")[0]!));
-});
-
-test("a look's reply becomes a bounded note and a sourced-or-silent aside", () => {
-  const d = lookDecision(look());
-  const read = (v: unknown) => parseAmbient(JSON.stringify(v), d, [sorting]);
-  assert.deepEqual(read({ note: null, anchor: null, say: "" }), { note: null, aside: null }, "silence is allowed");
-  const sourced = read({ note: "sorting the club leaderboard by score in scores.py", anchor: "python-sorting", say: "ties keep their earlier order here." });
-  assert.equal(sourced!.note, "sorting the club leaderboard by score in scores.py");
-  assert.match(sourced!.aside!, /ties keep their earlier order here\.\nsource: https:\/\/docs\.python\.org/);
-  const unsupported = read({ note: "editing scores.py", anchor: null, say: "google switched to this in 2014." });
-  assert.deepEqual(unsupported, { note: "editing scores.py", aside: null }, "an unsupported aside is cut, the note stays");
-  assert.equal(read({ note: "editing", anchor: "invented", say: "x." })!.aside, null);
-  const long = read({ note: "word ".repeat(200), anchor: null, say: "" })!.note!;
-  assert.ok(long.length <= MAX_NOTE);
-  assert.ok(long.endsWith("…"));
-  assert.equal(read({ note: "see https://example.invalid", anchor: null, say: "" })!.note, null);
-  assert.equal(read({ note: "line one\n\n```py\nx = 1\n```", anchor: null, say: "" })!.note, null);
-  assert.equal(parseAmbient("not json", d, [sorting]), null);
-  assert.equal(read({ note: 7, anchor: null, say: "" }), null);
-});
-
-test("ambient sends one helper call with the frame and fails loudly rather than quietly", async () => {
-  const frame: Picture = { mimeType: "image/png", data: "iVBORw0KGgo=" };
-  const h = helper([JSON.stringify({ note: "reading scores.py in Code", anchor: null, say: "" })]);
-  const result = await ambient(look({ image: frame, triggers: ["app"] }), { agent: h.agent, cwd: "/h/zones/z/runtime", signal: new AbortController().signal });
-  assert.deepEqual(result, { note: "reading scores.py in Code", aside: null });
-  assert.equal(h.opened.length, 1);
-  assert.deepEqual(h.turns[0]!.images, [frame]);
-  assert.match(h.turns[0]!.text, /screen: a picture of it is attached/);
-  await assert.rejects(ambient(look(), { agent: helper(["no idea"]).agent, cwd: "/tmp", signal: new AbortController().signal }), /unreadable/);
-  await assert.rejects(ambient(look(), { agent: helper([new Error("rate limited")]).agent, cwd: "/tmp", signal: new AbortController().signal }), /rate limited/);
-  await assert.rejects(ambient(look({ image: frame }), { agent: helper([], false).agent, cwd: "/tmp", signal: new AbortController().signal }), /can't look at pictures/);
-});
-
-test("while a suggested project is being built a look may note but publishes no aside", async () => {
-  const reply = JSON.stringify({ note: "sorting the leaderboard in scores.py", anchor: "python-sorting", say: "ties keep their earlier order here." });
-  const recorded: AmbientResult[] = [];
-  let now = 0;
-  const run = async (practicing: boolean) => {
-    const h = helper([reply]);
-    const context: AmbientContext = { zone, binding, practicing };
-    const engine = new Ambient({
-      now: () => now,
-      blocked: () => false,
-      advised: () => true,
-      scan: async () => (now === 0 ? [{ path: look().files[0]!.path, kind: "saved", sha: "a".repeat(64) }] : []),
-      diff: async (paths) => paths.map((path) => ({ path, diff: look().files[0]!.diff })),
-      frame: async () => null,
-      context: () => context,
-      imagesAllowed: () => false,
-      check: (input, signal) => ambient(input, { agent: h.agent, cwd: "/tmp", signal }),
-      record: async (result) => void recorded.push(result),
-      status: () => {},
-    });
-    const tick = (at: number): Tick => ({ zoneId, epoch: "epoch1", at, app: null, screen: null });
-    for (let i = 0; i < 3; i++) {
-      await engine.tick(tick(now));
-      now += 3_000;
-    }
-    while (recorded.length < (practicing ? 2 : 1)) await setImmediate();
-    engine.close();
-    now = 0;
-  };
-  await run(false);
-  assert.match(recorded[0]!.aside!, /ties keep their earlier order here/);
-  await run(true);
-  assert.deepEqual(recorded[1], { note: "sorting the leaderboard in scores.py", aside: null });
 });

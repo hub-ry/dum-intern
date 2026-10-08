@@ -361,7 +361,7 @@ export function panel() {
       "div",
       { class: "group", "aria-labelledby": "look-title", role: "group" },
       h("h3", { id: "look-title" }, "Look"),
-      h("p", { class: "hint" }, "Dum looks every 3 seconds at which app is in front, how much the screen changed and the folders you follow. It calls a model only when something changed. It never reads keystrokes, the clipboard or your editor."),
+      h("p", { class: "hint" }, "Dum looks every 3 seconds at which app is in front, how much the screen changed and the folders you follow. It calls a model only when something changed: when the screen changed, your look model gets one fresh picture of it and a line about what it saw last, never older pictures. One call at a time, at most one every 3 seconds and 1,200 an hour. It never reads keystrokes, the clipboard or your editor."),
       lookStatus,
       lookPause,
       h("label", { class: "check" }, look.apps, h("span", {}, "Apps: notice when you switch apps")),
@@ -443,7 +443,7 @@ export function panel() {
     );
     followAdd.disabled = !s.activeZone;
     voiceStatus.textContent = s.voice.status || "Voice is idle.";
-    versionLine.textContent = `Dum ${s.version} · ${s.platform} · ${s.agent.flavor} build`;
+    versionLine.textContent = `Dum ${s.version} · ${s.platform}`;
   }
 
   // -- showing panes --------------------------------------------------------

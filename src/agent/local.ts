@@ -4,7 +4,7 @@
 import { loopSession } from "./loop.ts";
 import { chatCompletionsClient } from "./openai-compatible.ts";
 import { LOCAL_ENDPOINTS, NAMES, SERVERS, catalog, cloudTagged, loopbackBase, refused, type LocalEndpoints, type LocalServer } from "./local-setup.ts";
-import type { AgentBackend, Capabilities, ModelOption, Selector } from "./types.ts";
+import type { AgentBackend, Capabilities, ModelOption } from "./types.ts";
 
 const CLOUD = "Dum requires a model that stays on this Mac";
 
@@ -20,7 +20,7 @@ export function parseModel(id: string): { server: LocalServer; model: string } {
 export function localBackend(endpoints: LocalEndpoints = LOCAL_ENDPOINTS): AgentBackend {
   for (const server of SERVERS) loopbackBase(endpoints[server]);
   const known = new Map<string, ModelOption>();
-  return {
+  const backend: AgentBackend = {
     id: "local",
     label: "On this Mac",
     async models(login, signal) {
@@ -38,8 +38,12 @@ export function localBackend(endpoints: LocalEndpoints = LOCAL_ENDPOINTS): Agent
       for (const m of out) known.set(m.id, m);
       return out;
     },
-    capabilities(selector: Selector): Capabilities {
-      return { images: known.get(selector.model)?.images ?? false, interrupt: true, runtimeActionCheck: false };
+    async capabilities(selector, login, signal): Promise<Capabilities> {
+      const option = known.get(selector.model) ?? (await backend.models(login, signal)).find((m) => m.id === selector.model);
+      const images = option?.images ?? false;
+      return {
+        model: selector.model, images, noImages: images ? "" : `${selector.model} can't see pictures`, interrupt: true, runtimeActionCheck: false,
+      };
     },
     async open(o) {
       if (o.login !== "none") throw new Error("Local models need no sign-in");
@@ -72,4 +76,5 @@ export function localBackend(endpoints: LocalEndpoints = LOCAL_ENDPOINTS): Agent
       };
     },
   };
+  return backend;
 }

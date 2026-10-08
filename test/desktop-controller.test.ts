@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "../src/desktop/controller.ts";
 import { HostEventSchema, type HostEvent, type HostResult } from "../src/desktop/host-protocol.ts";
 import { DEFAULT_PREFERENCES } from "../src/desktop/protocol.ts";
+import { LOOK } from "../src/observe-types.ts";
 import * as skills from "../src/skills.ts";
 import type { AgentBackend, AgentChoice, AgentEvent, BackendId, CredentialSource } from "../src/agent/types.ts";
 import type { RequestBinding } from "../src/share-types.ts";
@@ -30,15 +31,18 @@ function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend 
     label: `Fake ${id}`,
     async models(_login, signal) {
       const key = await credential("anthropic-key", signal);
-      return [{ id: key?.value ?? "no-key", label: "fake", efforts: [], images: true, actions: true, verified: false }];
+      const id = key?.value ?? "no-key";
+      return [{ id, resolved: id, label: "fake", efforts: [], images: true, actions: true, verified: false }];
     },
-    capabilities: () => ({ images: true, interrupt: true, runtimeActionCheck: false }),
+    capabilities: async (selector) => ({ model: selector.model, images: true, noImages: "", interrupt: true, runtimeActionCheck: false }),
     async open(o) {
       if (id !== "claude") throw new Error(`the ${id} backend was never chosen`);
       return {
         async *turn(input) {
           if (!o.actions.length) {
-            yield { type: "text", text: input.images?.length ? "a code editor showing a counter loop" : JSON.stringify({ anchor: null, say: "", note: NOTE }) };
+            // A look asks "what changed"; a shared picture asks for a description.
+            const looking = input.text.includes("what changed:");
+            yield { type: "text", text: input.images?.length && !looking ? "a code editor showing a counter loop" : JSON.stringify({ anchor: null, say: "", note: NOTE }) };
             yield end;
             return;
           }
@@ -77,6 +81,7 @@ const CHOICE: AgentChoice = {
   backend: "claude", login: "anthropic-key",
   intern: { backend: "claude", model: "fake-intern", effort: null },
   helper: { backend: "claude", model: "fake-helper", effort: null },
+  look: { backend: "claude", model: "fake-look", effort: null },
 };
 const PERSONAL = { path: "", text: "", warning: "" };
 
@@ -157,7 +162,7 @@ class Host {
 
   async start(f: Fixture, agent: AgentChoice | null = CHOICE): Promise<void> {
     await this.take((e): e is Extract<HostEvent, { type: "ready" }> => e.type === "ready");
-    await this.ok({ op: "initialize", home: f.home, flavor: "local", claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent } });
+    await this.ok({ op: "initialize", home: f.home, claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent } });
   }
 
   async zone(name: string, parentId: string | null, enter = true): Promise<Zone> {
@@ -312,7 +317,7 @@ if (process.env.DUM_FAKE_HOST === "1") {
     assert.equal(tooLate.ok, false);
   }));
 
-  test("an ambient tick on followed code reaches the helper and lands as a zone memory note", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+  test("an ambient tick on followed code reaches the look model and lands as a zone memory note", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
     const work = join(f.dir, "work");
     mkdirSync(work);
     writeFileSync(join(work, "counter.py"), "count = 0\n");
@@ -335,6 +340,26 @@ if (process.env.DUM_FAKE_HOST === "1") {
     // A tick from another epoch is blocked: the look says it's paused and asks nothing.
     await host.ok({ op: "observe-tick", tick: { zoneId: z.id, epoch: randomUUID(), at: Date.now(), app: null, screen: null } });
     await host.until((e) => /paused/.test(e.look.status));
+  }));
+
+  test("the live look: a changed screen asks main for one frame, sends it to the look model, and shows what it saw", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const host = launch();
+    await host.start(f);
+    const z = await host.zone("Loops", null);
+    const s = await host.ready(z.id);
+    const tick = (changedCells: number) => ({ op: "observe-tick", tick: { zoneId: z.id, epoch: s.zoneEpoch, at: Date.now(), app: null, screen: { changedCells } } });
+    await host.ok(tick(0));
+    assert.equal(host.events.some((e) => e.type === "frame-request"), false, "a still screen asks for nothing");
+    // The tick waits on main's frame, so it is answered before the tick returns.
+    const changed = host.send(tick(LOOK.activeCells));
+    const ask = await host.take((e): e is Extract<HostEvent, { type: "frame-request" }> => e.type === "frame-request");
+    await host.ok({ op: "observe-frame", checkId: ask.checkId, image: { mimeType: "image/png", data: PNG } });
+    assert.equal((await host.reply(changed)).ok, true);
+    const seen = await host.until((e) => e.look.status.includes(`last saw: ${NOTE}`));
+    assert.match(seen.look.status, /^watching for changes - last saw: /);
+    const memory = join(f.home, "zones", z.id, "memory.md");
+    for (let i = 0; i < 200 && !(existsSync(memory) && readFileSync(memory, "utf8").includes(NOTE)); i++) await sleep(25);
+    assert.ok(readFileSync(memory, "utf8").includes(NOTE));
   }));
 
   test("with no backend the look still notices followed-file changes, says advice needs a backend, and calls nothing", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
