@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Follows } from "../src/follow.ts";
@@ -12,12 +12,14 @@ import { sha } from "../src/shared-files.ts";
 import { LOOK, type FileSignal } from "../src/observe-types.ts";
 import { SHARE_LIMITS } from "../src/share-types.ts";
 
-const H = mkdtempSync(join(tmpdir(), "dum-follow-home-"));
+// Resolved, so expected paths match what Dum reports where tmpdir is a symlink (macOS: /var → /private/var).
+const TMP = realpathSync(tmpdir());
+const H = mkdtempSync(join(TMP, "dum-follow-home-"));
 process.env.DUM_HOME = H;
 process.env.DUM_CONTEXT = "off";
 
 function folder() {
-  const root = mkdtempSync(join(tmpdir(), "dum-followed-"));
+  const root = mkdtempSync(join(TMP, "dum-followed-"));
   mkdirSync(join(root, "src"));
   writeFileSync(join(root, "src/main.py"), "def main():\n    return 1\n");
   writeFileSync(join(root, "notes.md"), "notes\n");
@@ -130,7 +132,7 @@ test("a file the model read after a save is not a change any more", async () => 
 
 test("adding refuses home, symlinks, files, over-limit folders and a ninth folder", async () => {
   const p = folder();
-  const wide = mkdtempSync(join(tmpdir(), "dum-wide-"));
+  const wide = mkdtempSync(join(TMP, "dum-wide-"));
   try {
     const follows = new Follows(H, randomUUID());
     await assert.rejects(follows.add(homedir()), /home directory/);
@@ -142,7 +144,7 @@ test("adding refuses home, symlinks, files, over-limit folders and a ninth folde
     for (let i = 0; i <= SHARE_LIMITS.files; i++) writeFileSync(join(wide, `f${i}.txt`), "x\n");
     await assert.rejects(follows.add(wide), /more than 2000 files/);
     await assert.rejects(follows.add(join(p.root, "src")).then(() => follows.add(p.root)), /overlaps/);
-    const roots = Array.from({ length: 8 }, () => mkdtempSync(join(tmpdir(), "dum-root-")));
+    const roots = Array.from({ length: 8 }, () => mkdtempSync(join(TMP, "dum-root-")));
     try {
       const many = new Follows(H, randomUUID());
       for (const r of roots) await many.add(r);
@@ -172,7 +174,7 @@ test("a folder that grows over the limits rests instead of being followed in par
 
 test("a followed folder replaced by a symlink stops being followed, and the record says so", async () => {
   const p = folder();
-  const away = mkdtempSync(join(tmpdir(), "dum-away-"));
+  const away = mkdtempSync(join(TMP, "dum-away-"));
   try {
     const zone = randomUUID();
     const follows = new Follows(H, zone);

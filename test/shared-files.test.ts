@@ -4,14 +4,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { SharedFiles, sha, unifiedDiff } from "../src/shared-files.ts";
 import { Follows } from "../src/follow.ts";
 import { SHARE_LIMITS, type RequestBinding } from "../src/share-types.ts";
 
-const H = mkdtempSync(join(tmpdir(), "dum-shares-home-"));
+// Resolved, so expected paths match what Dum reports where tmpdir is a symlink (macOS: /var → /private/var).
+const TMP = realpathSync(tmpdir());
+const H = mkdtempSync(join(TMP, "dum-shares-home-"));
 process.env.DUM_HOME = H;
 process.env.DUM_CONTEXT = "off";
 
@@ -19,8 +21,8 @@ const binding = (): RequestBinding => ({ zoneId: randomUUID(), zoneEpoch: "epoch
 
 /** A project folder with source, secrets, caches, a binary and an outside secret to leak. */
 function project() {
-  const root = mkdtempSync(join(tmpdir(), "dum-share-"));
-  const away = mkdtempSync(join(tmpdir(), "dum-away-"));
+  const root = mkdtempSync(join(TMP, "dum-share-"));
+  const away = mkdtempSync(join(TMP, "dum-away-"));
   const put = (rel: string, body: string | Buffer, base = root) => {
     mkdirSync(dirname(join(base, rel)), { recursive: true });
     writeFileSync(join(base, rel), body);
@@ -82,7 +84,7 @@ test("chosen roots are refused for home, its ancestors, system, private, credent
     await assert.rejects(shares.grant("/", "folder"), /whole disk/);
     await assert.rejects(shares.grant(homedir(), "folder"), /home directory/);
     await assert.rejects(shares.grant(dirname(homedir()), "folder"), /home directory/);
-    await assert.rejects(shares.grant("/proc/self/status", "file"), /system files/);
+    await assert.rejects(shares.grant("/etc/hosts", "file"), /system files/);
     await assert.rejects(shares.grant("src/main.py", "file"), /choose a file or folder/);
     await assert.rejects(shares.grant(join(p.root, ".env"), "file"), /hidden|credentials/);
     await assert.rejects(shares.grant(join(p.root, "id_ed25519"), "file"), /credentials/);
@@ -110,8 +112,8 @@ test("chosen roots are refused for home, its ancestors, system, private, credent
 });
 
 test("an over-limit folder is refused whole, not silently cut short", async () => {
-  const wide = mkdtempSync(join(tmpdir(), "dum-wide-"));
-  const deep = mkdtempSync(join(tmpdir(), "dum-deep-"));
+  const wide = mkdtempSync(join(TMP, "dum-wide-"));
+  const deep = mkdtempSync(join(TMP, "dum-deep-"));
   try {
     for (let i = 0; i <= SHARE_LIMITS.files; i++) writeFileSync(join(wide, `f${i}.txt`), "x\n");
     const shares = new SharedFiles(binding(), null);
@@ -124,7 +126,7 @@ test("an over-limit folder is refused whole, not silently cut short", async () =
     writeFileSync(join(dirname(nested), "ok.txt"), "x\n");
     const ok = await shares.grant(deep, "folder");
     assert.equal(ok.files.length, 1);
-    const roots = Array.from({ length: 8 }, () => mkdtempSync(join(tmpdir(), "dum-root-")));
+    const roots = Array.from({ length: 8 }, () => mkdtempSync(join(TMP, "dum-root-")));
     try {
       const many = new SharedFiles(binding(), null);
       for (const r of roots) await many.grant(r, "folder");
@@ -242,7 +244,7 @@ test("change targets: granted files hash, new names only under a folder, through
 
 test("one namespace: the zone's followed folders sit beside the request's shares", async () => {
   const p = project();
-  const followed = mkdtempSync(join(tmpdir(), "dum-followed-"));
+  const followed = mkdtempSync(join(TMP, "dum-followed-"));
   try {
     writeFileSync(join(followed, "notes.md"), "followed\n");
     const b = binding();
