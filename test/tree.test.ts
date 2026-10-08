@@ -26,6 +26,8 @@ test("an empty tree in a zone with no language shows every track's summary", () 
 test("the zone's language picks its track, by any spelling", () => {
   const text = treeText({ skills: [] }, "py");
   assert.ok(text.includes(python.skills[0]!.name));
+  assert.match(text, new RegExp(`next · :projects ${python.skills[0]!.name} in python`), "an open skill points at suggested projects");
+  assert.doesNotMatch(text, /:practice/);
   assert.doesNotMatch(text, /:tree <language> shows a track's skills/, "one track drawn, not the summary");
   assert.equal(treeText({ skills: [] }, "python"), text);
 });

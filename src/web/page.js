@@ -1,5 +1,5 @@
 // The skill tree page. Everything it draws comes from the server's view of the tree, and every
-// edit goes back through the same rules as `:skill` in the terminal.
+// edit goes back through the same rules as a skill edit in the app.
 "use strict";
 
 const id = location.pathname.split("/").filter(Boolean)[0] || "";
@@ -55,13 +55,13 @@ async function send(op, name, lang) {
 
 async function onSkill(node, track) {
   const label = track.lang ? `${node.name} (${track.lang})` : node.name;
-  if (node.state === "locked") return toast(`${label} needs ${node.needs.join(", ")} first${node.next ? `. Start with course ${node.next}${track.lang ? ` in ${track.lang}` : ""}` : ""}`);
+  if (node.state === "locked") return toast(`${label} needs ${node.needs.join(", ")} first${node.next ? `. Start with ${node.next}${track.lang ? ` in ${track.lang}` : ""}` : ""}`);
   if (node.state === "open") {
-    const ok = await confirmDialog(`Add ${label}?`, "Only add what you can write from a blank file, completely without AI. Otherwise take its course in dum: it's three minutes.", "Add it");
+    const ok = await confirmDialog(`Add ${label}?`, "Only add what you can write from a blank file, completely without AI. Otherwise build it first: dum suggests projects that fit it.", "Add it");
     if (ok) send("add", node.name, track.lang);
     return;
   }
-  const ok = await confirmDialog(`Take ${label} off?`, "dum will treat it as locked again: AI stops writing it, and it comes back by typing it or taking its course.", "Take it off");
+  const ok = await confirmDialog(`Take ${label} off?`, "dum will treat it as locked again: AI stops writing it, and it comes back when you show dum you can write it.", "Take it off");
   if (ok) send("remove", node.name, track.lang);
 }
 
@@ -94,7 +94,7 @@ function renderTrack(t) {
               n.name,
               n.state === "locked" && n.needs.length ? el("span", { class: "needs" }, `needs ${n.needs.join(", ")}`) : null,
               n.state === "recognized" ? el("span", { class: "needs" }, "recognized") : null,
-              n.next ? el("span", { class: "needs" }, `next: course ${n.next}${t.lang ? ` in ${t.lang}` : ""}`) : null,
+              n.next ? el("span", { class: "needs" }, `next: ${n.next}${t.lang ? ` in ${t.lang}` : ""}`) : null,
             ),
           ),
         ),
@@ -160,5 +160,5 @@ async function load() {
 }
 
 load();
-// Picks up what dum did in the terminal while the page was open.
+// Picks up what dum did in the app while the page was open.
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && load());

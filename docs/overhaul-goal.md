@@ -2,20 +2,25 @@
 
 ## Current intent
 
-- Keep the two characters in the corner. The interface should stay out of the user's way, like a desktop companion, not a tutoring dashboard.
-- The user builds independently. The wizard gives selective unprompted advice using the screen by default, with a toggle to saved project files and a visible pause control. Screen access remains subject to OS permission. No passive audio capture or keystroke watching.
-- When the user is satisfied, they tell dum the story of what they built and why. Dum remembers reasoning; a story alone isn't unaided build evidence.
-- Dum's implementation capability follows the user's unlocked skill tree, including core algorithms. Anti-vibe accepts an approach already supplied rather than asking for it again.
-- Project recommendations use project memory and configured personal context. Show estimated duration and difficulty, with substantial projects spanning several ordered skill milestones for experienced programmers learning a new language.
-- Keep prerequisites, language scope, explicit unaided evidence, editor-safe proposals, and independent workspace permissions.
-- Feynman Slides is not a visual reference. The user named heyclicky as the desktop-companion reference and explicitly requested default screen-aware advice; don't copy its branding or imply unrelated capabilities.
-- Keep typing on demand and deliberate local voice dictation through bundled OpenSuperWhisper on supported Macs. A transcript fills a draft; it never sends automatically. Disclose native permissions, local audio retention, and the screen wizard's independent view of visible drafts.
+[architecture.md](architecture.md) holds the binding rules and glossary. Where this file disagrees with it, architecture.md wins.
+
+- Dum is an always-on Mac app in the menu bar, with no Dock icon and no command-line version. A hotkey command bar handles keyboard work, a click-through bubble near the cursor shows voice and replies, and a full panel holds zones, skills, history and settings. The interface stays out of the user's way; it isn't a tutoring dashboard.
+- Zones are the only scope: a tree of things the user is learning. Dum is never tied to a Git repository.
+- Dum is always on. It looks every 3 seconds, at the front app, how much the screen changed and saved files in followed folders, and calls a model only when something changed. Screen look is on by default on a fresh install; first launch asks for Screen Recording, and if that's denied the look runs on app switches and code saves only. Pausing is one click. No passive audio capture or keystroke watching.
+- The user builds independently. When they're satisfied, they tell Dum what they built and why. Dum remembers reasoning; a story alone isn't unaided build evidence.
+- Dum's implementation capability follows the user's unlocked skill tree, including core algorithms. On command, when the user holds the skills, Dum writes the change directly, shows the diff after and offers one-click revert. The user's editor is a writer Dum tolerates: Dum writes a file only if it hasn't changed since Dum read it. Anti-vibe accepts an approach already supplied rather than asking for it again.
+- Practice means suggested projects that fit a skill's scope, using the zone's memory and configured personal context. Show estimated duration and difficulty, with substantial projects spanning several ordered skill milestones. No guided practice.
+- Keep prerequisites, language scope, explicit unaided evidence, and file access that is separate from skill evidence.
+- Feynman Slides is not a visual reference. The user named heyclicky as the reference for screen-aware desktop help and explicitly requested default screen-aware advice; don't copy its branding or imply unrelated capabilities.
+- Voice and keyboard are both first-class. Voice is push-to-talk through bundled OpenSuperWhisper on supported Macs, transcribed locally into the draft; it never sends automatically. Everything works from the keyboard without the mouse. Disclose native permissions and that the look can see a visible draft.
+- Dum and the Wizard stay as two distinct voices, with their portraits in the panel and the bubble.
+- The user picks the backend and model: Claude, models on their own Mac, and ChatGPT once its release gate is met. Public builds follow each provider's rules: Claude connects with the user's own API key, never subscription sign-in. Subscription sign-in is for local builds only.
 - Show a thin bright skill-backed progress strip with newbie → intern → good → cracked, without treating conversation volume as evidence.
 - Public-site behavior and routes are described in [README.md](../README.md). Non-coding subjects are an exploration of projects and evidence, not a claimed validated assessment system.
 
 ## Historical overhaul brief
 
-The brief below records the earlier teaching-first direction. Where it conflicts with the current intent above, the current intent wins.
+The brief below records the earlier teaching-first direction, from when Dum was a terminal tool. Where it conflicts with the current intent above, the current intent wins.
 
 Overhaul dum-intern in /home/ryanhubbart/code2/dum-intern into a simple terminal coding partner that helps Ryan learn by teaching an AI intern while building real software. Implement and verify the complete experience, not just a plan or scaffold.
 
@@ -87,7 +92,7 @@ Claude is the heavy lifter. Prefer anthropic/claude-opus-5-5:high for substantia
 
 The main coordinator is openai-codex/gpt-6.1-sol at high effort. Bounce substantive designs and findings between Claude and Codex: Claude develops and implements; Codex examines assumptions, resolves disagreements, owns integration, and gets the final say on technical choices and acceptance. Codex cannot override Ryan's stated product intent. Record a short decision and evidence when rejecting a Claude proposal. Do not spend turns manufacturing debates over trivial changes.
 
-These are development orchestration preferences. For the shipped app, preserve working Claude subscription support. Add or migrate Codex runtime support only where the chosen complete design needs it; never introduce Gemini support or require paid API keys.
+These are development orchestration preferences. For the shipped app, the subscription-only and no-API-key lines in this section are superseded by rules 11 and 12 in [architecture.md](architecture.md): the user picks the backend and model, public builds connect Claude with the user's own API key and never offer subscription sign-in, and subscription sign-in is for local builds only. Never introduce Gemini support.
 
 ## Execution and acceptance
 

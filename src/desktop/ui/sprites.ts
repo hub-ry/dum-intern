@@ -1,4 +1,4 @@
-// Dum and the wizard, drawn from the same art files the terminal uses.
+// Dum and the wizard, drawn from the art files the app icon is made from too.
 
 import internArt from "../../art/intern.txt";
 import wizardArt from "../../art/wizard.txt";

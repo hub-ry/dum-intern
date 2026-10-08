@@ -222,6 +222,14 @@ if (process.env.DUM_FAKE_HOST === "1") {
     const refused = await host.call({ op: "send", binding: binding(opened), text: "hello", shares: [] });
     assert.equal(refused.ok, false);
     assert.match(refused.error!, /Choose who powers Dum/);
+
+    // Typed commands that call no model work unpowered too; the ones that do are refused.
+    const help = await host.call({ op: "send", binding: binding(opened), text: ":help", shares: [] });
+    assert.equal(help.ok, true, help.error);
+    const shown = await host.until((s) => s.state?.stage.kind === "info" && /:projects/.test(s.state.stage.body) && s.canAttach);
+    const projects = await host.call({ op: "send", binding: binding(shown), text: ":projects recursion", shares: [] });
+    assert.equal(projects.ok, false);
+    assert.match(projects.error!, /Choose who powers Dum/);
   }));
 
   test("only the selected backend runs, a shared picture is looked at once by the helper, and stale bindings are refused", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
@@ -327,6 +335,27 @@ if (process.env.DUM_FAKE_HOST === "1") {
     // A tick from another epoch is blocked: the look says it's paused and asks nothing.
     await host.ok({ op: "observe-tick", tick: { zoneId: z.id, epoch: randomUUID(), at: Date.now(), app: null, screen: null } });
     await host.until((e) => /paused/.test(e.look.status));
+  }));
+
+  test("with no backend the look still notices followed-file changes, says advice needs a backend, and calls nothing", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const work = join(f.dir, "work");
+    mkdirSync(work);
+    writeFileSync(join(work, "counter.py"), "count = 0\n");
+    const host = launch();
+    await host.start(f, null);
+    const z = await host.zone("Loops", null);
+    await host.ready(z.id);
+    await host.ok({ op: "follow-add", path: work });
+    writeFileSync(join(work, "counter.py"), "count = 0\nfor i in range(3):\n    count += i\n");
+    const s = await host.until((e) => e.follows.length === 1);
+    for (let i = 0; i < 4; i++) {
+      await host.ok({ op: "observe-tick", tick: { zoneId: z.id, epoch: s.zoneEpoch, at: Date.now(), app: null, screen: null } });
+    }
+    const seen = await host.until((e) => /1 changed file noticed/.test(e.look.status));
+    assert.match(seen.look.status, /^watching \(1 followed folder, 1 changed file noticed\) - advice needs a backend/);
+    assert.equal(host.events.some((e) => e.type === "frame-request"), false, "no frame was asked for");
+    const memory = join(f.home, "zones", z.id, "memory.md");
+    assert.ok(!existsSync(memory) || !readFileSync(memory, "utf8").includes(NOTE), "no helper call wrote a note");
   }));
 
   test("a permitted change is written directly with its diff, and revert puts the file back", { timeout: 60_000 }, () => withHosts(async (f, launch) => {

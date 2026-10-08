@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>other subjects — dum intern</title>
-  <meta name="description" content="Using dum outside coding: what works now, what the current gates are, and concrete examples for math, music, and history.">
+  <meta name="description" content="Using Dum outside coding: zones for any subject, what carries over today, what's still built for programming, and examples for math, music, and history.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -16,134 +16,129 @@
 <main>
   <h1>Other subjects</h1>
 
-  <p>Dum's conversation isn't limited to code. The skill tree and evidence system
-     are built around programming, but the conversation itself can be about anything
-     you're genuinely working on — a proof, a composition, a research paper.</p>
+  <p>A zone is whatever you're learning, so it doesn't have to be code. Make one called
+     <code>Math › Real analysis</code> or <code>Music › Arranging</code>, write its goal in your
+     own words, and Dum keeps that zone's conversation, memory and notes apart from the rest.
+     The skill tree and evidence are still built around programming.</p>
 
-  <p>We're exploring subject-specific skill trees and evidence. These examples describe
-     that direction, not a shipped assessment system for every subject.</p>
+  <p>We're exploring subject-specific skill trees and evidence. The examples below describe what
+     works today and where that could go, not a finished assessment system for every subject.</p>
 
-  <h2>What can carry over</h2>
+  <h2>What carries over</h2>
 
-  <p><strong>Conversation</strong> can discuss a proof, a score, or a historical source.
-     The current prompts and verified-source catalog are programming-oriented;
-     a plausible answer isn't a subject-specific assessment.</p>
+  <p><strong>Zones.</strong> Nest them the way the subject splits, like <code>History</code> ›
+     <code>Reconstruction</code> › <code>Primary sources</code>. A zone's goal and
+     <em>Notes for this zone</em> reach the zones inside it, so background you write once applies
+     to the whole branch.</p>
 
-  <p><strong>Project memory</strong> (<code>:remember</code>) persists across sessions
-     regardless of subject. You can use it to record decisions, open questions,
-     and context for any kind of project.</p>
+  <p><strong>Conversation.</strong> Dum can discuss a proof, a score or a historical source.
+     The prompts and the Wizard's source catalog are programming-oriented, and a plausible answer
+     isn't a subject-specific assessment.</p>
 
-  <p><strong>Sharing work</strong>: <code>:inspect path/to/file</code> shares a bounded
-     excerpt from project text files, such as LaTeX, LilyPond, or an essay draft.
-     <code>:changes</code> shares saved changes. The screen-aware wizard can see a
-     diagram or application view while screen advice is enabled.</p>
+  <p><strong>Memory.</strong> <code>:remember</code> keeps a note in the zone's memory, and it comes
+     back next time you're in that zone. Use it for decisions, open questions and what you've
+     already tried.</p>
 
-  <h2>What's coding-oriented right now</h2>
+  <p><strong>Your files.</strong> Share a LaTeX file, a LilyPond score or an essay draft with your
+     message, or follow its folder in the zone, and Dum can read it. <code>:inspect</code> shows
+     Dum part of a file you shared or follow. When you save in a followed folder, the Wizard may
+     comment on what changed.</p>
 
-  <p>The skill tree (<code>:tree</code>, <code>:skills</code>), the three evidence levels
-     (recognize / build / apply), and <code>:submit</code> are built for programming.
-     They track concepts and tools in specific languages. Subject-specific assessment
-     outside code is not implemented.</p>
+  <p><strong>The screen.</strong> With the screen look on, the Wizard sometimes gets a frame of your
+     screen when you switch apps or when the screen goes still after a burst of activity, so it can see a diagram, a score or
+     a scanned page. You can also send a screenshot of a window on purpose.</p>
 
-  <p>The generic evidence machinery can store custom skills, but there aren't curated
-     math, music, or history tracks or validated assessment standards for them.
-     A custom note doesn't establish that a proof, performance, or historical claim is sound.</p>
+  <h2>What's still built for code</h2>
 
-  <p>For each subject, the question is what independent work would demonstrate a skill,
-     how prerequisites fit together, and which sources make a review checkable.
-     Memory should shape substantial projects, not turn every topic into a short quiz.</p>
+  <p>The curated tracks are programming: language basics, plus graphics, interview, systems and a
+     builder track. The three evidence levels (recognize, build, apply) and project hand-ins were
+     designed for code.</p>
 
-  <hr class="section-divider">
+  <p>You can add custom skills, but there are no curated math, music or history tracks and no
+     validated standards for them. A skill note doesn't establish that a proof, a performance or a
+     historical claim is sound.</p>
+
+  <p>For each subject the open questions are what independent work would demonstrate a skill, how
+     prerequisites fit together, and which sources make a review checkable. Suggested projects
+     should stay substantial rather than turning every topic into a short quiz.</p>
 
   <h2>Mathematics</h2>
 
-  <p>Working through a proof, a problem set, or a research document? Dum can discuss
-     approaches, follow reasoning steps, and remember context across sessions.
-     The wizard can point out a gap in an argument — its judgment can be wrong,
-     so check its reasoning.</p>
+  <p>Working through a proof, a problem set or a paper? Dum can discuss approaches, follow the
+     steps of an argument, and remember context across sessions in the zone. The Wizard can point
+     out a gap in an argument. Its judgment can be wrong, so check its reasoning.</p>
 
   <h3>What it looks like</h3>
   <ul>
-    <li>Share a LaTeX excerpt with <code>:inspect</code>; ask about a specific step
-        or ask dum to follow the argument.</li>
-    <li>Describe the structure of a proof; get wizard feedback on whether
-        the cases look complete.</li>
-    <li>Record which approaches you've tried in project memory so dum doesn't
-        repeat suggestions you've already ruled out.</li>
-    <li>Share a plot or diagram with screen sharing and ask what dum sees.</li>
+    <li>Follow the folder with your LaTeX source; ask about a specific step, or ask Dum to follow
+        the argument.</li>
+    <li>Describe the structure of a proof and get feedback on whether the cases look
+        complete.</li>
+    <li>Keep the approaches you've ruled out in the zone's memory so Dum doesn't suggest them
+        again.</li>
+    <li>Send a screenshot of a plot or diagram and ask what Dum sees.</li>
   </ul>
 
   <h3>Current limits</h3>
-  <p>There's no curated math track or proof checker. A useful direction is a proof notebook
-     that spans several techniques: completed proofs and counterexamples would be evidence,
-     not a confident explanation alone.</p>
-
-  <hr class="section-divider">
+  <p>There's no curated math track and no proof checker. A useful direction is a proof notebook
+     that spans several techniques, where completed proofs and counterexamples would be the
+     evidence, not a confident explanation alone.</p>
 
   <h2>Music</h2>
 
-  <p>Composing, arranging, transcribing, or analyzing? Dum can discuss theory
-     questions, arrangement choices, and structural decisions. Share notation in a
-     text format and ask specific questions about it.</p>
+  <p>Composing, arranging, transcribing or analyzing? Dum can discuss theory questions,
+     arrangement choices and structure. Share notation in a text format and ask about it.</p>
 
   <h3>What it looks like</h3>
   <ul>
-    <li>Share LilyPond, ABC notation, or a plain-text lead sheet with
-        <code>:inspect</code>; discuss a specific bar or harmonic move.</li>
-    <li>Describe what you're trying to achieve; ask about common approaches
-        in that style or period.</li>
-    <li>Record compositional decisions in project memory — why you chose
-        a particular form, what you've ruled out and why.</li>
-    <li>Use screen sharing to show a score or DAW view and ask for observations.</li>
+    <li>Share LilyPond, ABC or a plain-text lead sheet; discuss a specific bar or harmonic
+        move.</li>
+    <li>Describe what you're going for and ask about common approaches in that style or
+        period.</li>
+    <li>Keep compositional decisions in the zone's memory: why you chose a form, what you ruled
+        out and why.</li>
+    <li>Send a screenshot of a score or DAW view and ask for observations.</li>
   </ul>
 
   <h3>Current limits</h3>
-  <p>There's no dedicated score or performance assessment. A candidate project is an
-     arrangement with an annotated score and recorded performance, with separate evidence
-     for harmony, voice leading, and interpretation. Current text and screen advice
-     cannot verify a performance or replace a musician's review.</p>
-
-  <hr class="section-divider">
+  <p>There's no score or performance assessment. A candidate project is an arrangement with an
+     annotated score and a recorded performance, with separate evidence for harmony, voice leading
+     and interpretation. Text and screen advice can't verify a performance or replace a
+     musician's ear.</p>
 
   <h2>History and research</h2>
 
-  <p>Writing a research paper, analyzing primary sources, or building a historical
-     argument? Dum can discuss interpretations, source context, and essay structure.
-     Project memory makes it useful across multiple sessions on the same topic.</p>
+  <p>Writing a research paper, reading primary sources, or building a historical argument? Dum can
+     discuss interpretations, source context and essay structure, and the zone's memory keeps it
+     useful across many sessions on one topic.</p>
 
   <h3>What it looks like</h3>
   <ul>
-    <li>Share a draft paragraph with <code>:inspect</code>; ask about clarity
-        or argument structure.</li>
-    <li>Describe a source; discuss its likely provenance, limitations, and
-        how to read it critically.</li>
-    <li>Record research threads, working hypotheses, and sources you've
-        already checked in project memory.</li>
-    <li>Use screen sharing to show an archival image or a dense passage
-        and ask dum to describe what it sees.</li>
+    <li>Share a draft paragraph; ask about clarity or the structure of the argument.</li>
+    <li>Describe a source; discuss its likely provenance, its limits and how to read it
+        critically.</li>
+    <li>Keep research threads, working hypotheses and sources you've already checked in the
+        zone's memory.</li>
+    <li>Send a screenshot of an archival image or a dense passage and ask Dum to describe what it
+        sees.</li>
   </ul>
 
   <h3>Current limits</h3>
-  <p>There's no scholarly-source verification system or curated history track.
-     A substantial direction is a sourced essay or small critical edition: primary-source
-     comparisons, traceable citations, and argued interpretations would be separate evidence.
-     Verify dates and provenance yourself; a model's agreement isn't historical proof.</p>
+  <p>There's no scholarly-source verification and no curated history track. A substantial
+     direction is a sourced essay or a small critical edition, where primary-source comparisons,
+     traceable citations and argued interpretations would each be separate evidence. Check dates
+     and provenance yourself; a model agreeing with you isn't historical proof.</p>
 
-  <hr class="section-divider">
+  <h2>The look and voice</h2>
 
-  <h2>Input and sending</h2>
+  <p><strong>The look</strong> is on by default. Every 3 seconds Dum checks which app is in front,
+     how much the screen changed and whether files in followed folders were saved, and it calls a
+     model only when something changed. You can pause it from the menu bar or turn the screen part
+     off in Settings. See <a href="/docs#look">the look</a>.</p>
 
-  <p><strong>Wizard screen advice</strong> is the default source while advice is enabled.
-     It samples the screen for unprompted advice, subject to OS permission. You can pause it
-     or switch to saved project files. This is separate from manually previewing and
-     sending a screenshot with a message.</p>
-
-  <p><strong>Voice dictation</strong> is deliberate input. You initiate recording,
-     review the transcript, and decide when to send the message. It isn't an auto-send channel.
-     If screen advice is enabled, its independent screenshots may include visible drafts.</p>
-
-  <p>The two paths are independent. Screen sampling doesn't record audio.
-     Voice dictation doesn't capture the screen.</p>
+  <p><strong>Voice</strong> is deliberate. You hold the talk shortcut, and the words go into your
+     draft on your Mac. Nothing is sent until you send it. The look pauses while you're
+     recording.</p>
 
 </main>
 

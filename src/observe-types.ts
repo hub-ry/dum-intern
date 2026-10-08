@@ -27,8 +27,12 @@ export const LOOK = {
   grid: [64, 40],
   /** Mean level change that marks a cell changed. */
   levelDelta: 8,
-  /** Width of a frame sent to the helper. */
+  /** Width of the activity thumbnail that is reduced to the grid; never sent anywhere. */
   thumbWidth: 320,
+  /** Width of a frame sent to the helper: wide enough to read code on screen. */
+  frameWidth: 1280,
+  /** Largest frame PNG sent to the helper; within look.ts's MAX_IMAGE_BYTES. A bigger one is not sent. */
+  frameBytes: 3_750_000,
 } as const;
 
 /** Defaults on a fresh install: apps and screen on (rule 8). */

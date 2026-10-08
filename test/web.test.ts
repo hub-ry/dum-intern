@@ -1,15 +1,16 @@
 // The web copy of a tree: merging two copies, the edits a page may make, the server, and the
-// terminal's client against a real server on a free port.
+// app's client against a real server on a free port.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { merge, edit, same, type Snapshot } from "../src/sync.ts";
 import { createServer } from "../src/web/server.ts";
 import { view } from "../src/web/view.ts";
 import { unlock, read, write, remove, removed, id, type Skill } from "../src/skills.ts";
+import * as web from "../src/web.ts";
 
 const sk = (name: string, lang: string, at: string, level: Skill["level"] = "build"): Skill => ({ name, lang, how: "typed", level, requires: [], why: "", at });
 
@@ -24,7 +25,7 @@ test("the newest word on each skill wins, a removal included", () => {
   assert.equal(tie.skills[0]!.level, "build", "a tie keeps the higher level");
 });
 
-test("a page edit follows the terminal's rules: above its prerequisites, and anything comes off", () => {
+test("a page edit follows the app's rules: above its prerequisites, and anything comes off", () => {
   const now = new Date("2026-10-03T00:00:00Z");
   let snap: Snapshot = { skills: [sk("printing", "python", "2026-01-01")], removed: {} };
   assert.deepEqual(edit(snap, { op: "add", name: "recursion", lang: "python" }), { refused: "recursion (python) builds on return values, conditionals - add those first" });
@@ -156,14 +157,13 @@ test("public docs serve typed assets without making private trees cacheable or e
   } finally { await s.close(); }
 });
 
-test("the terminal links, pulls a page edit, pushes its own, and takes the copy down", async () => {
+test("the app links, pulls a page edit, pushes its own, and takes the copy down", async () => {
   const s = await server();
   const was = process.env.DUM_HOME;
   process.env.DUM_HOME = mkdtempSync(`${tmpdir()}/dum-web-home-`);
-  const web = await import("../src/web.ts");
   try {
     write(unlock({ skills: [] }, { name: "printing", lang: "python", how: "typed", why: "" }));
-    assert.deepEqual(await web.syncNow(), { ok: false, why: "not linked - dum --web <server> makes a link" });
+    assert.deepEqual(await web.syncNow(), { ok: false, why: "not linked - link a web tree in Settings first" });
     const url = await web.link(s.base);
     assert.match(url, new RegExp(`^${s.base}/[0-9a-f-]{36}$`));
     const api = `${s.base}/api/trees/${web.config()!.id}`;
@@ -185,6 +185,28 @@ test("the terminal links, pulls a page edit, pushes its own, and takes the copy 
     assert.equal(web.config(), null);
     assert.equal((await fetch(fresh.replace(/\/([^/]+)$/, "/api/trees/$1"))).status, 404);
     assert.ok(existsSync(`${process.env.DUM_HOME}/skills`), "the tree here is untouched");
+  } finally {
+    process.env.DUM_HOME = was;
+    await s.close();
+  }
+});
+
+test("a pulled tree that can't be saved here is reported as that, and nothing is pushed", async () => {
+  const s = await server();
+  const was = process.env.DUM_HOME;
+  const home = mkdtempSync(`${tmpdir()}/dum-web-home-`);
+  process.env.DUM_HOME = home;
+  try {
+    await web.link(s.base);
+    const api = `${s.base}/api/trees/${web.config()!.id}`;
+    await fetch(`${api}/edit`, { method: "POST", body: JSON.stringify({ op: "add", name: "printing", lang: "python" }) });
+    const before = await (await fetch(api)).json();
+    // A file where the skills folder goes: every note write fails.
+    writeFileSync(`${home}/skills`, "");
+    const result = await web.syncNow();
+    assert.equal(result.ok, false);
+    assert.match(!result.ok ? result.why : "", /^couldn't save the synced tree here: /);
+    assert.deepEqual(await (await fetch(api)).json(), before, "nothing went up");
   } finally {
     process.env.DUM_HOME = was;
     await s.close();

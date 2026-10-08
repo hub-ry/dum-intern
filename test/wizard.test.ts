@@ -253,6 +253,7 @@ test("while a suggested project is being built a look may note but publishes no 
     const engine = new Ambient({
       now: () => now,
       blocked: () => false,
+      advised: () => true,
       scan: async () => (now === 0 ? [{ path: look().files[0]!.path, kind: "saved", sha: "a".repeat(64) }] : []),
       diff: async (paths) => paths.map((path) => ({ path, diff: look().files[0]!.diff })),
       frame: async () => null,

@@ -35,9 +35,6 @@ export const MAX_ENTRIES = ZONE_LIMITS.transcriptEntries;
 /** How much of one shared excerpt or diff the agent's memory carries forward. */
 const RECALL_CHARS = 1200;
 
-/** The zone's conversation files, moved aside together by `fresh`. Changes stay: they are the record of what was written. */
-const SESSION_FILES = ["transcript.json", "memory.md", "practice.json"];
-
 /** What `attach` needs from the conversation store. */
 export type Transcribed = {
   getSnapshot(): { transcript: Entry[] };
@@ -174,14 +171,5 @@ END ZONE MEMORY`;
 
 export function describe(home: string, zoneId: ZoneId): string {
   const markdown = notes(home, zoneId);
-  return `${join(home, record(zoneId, "memory.md"))}\n\n${markdown || "no notes yet. :remember <note> saves one."}\n\nThis zone's conversation is saved in ${join(home, record(zoneId, "transcript.json"))}.\nEdit memory.md to correct or remove a note. Starting fresh moves this zone's conversation aside.`;
-}
-
-/** Start this zone's conversation fresh: its session files move aside, nothing is deleted. */
-export function fresh(home: string, zoneId: ZoneId): void {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  for (const name of SESSION_FILES) {
-    try { renameSync(statePath(home, record(zoneId, name)), statePath(home, record(zoneId, `${name}.old-${stamp}`))); }
-    catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
-  }
+  return `${join(home, record(zoneId, "memory.md"))}\n\n${markdown || "no notes yet. :remember <note> saves one."}\n\nThis zone's conversation is saved in ${join(home, record(zoneId, "transcript.json"))}.\nEdit memory.md to correct or remove a note.`;
 }

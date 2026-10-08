@@ -41,12 +41,26 @@ const PATCH_BYTES = 1024 * 1024;
 const MORE = "the full patch is kept with the change";
 const NO_PERSONAL: context.Context = { path: "", text: "", warning: "" };
 
-const LOOK_STATUS: Record<AmbientStatus, string> = {
+const LOOK_STATUS: Record<Exclude<AmbientStatus, "unadvised">, string> = {
   watching: "watching for changes",
   checking: "taking a look",
   blocked: "paused while dum is busy or waiting on you",
   failed: "the last look didn't work - it tries again on the next change",
 };
+
+/** The commands that call a model; every other command, and the panels, work before any backend is chosen. */
+const MODEL_COMMANDS: Record<string, true> = { projects: true, submit: true };
+
+/** The look in words. Without a backend it still watches, says what it has noticed, and calls nothing. */
+function lookText(live: Live): string {
+  if (live.look !== "unadvised") return LOOK_STATUS[live.look];
+  const folders = live.follows.list().length;
+  const files = live.signals.size;
+  const noticed = folders
+    ? `${folders} followed folder${folders === 1 ? "" : "s"}, ${files} changed file${files === 1 ? "" : "s"} noticed`
+    : "no folder followed yet";
+  return `watching (${noticed}) - advice needs a backend: choose one in Who powers Dum?`;
+}
 
 /** What the host builds its backends from; main never sees these. */
 export type BackendFactory = (o: { flavor: Flavor; claudeExecutable: string | null; credential: CredentialSource }) => AgentBackend[];
@@ -97,7 +111,7 @@ type Live = {
   changes: ChangeReceipt[];
   /** Followed-file signals since the last diff, latest per path. */
   signals: Map<ResourcePath, FileSignal>;
-  look: string;
+  look: AmbientStatus;
   /** Token for "no prompt is taking input": never accepted by a prompt. */
   idle: string;
 };
@@ -345,9 +359,11 @@ export class DesktopController {
       return;
     }
     if (live.running) throw new Error("wait for dum to finish, or Stop it - nothing was sent");
-    if (init.agentError) throw new Error(init.agentError);
-    init.registry.chosen();
     const cmd = parseCommand(line);
+    if (!cmd || Object.hasOwn(MODEL_COMMANDS, cmd.name)) {
+      if (init.agentError) throw new Error(init.agentError);
+      init.registry.chosen();
+    }
     if (cmd && image) throw new Error("a picture goes with a request, not a command - nothing was sent");
     const files = this.claim(live, binding, shares);
     if (cmd) {
@@ -389,7 +405,7 @@ export class DesktopController {
     const init = this.ready();
     const live = this.bound(binding);
     if (live.store.getSnapshot().prompt?.type !== "next" || live.running) throw new Error("finish what dum is doing first, or Stop it");
-    if (name !== "remember") {
+    if (Object.hasOwn(MODEL_COMMANDS, name)) {
       if (init.agentError) throw new Error(init.agentError);
       init.registry.chosen();
     }
@@ -803,7 +819,7 @@ export class DesktopController {
     const live: Live = {
       zone, epoch: randomUUID(), store, follows, ambient: null as unknown as Ambient, stop: new AbortController(),
       detach: () => { unsubscribe(); stopMemory(); }, done: Promise.resolve(), pending: null, running: null, next: null,
-      changes: [], signals: new Map(), look: LOOK_STATUS.watching, idle: randomUUID(),
+      changes: [], signals: new Map(), look: "watching", idle: randomUUID(),
     };
     live.ambient = this.ambient(init, live);
     this.refreshChanges(init, live);
@@ -825,15 +841,21 @@ export class DesktopController {
     return new Ambient({
       now: Date.now,
       blocked: (t) => {
-        if (!mine() || t.zoneId !== live.zone.id || t.epoch !== live.epoch || init.agentError) return true;
-        try { init.registry.chosen(); } catch { return true; }
+        if (!mine() || t.zoneId !== live.zone.id || t.epoch !== live.epoch) return true;
         const s = live.store.getSnapshot();
         return !!live.running || s.busy || s.prompt?.type !== "next" || !live.store.canAttach;
+      },
+      advised: () => {
+        if (init.agentError) return false;
+        try { init.registry.chosen(); } catch { return false; }
+        return true;
       },
       scan: async () => {
         if (!mine()) return [];
         const signals = await live.follows.scan();
         for (const s of signals) live.signals.set(s.path, s);
+        // The follow list and what the look has noticed both just changed.
+        if (signals.length) this.changed();
         return signals;
       },
       diff: async (paths) => {
@@ -867,7 +889,7 @@ export class DesktopController {
         if (result.aside) live.store.quip(result.aside);
       },
       status: (status) => {
-        live.look = LOOK_STATUS[status];
+        live.look = status;
         if (mine()) this.changed();
       },
     });
@@ -942,7 +964,7 @@ export class DesktopController {
         shares: live ? (live.running?.files ?? live.pending)?.grants().filter((g) => g.scope === "request") ?? [] : [],
         follows: live?.follows.list() ?? [],
         changes: live?.changes ?? [],
-        look: { status: live ? live.look : "enter a zone for the look" },
+        look: { status: live ? lookText(live) : "enter a zone for the look" },
       });
     });
   }

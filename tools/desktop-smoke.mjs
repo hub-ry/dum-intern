@@ -4,9 +4,9 @@
 // the focused window and answers the native folder picker; a private D-Bus session with a minimal
 // StatusNotifierWatcher receives the tray icon. Screenshots and report.json go to DUM_SMOKE_OUTPUT.
 //
-// Development run (default): the checkout's `dist/` as built, then the same compiled output staged with
-// build-info.json set to "public" (the only thing `--flavor public` changes). DUM_SMOKE_EXECUTABLE runs a
-// packaged binary instead, in whatever flavor it was built.
+// Development run (default): the checkout's `dist/` as built; after a local build, the same compiled
+// output again staged with build-info.json set to "public" (the only thing `--flavor public` changes).
+// DUM_SMOKE_EXECUTABLE runs a packaged binary instead, in whatever flavor it was built.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -460,7 +460,7 @@ async function launch(dirs, appDir) {
     NO_AT_BRIDGE: '1',
   };
   for (const key of Object.keys(env)) if (/(?:API_KEY|TOKEN|PASSWORD|SECRET)|^(?:ANTHROPIC_|OPENAI_|GOOGLE_|GEMINI_|VERTEX_|ANTIGRAVITY_|CLAUDE_CODE_|OLLAMA_)/i.test(key)) delete env[key];
-  for (const key of ['DUM_CLAUDE_BIN', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR']) delete env[key];
+  for (const key of ['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR']) delete env[key];
   if (bus) env.DBUS_SESSION_BUS_ADDRESS = bus.address;
   const executable = packaged ?? (await import('electron')).default;
   // A packaged app has Node's inspector fused off; the checkout's main process is counted through it.
@@ -896,11 +896,13 @@ async function lookAndFollow(dirs) {
     assert.equal(n.frames, 0, `${n.frames} frames were produced for the host`);
     return `${n.ticks} look ticks, ${n.frames} frames; statuses: ${seen.join(' | ')}`;
   });
-  await step('the look status shows the followed-folder FileSignal', async () => {
+  await step('the look status shows the followed-folder FileSignal and that advice needs a backend', async () => {
     const seen = [...statuses];
     assert.ok(after, 'no FileSignal was observed');
-    const reacted = seen.filter((v) => v !== LOOK_BLOCKED && v !== 'watching for changes' && !v.startsWith('enter a zone'));
-    assert.ok(reacted.length > 0, `look status never changed for the saved files; it showed only: ${seen.map((v) => `"${v}"`).join(', ')}`);
+    const noticed = seen.filter((v) => /\b[1-9]\d* changed files? noticed\b/.test(v) && /advice needs a backend/.test(v));
+    assert.ok(noticed.length > 0, `look status never told of the saved files: ${seen.map((v) => `"${v}"`).join(', ')}`);
+    assert.ok(!seen.includes(LOOK_BLOCKED), 'with no backend and nothing running, the look never claimed to be paused');
+    return noticed.at(-1);
   });
   sampling = false;
   await sampler;
@@ -914,6 +916,20 @@ async function lookAndFollow(dirs) {
     await panel.evaluate(() => document.querySelector('#look-title')?.scrollIntoView());
     await shoot(panel, `${current}-look-status.png`);
     return `"${status}"`;
+  });
+  await step('Settings › Web tree: link, sync, new link and unlink are there; Sync now before a link says so', async () => {
+    const labels = await panel.$$eval('[aria-labelledby=web-title] button', (bs) => bs.map((b) => b.textContent.trim()));
+    for (const label of ['Link', 'Sync now', 'New link', 'Unlink']) assert.ok(labels.includes(label), `no ${label} button: ${labels.join(', ')}`);
+    assert.ok(await panel.$('[aria-labelledby=web-title] input[aria-label=Server]'), 'no Server field');
+    await panel.focus('[aria-labelledby=web-title] input[aria-label=Server]');
+    await panel.keyboard.press('Tab');
+    await panel.keyboard.press('Tab');
+    assert.equal(await panel.evaluate(() => document.activeElement?.textContent?.trim()), 'Sync now', 'Sync now is reached by Tab');
+    await panel.keyboard.press('Enter');
+    await panel.waitForFunction(() => /not linked - link a web tree in Settings first/.test(document.querySelector('.errors')?.textContent ?? ''), { timeout: 10_000 });
+    await panel.evaluate(() => document.querySelector('#web-title')?.scrollIntoView());
+    await shoot(panel, `${current}-web-tree.png`);
+    return 'refused: not linked';
   });
 }
 
@@ -1060,7 +1076,12 @@ try {
   });
   await stop();
 
-  if (!packaged) {
+  if (packaged) {
+    limits.push(`packaged run covers only its own ${flavor} flavor`);
+  } else if (primaryFlavor === 'public') {
+    // The checkout is already a public build: the whole journey above ran public, so no staged copy.
+    limits.push('the checkout is a public build: the local flavor was not exercised in this run');
+  } else {
     current = 'public';
     const publicApp = await stagePublic();
     const publicDirs = await install('public');
@@ -1068,8 +1089,6 @@ try {
     await firstRun(publicDirs, 'public');
     await whoPowersDum('public');
     await stop();
-  } else {
-    limits.push(`packaged run covers only its own ${flavor} flavor`);
   }
 } catch (error) {
   record('run', false, error?.stack ?? error);
@@ -1077,7 +1096,13 @@ try {
   if (active) {
     diagnostic = active.diagnostic().slice(-4000);
     active.child.kill();
-    await active.exit;
+    // A run that failed mid-way still has to report: an app that ignores SIGTERM is killed.
+    const exited = await Promise.race([active.exit.then(() => true), delay(15_000).then(() => false)]);
+    if (!exited) {
+      limits.push('the desktop ignored SIGTERM at the end of the run and was killed');
+      active.child.kill('SIGKILL');
+      await active.exit;
+    }
     active.browser.disconnect();
     active = null;
   }

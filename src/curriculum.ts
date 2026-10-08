@@ -1,11 +1,11 @@
-// The curated skill tracks, and the rule they exist for: no course before its prerequisites.
+// The curated skill tracks, and the rule they exist for: no skill before its prerequisites.
 // Someone who can't print hello world doesn't get to unlock recursion.
 
 import YAML from "yaml";
 import { readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import * as skills from "./skills.ts";
 
-/** `in`: for a skill no one language owns (git, http), the language its course is written in. */
+/** `in`: for a skill no one language owns (git, http), the language its projects are written in. */
 export type Node = { name: string; requires: string[]; in?: string };
 /** A named ladder in one language, or in none ("" - ideas like http that carry everywhere). */
 export type Track = { name: string; lang: string; skills: Node[] };
@@ -92,7 +92,7 @@ export function canonical(name: string, lang: string): string {
 
 /**
  * Where a skill lives, asked about from a language. "http" from python is the language-free
- * builder skill, and its course is written in python unless the track says otherwise.
+ * builder skill, and its projects are written in python unless the track says otherwise.
  */
 export function locate(name: string, lang: string): { lang: string; exercise: string } {
   const l = skills.langName(lang);
@@ -145,9 +145,9 @@ export function prereqs(name: string, lang: string): string[] {
 
 export type Status =
   | { state: "unlocked" }
-  /** Every prerequisite is theirs, so the course (or the explanation) is open. */
+  /** Every prerequisite is theirs, so the skill is open to build (or explain). */
   | { state: "open" }
-  /** `next` is the lowest rung they can take a course on right now. */
+  /** `next` is the lowest rung they can work on right now. */
   | { state: "locked"; missing: string[]; next: string };
 
 /** What a prerequisite has to be held at, to ask for a skill at `need`. Deciding when isn't required below. */
@@ -255,7 +255,7 @@ export function view(t: skills.Tree, langs: string[], all = false): string[] {
       const m = mark(n.name, tr.lang);
       if (m) known.push(m);
       const st = current(t, n.name, tr.lang);
-      if (st.state === "open") next.push(`  ○ ${n.name}  next · :practice ${n.name}${tr.lang ? ` in ${tr.lang}` : ""}`);
+      if (st.state === "open") next.push(`  ○ ${n.name}  next · :projects ${n.name}${tr.lang ? ` in ${tr.lang}` : ""}`);
       else if (st.state === "locked" && !m) {
         locked.push(`  · ${n.name}  needs ${st.missing.join(", ")}${st.next ? `  starts at ${st.next}` : ""}`);
       }

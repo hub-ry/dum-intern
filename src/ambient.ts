@@ -11,15 +11,18 @@ import type { ZoneContext } from "./zone-types.ts";
 /** Diff budget for one ambient call. */
 export const AMBIENT_FILES = { count: 4, bytes: 96 * 1024 } as const;
 
-export type AmbientStatus = "watching" | "checking" | "blocked" | "failed";
+/** `unadvised`: the look runs and notices changes, but no backend is chosen, so nothing is ever sent. */
+export type AmbientStatus = "watching" | "checking" | "blocked" | "unadvised" | "failed";
 
 /** The live zone an ambient call is bound to; `practicing` is true while a suggested project is active. */
 export type AmbientContext = { zone: ZoneContext; binding: RequestBinding; practicing: boolean };
 
 export type AmbientOptions = {
   now: () => number;
-  /** No active zone, first-run goal, no backend, a turn in flight, a decision waiting, or a stale epoch. */
+  /** No active zone, first-run goal, a turn in flight, a decision waiting, or a stale epoch. */
   blocked: (tick: Tick) => boolean;
+  /** A backend is chosen, so a change can become a helper call. Without one the look still scans, and calls nothing. */
+  advised: () => boolean;
   /** `Follows.scan()` for the tick's zone. */
   scan: () => Promise<readonly FileSignal[]>;
   /** Bounded diffs against the last bytes Dum read. */
@@ -112,14 +115,15 @@ export class Ambient {
     }
     const signals = await this.o.scan();
     if (this.closed) return;
-    if (this.o.blocked(t)) {
+    const blocked = this.o.blocked(t) ? "blocked" : this.o.advised() ? null : "unadvised";
+    if (blocked) {
       this.drop();
       this.settled = appKey(t.app) ?? this.settled;
       this.lastApp = appKey(t.app);
-      this.show("blocked");
+      this.show(blocked);
       return;
     }
-    if (this.shown === "blocked") this.show(this.inFlight ? "checking" : "watching");
+    if (this.shown === "blocked" || this.shown === "unadvised") this.show(this.inFlight ? "checking" : "watching");
     this.observeCode(signals);
     this.observeApp(t);
     this.observeTyping(t);

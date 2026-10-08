@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { cloudTagged, localBackend, localSetup, loopbackBase } from "../src/agent/local.ts";
+import { localBackend } from "../src/agent/local.ts";
+import { cloudTagged, localSetup, loopbackBase } from "../src/agent/local-setup.ts";
 import type { AgentEvent, OpenOptions } from "../src/agent/types.ts";
 
 process.env.DUM_CONTEXT = "off";

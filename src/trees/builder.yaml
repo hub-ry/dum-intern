@@ -1,5 +1,5 @@
 # The builder track: what turns a language into software. No language owns these, so they count
-# in any language you've written something in. `in` is the language a course is written in when
+# in any language you've written something in. `in` is the language its projects are written in when
 # the skill lives outside one; otherwise it's whatever you're working in.
 lang: ""
 track: builder

@@ -18,7 +18,7 @@ export type ObserverOptions = {
   frontmost(): Promise<AppSignal | null>;
   /** Thumbnail of the display nearest the cursor, at most `LOOK.thumbWidth` wide; null when unavailable. */
   thumbnail(): Promise<Bitmap | null>;
-  /** One PNG of the display nearest the cursor, at most `LOOK.thumbWidth` wide; null when unavailable. */
+  /** One PNG of the display nearest the cursor, at most `LOOK.frameWidth` wide; null when unavailable. */
   capture(): Promise<Buffer | null>;
   send(tick: Tick): void;
   look: LookPrefs;
@@ -96,6 +96,10 @@ export class Observer {
     }
     const png = await this.o.capture();
     if (!png || this.closed || this.reason() || !this.look.screen) return null;
+    if (png.length > LOOK.frameBytes) {
+      this.message = `frame ${checkId} not sent: ${png.length} bytes is over the ${LOOK.frameBytes}-byte cap`;
+      return null;
+    }
     return { mimeType: "image/png", data: png.toString("base64") };
   }
 

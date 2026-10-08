@@ -23,11 +23,12 @@ function rig(over: Partial<AmbientOptions> & { auto?: boolean } = {}) {
   const records: { result: AmbientResult; input: AmbientInput }[] = [];
   const statuses: AmbientStatus[] = [];
   const frames: number[] = [];
-  const state = { blocked: false, practicing: false, images: true };
+  const state = { blocked: false, advised: true, practicing: false, images: true };
   const auto = over.auto ?? true;
   const ambient = new Ambient({
     now: () => now,
     blocked: () => state.blocked,
+    advised: () => state.advised,
     scan: async () => scans.shift() ?? [],
     diff: async (paths) => paths.map((path) => ({ path, diff: `diff of ${path}` })),
     frame: async (): Promise<Picture> => {
@@ -326,6 +327,24 @@ test("blocked ticks drop pending triggers", async () => {
   assert.equal(r.calls.length, 0, "a switch made while blocked does not fire later");
   await r.ticks(2, { app: app("com.c") });
   assert.equal(r.calls.length, 1);
+});
+
+test("with no backend the look says it's unadvised, and never calls or asks for a frame", async () => {
+  const r = rig();
+  r.state.advised = false;
+  await r.tick({ app: app("com.a") }, [saved("g/a.ts", "1")]);
+  await r.ticks(4, { app: app("com.b"), screen: { changedCells: 9 } });
+  await r.ticks(4, { app: app("com.b"), screen: { changedCells: 0 } });
+  assert.deepEqual(r.statuses, ["unadvised"]);
+  assert.equal(r.calls.length, 0);
+  assert.equal(r.frames.length, 0);
+
+  r.state.advised = true;
+  await r.tick({ app: app("com.b") }, [saved("g/b.ts", "1")]);
+  assert.equal(r.statuses.at(-1), "watching");
+  await r.ticks(2, { app: app("com.b") });
+  assert.equal(r.calls.length, 1, "a change after a backend is chosen is advised");
+  assert.deepEqual(r.calls[0]!.input.files.map((f) => f.path), ["g/b.ts"], "what was noticed without a backend isn't sent later");
 });
 
 test("no frame when images are not allowed; no aside while practicing", async () => {

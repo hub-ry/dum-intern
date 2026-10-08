@@ -18,7 +18,7 @@ import { Evidence, type Origin } from "./evidence.ts";
 import { Practice, active as building } from "./practice.ts";
 import { look } from "./look.ts";
 import { SHARE_LIMITS, type ResourcePath, type Resources, type RequestBinding, type ShareGrant, type SourceSnapshot } from "./share-types.ts";
-import { ZONE_LIMITS, type ChangeReceipt, type SkillRef, type ZoneContext } from "./zone-types.ts";
+import { ZONE_LIMITS, type ChangeReceipt, type ZoneContext } from "./zone-types.ts";
 import type { Registry } from "./agent/registry.ts";
 import type { AgentSession, DumAction } from "./agent/types.ts";
 
@@ -64,10 +64,11 @@ see the diff after, and one click reverts it. Read the file first with read_file
 the sha256 it gave you as base_sha; for a new file in a shared or followed folder, pass
 null and the whole content. For an existing file, send exact edits: each old_text must
 appear once in the file as you read it. Name every skill the change rests on, spelled the
-way the curated tracks below do. Code checks each one at its level today, for the file's
-language, and refuses anything locked: nothing is written then. If the file changed since
-you read it, the change is refused; read it again. Never write a locked skill another way:
-say it's theirs to build, and offer suggested projects that fit that skill.
+way the curated tracks below do, and mark a tool as kind "tool". Code checks each one at
+its level today, for the file's language, and refuses anything locked: nothing is written
+then. If the file changed since you read it, the change is refused; read it again. Never
+write a locked skill another way: say it's theirs to build, and offer suggested projects
+that fit that skill.
 
 THE SKILL TREE (enforced in code, not by you)
 Every skill has a level: recognize (they said what it is and what it's for), build
@@ -294,9 +295,12 @@ function define<S extends z.ZodRawShape>(store: Store, t: {
   };
 }
 
+/** A skill a change rests on: a tool (one library, framework, API or command) needs recognize, anything else build. */
 const SKILL = z.object({
   name: z.string().min(1).max(200).describe("The skill, spelled the way the curated track spells it"),
   lang: z.string().max(64).optional().describe("Its language. Leave out for an idea no language owns (http, json, git)."),
+  kind: z.enum(["concept", "tool"]).optional()
+    .describe("tool: one library, framework, API or command, which they need only recognize. Anything else, and anything on a curated track, is a concept they must have built."),
 }).strict();
 
 /** Dum's actions, and nothing else: the closed set the model may call. */
@@ -372,7 +376,7 @@ function actions(ctx: Ctx): DumAction[] {
           if ("why" in edited) return refuse(`${edited.why}. Nothing written`);
           next = edited.next;
         } else next = a.content!;
-        const named: SkillRef[] = a.skills.map((s) => ({ name: s.name.trim(), lang: s.lang?.trim() ?? "" }));
+        const named = a.skills.map((s) => ({ name: s.name.trim(), lang: s.lang?.trim() ?? "", kind: s.kind }));
         let receipt: ChangeReceipt;
         try {
           receipt = await changes.change(

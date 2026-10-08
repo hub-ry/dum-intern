@@ -94,6 +94,31 @@ test("a locked concept, a 'not yet' or another language is refused and nothing i
   } finally { s.done(); }
 });
 
+test("a tool needs only recognize, but a curated skill called a tool is still a concept that needs build", async () => {
+  const tree = unlock(unlock(withRecursion, { name: "httpx", lang: "python", how: "typed", level: "recognize", why: "" }),
+    { name: "lists", lang: "python", how: "typed", level: "recognize", why: "" });
+  const HTTPX = { name: "httpx", lang: "python" };
+  for (const [label, named] of [
+    ["unnamed kind defaults to concept", [...RECURSION, HTTPX]],
+    ["curated skill called a tool", [...RECURSION, { name: "lists", lang: "python", kind: "tool" as const }]],
+  ] as const) {
+    const s = await setup(tree);
+    try {
+      const read = await s.shares.file(s.walk);
+      await assert.rejects(change(s.deps, s.zoneId, s.binding, s.walk, read.sha, NEXT, [...named]), /isn't theirs at build yet.* - nothing written$/, label);
+      assert.equal(readFileSync(join(s.root, "src/walk.py"), "utf8"), ORIGINAL, label);
+    } finally { s.done(); }
+  }
+  const s = await setup(tree);
+  try {
+    const read = await s.shares.file(s.walk);
+    const receipt = await change(s.deps, s.zoneId, s.binding, s.walk, read.sha, NEXT, [...RECURSION, { ...HTTPX, kind: "tool" }]);
+    assert.equal(readFileSync(join(s.root, "src/walk.py"), "utf8"), NEXT, "a recognized tool is enough");
+    assert.deepEqual(listChanges(H, s.zoneId)[0]!.skills, [...RECURSION, HTTPX], "the record keeps plain skill refs");
+    assert.equal(receipt.target, s.walk);
+  } finally { s.done(); }
+});
+
 test("a SHA that isn't the current bytes is refused, and an editor save after the read keeps the user's bytes", async () => {
   const s = await setup();
   try {

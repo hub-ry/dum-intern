@@ -8,7 +8,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { closeSync, constants, fchmodSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { classify, mayChange, type Mode } from "./gate.ts";
+import { classify, mayChange, type Kind, type Mode } from "./gate.ts";
 import type * as skills from "./skills.ts";
 import { createState, readState, statePath, writeState } from "./state-files.ts";
 import { bound, readText, sha, unifiedDiff } from "./shared-files.ts";
@@ -27,9 +27,10 @@ function code(err: unknown): string | undefined {
 
 /**
  * Write `next` to `target` for the named skills. Refuses, writing nothing, when a skill isn't held
- * at its level today (rule 1) or when the file no longer hashes to `baseSha`, the digest of the
- * bytes the model read (rule 7; null means the file must not exist yet). New files go only in a
- * shared or followed folder.
+ * at its level today (rule 1: a concept needs build, a tool recognize, and a skill on a curated
+ * track is a concept whatever it's called) or when the file no longer hashes to `baseSha`, the
+ * digest of the bytes the model read (rule 7; null means the file must not exist yet). New files
+ * go only in a shared or followed folder.
  */
 export async function change(
   deps: ChangeDeps,
@@ -38,7 +39,7 @@ export async function change(
   target: ResourcePath,
   baseSha: string | null,
   next: string,
-  skillRefs: SkillRef[],
+  skillRefs: (SkillRef & { kind?: Kind })[],
 ): Promise<ChangeReceipt> {
   IdSchema.parse(zoneId);
   if (binding.zoneId !== zoneId) throw new Error("that request belongs to another zone - nothing written");
@@ -50,7 +51,7 @@ export async function change(
   if (skillRefs.length > ZONE_LIMITS.focusSkills) throw new Error(`a change can name at most ${ZONE_LIMITS.focusSkills} skills - nothing written`);
 
   // Rule 1, decided now against the live tree and holds, for this exact resource and its language.
-  const pieces = classify(deps.tree, skillRefs.map((s) => ({ skill: s.name, lang: s.lang, what: "", paths: [target] })), deps.mode, deps.held);
+  const pieces = classify(deps.tree, skillRefs.map((s) => ({ skill: s.name, lang: s.lang, kind: s.kind, what: "", paths: [target] })), deps.mode, deps.held);
   const verdict = mayChange(deps.tree, deps.mode, pieces, target, skillRefs.map((s) => s.name), deps.held);
   if (!verdict.ok) throw new Error(`${verdict.why} - nothing written`);
 
@@ -74,7 +75,8 @@ export async function change(
   const id = randomUUID();
   const createdAt = new Date().toISOString();
   const manifest = ChangeManifestSchema.parse({
-    version: 1, id, zoneId, requestId: binding.requestId, createdAt, target, baseSha, nextSha, skills: skillRefs, revertedAt: null,
+    version: 1, id, zoneId, requestId: binding.requestId, createdAt, target, baseSha, nextSha,
+    skills: skillRefs.map(({ name, lang }) => ({ name, lang })), revertedAt: null,
   });
   const dir = `zones/${zoneId}/changes/${id}`;
   const keep = (name: string, body: string) => {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { setImmediate as turn } from "node:timers/promises";
 import { Observer, changedCells, grid, type Bitmap, type ObserverOptions } from "../src/desktop/observer.ts";
 import { LOOK, TickSchema, type Tick } from "../src/observe-types.ts";
+import { MAX_IMAGE_BYTES } from "../src/look.ts";
 
 const [W, H] = LOOK.grid;
 const ZONE = "1b4e28ba-2fa1-4d2b-9c3e-0123456789ab";
@@ -152,4 +153,14 @@ test("frame returns one PNG and keeps none", async () => {
   r.observer.close();
   assert.equal(await r.observer.frame("check-3"), null);
   assert.equal(r.calls.capture, 2);
+});
+
+test("frames get their own size: wider than the activity thumbnail, and never over look.ts's decode bound", async () => {
+  assert.ok(LOOK.frameWidth >= 1280 && LOOK.frameWidth > LOOK.thumbWidth, "wide enough to read code");
+  assert.ok(LOOK.frameBytes <= MAX_IMAGE_BYTES);
+  const atCap = Buffer.alloc(LOOK.frameBytes, 1);
+  assert.equal((await rig({ capture: async () => atCap }).observer.frame("fits"))?.data, atCap.toString("base64"));
+  const r = rig({ capture: async () => Buffer.alloc(LOOK.frameBytes + 1, 1) });
+  assert.equal(await r.observer.frame("too-big"), null, "an oversize frame is not sent");
+  assert.match(r.observer.status, /too-big not sent/);
 });

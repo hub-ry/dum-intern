@@ -1,5 +1,5 @@
 // Your tree as one value that can travel: every skill, and when each removed one went. Two copies
-// merge by time, skill by skill, so the web page and the terminal can both change it.
+// merge by time, skill by skill, so the web page and the desktop app can both change it.
 
 import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
@@ -38,7 +38,10 @@ export function merge(a: Snapshot, b: Snapshot): Snapshot {
   return out;
 }
 
-/** Make this machine's tree match a snapshot: write what's newer, delete what was removed. */
+/**
+ * Make this machine's tree match a snapshot: write what's newer, delete what was removed. Throws
+ * when a note can't be written, before any removal is applied; the caller reports it.
+ */
 export function apply(snap: Snapshot, dir = skills.home()) {
   const here = skills.read(dir);
   const changed = snap.skills.filter((s) => {
@@ -64,7 +67,7 @@ export function same(a: Snapshot, b: Snapshot): boolean {
 export type Edit = { op: "add" | "remove"; name: string; lang: string };
 
 /**
- * One edit from the web page, under the same rules as `:skill` in the terminal: a skill goes on
+ * One edit from the web page, under the same rules as a skill edit in the app: a skill goes on
  * only above its prerequisites, and anything can come off. Returns the new snapshot, or why not.
  */
 export function edit(snap: Snapshot, e: Edit, now = new Date()): Snapshot | { refused: string } {

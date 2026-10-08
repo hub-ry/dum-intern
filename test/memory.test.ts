@@ -176,22 +176,6 @@ test("old history stays readable and recalled as history, not as permission", ()
   } finally { done(); }
 });
 
-test("starting fresh moves this zone's conversation aside and deletes nothing", () => {
-  const { home, zone, dir, done } = scratch();
-  try {
-    memory.save(home, zone, [{ kind: "say", id: 1, text: "hello" }]);
-    memory.remember(home, zone, "keep this somewhere");
-    writeFileSync(join(dir, "context.md"), "zone context stays");
-    memory.fresh(home, zone);
-    assert.deepEqual(memory.load(home, zone).entries, []);
-    assert.equal(memory.notes(home, zone), "");
-    const files = readdirSync(dir);
-    assert.ok(files.some((f) => f.startsWith("transcript.json.old-")));
-    assert.ok(files.some((f) => f.startsWith("memory.md.old-")));
-    assert.equal(readFileSync(join(dir, "context.md"), "utf8"), "zone context stays");
-  } finally { done(); }
-});
-
 test("a failed save warns once through the store instead of throwing into it", () => {
   const { home, zone, dir, done } = scratch();
   try {

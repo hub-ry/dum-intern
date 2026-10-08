@@ -75,16 +75,23 @@ export class HostController {
       child.stdout?.resume();
       child.stderr?.resume();
       const ready = Promise.withResolvers<void>();
+      // The host posts its first state just after the initialize reply; start() resolves only once main can see it.
+      const stated = Promise.withResolvers<void>();
+      stated.promise.catch(() => undefined);
       const timer = setTimeout(() => ready.reject(new Error("the teaching host didn't start")), READY_MS);
       child.on("message", (message: unknown) => {
         if (this.child !== child) return;
         const parsed = HostEventSchema.safeParse(message);
         if (!parsed.success || parsed.data.epoch !== epoch) return;
         if (parsed.data.type === "ready") ready.resolve();
-        else this.receive(parsed.data);
+        else {
+          this.receive(parsed.data);
+          if (parsed.data.type === "state") stated.resolve();
+        }
       });
       child.once("exit", () => {
         ready.reject(new Error("the teaching host stopped while starting"));
+        stated.reject(new Error("the teaching host stopped while starting"));
         if (this.child !== child) return;
         this.lost("Dum's teaching host stopped - restart it to go on; nothing that was waiting was kept");
       });
@@ -93,13 +100,17 @@ export class HostController {
       } finally {
         clearTimeout(timer);
       }
+      const unstated = setTimeout(() => stated.reject(new Error("the teaching host didn't report its state")), READY_MS);
       try {
         await this.request({
           op: "initialize", home: this.options.home, flavor: this.options.flavor, claudeExecutable: this.options.claudeExecutable, personal, settings,
         });
+        await stated.promise;
       } catch (err) {
         await this.stop();
         throw err;
+      } finally {
+        clearTimeout(unstated);
       }
     });
   }

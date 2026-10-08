@@ -34,7 +34,7 @@ import * as context from "../context.ts";
 import { home } from "../skills.ts";
 import { LOOK } from "../observe-types.ts";
 import { bundledExecutable, claudeSetup } from "../agent/claude-setup.ts";
-import { localSetup } from "../agent/local.ts";
+import { localSetup } from "../agent/local-setup.ts";
 import { RELEASED } from "../agent/registry.ts";
 import { accessToken, chatgptSetup } from "../agent/siwc.ts";
 import { AgentSetup, credentialSource } from "./agent-setup.ts";
@@ -347,7 +347,7 @@ async function start(): Promise<void> {
     },
     async capture() {
       if (!screenGranted()) return null;
-      return (await cursorScreen(LOOK.thumbWidth))?.toPNG() ?? null;
+      return (await cursorScreen(LOOK.frameWidth))?.toPNG() ?? null;
     },
     send(tick) {
       // A tick for an epoch that's over is dropped here, never sent.

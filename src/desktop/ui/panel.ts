@@ -1,7 +1,7 @@
 // The full panel: the conversation, zones, the skill tree, every note pane, changes and settings.
 // Normally hidden; the menu bar, the command bar and the hotkey open it. Everything is reachable by keyboard.
 
-import type { DesktopPreferences, Panel, Snapshot } from "../protocol.ts";
+import type { DesktopPreferences, Panel, Snapshot, TreeSync } from "../protocol.ts";
 import type { State } from "../../store-types.ts";
 import type { View } from "../../web/view.ts";
 import { ZONE_LIMITS } from "../../zone-types.ts";
@@ -310,6 +310,22 @@ export function panel() {
   const voiceStatus = h("p", { class: "hint" });
   const hotkeyError = h("p", { class: "hint error-text", role: "alert" });
   const versionLine = h("p", { class: "hint" });
+  const webServer = h("input", { class: "input", type: "url", placeholder: "https://…", "aria-label": "Server" });
+  const webStatus = h("p", { class: "hint", role: "status" });
+  async function treeSync(sync: TreeSync, done: string) {
+    webStatus.textContent = "";
+    if ((await client.call({ type: "tree-sync", sync })).ok) webStatus.textContent = done;
+  }
+  const webLink = () => {
+    const server = webServer.value.trim();
+    if (!server) return client.showError("Type the server's address first.");
+    void treeSync({ action: "link", server }, "Linked. The page opened in your browser.");
+  };
+  webServer.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    webLink();
+  });
 
   const recorders = new Map<"hotkey" | "voiceHotkey" | "sendDraftHotkey", HTMLInputElement>();
   let recording: HTMLInputElement | null = null;
@@ -375,6 +391,18 @@ export function panel() {
       modeHint,
       h("label", { class: "check" }, toggles.personalContext, h("span", {}, "Use my personal context file for suggestions")),
       h("p", { class: "hint" }, "Off unless you turn it on. It's the Markdown file at ~/.dum/context.md. It shapes suggested projects and never adds skills."),
+    ),
+    h(
+      "div",
+      { class: "group", "aria-labelledby": "web-title", role: "group" },
+      h("h3", { id: "web-title" }, "Web tree"),
+      h("p", { class: "hint" }, "Keep a copy of your skill tree at a private link you can open and edit in a browser. Only the tree goes there: no zones, conversations, holds or files."),
+      h("label", { class: "field" }, h("span", {}, "Server"), webServer),
+      h("button", { type: "button", class: "btn ghost", onclick: webLink }, icon("external"), "Link"),
+      h("button", { type: "button", class: "btn ghost", onclick: () => void treeSync({ action: "sync" }, "Synced.") }, "Sync now"),
+      h("button", { type: "button", class: "btn ghost", onclick: () => void treeSync({ action: "rotate" }, "New link made; the old one stopped working. The page opened in your browser.") }, "New link"),
+      h("button", { type: "button", class: "btn ghost", onclick: () => void treeSync({ action: "off" }, "Unlinked. The web copy is gone; the tree here is untouched.") }, "Unlink"),
+      webStatus,
     ),
     h(
       "div",
