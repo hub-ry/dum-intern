@@ -75,7 +75,10 @@ export class ZoneTree {
   private open(form: Form) {
     this.form = form;
     this.redraw();
-    this.formBox.querySelector<HTMLElement>("input, textarea, button")?.focus();
+    const first = this.formBox.querySelector<HTMLElement>("input, textarea, button");
+    first?.focus();
+    // Editing starts as a Finder rename does: the whole name selected, so typing replaces it.
+    if (form.kind === "edit" && first instanceof HTMLInputElement) first.select();
   }
 
   private visible(reg: ZoneRegistry): Zone[] {

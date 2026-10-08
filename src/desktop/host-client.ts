@@ -46,6 +46,13 @@ export class HostController {
   private readonly pending = new Map<string, Pending>();
   /** Starting and closing happen one at a time, each after the last has finished. */
   private life: Promise<unknown> = Promise.resolve();
+  private readonly first = Promise.withResolvers<void>();
+  /**
+   * Settles once the latest start attempt has, or before any start, once the first one has.
+   * Operations wait on it: one asked for while the host starts (the panel can open from the menu
+   * bar before then) reaches it after `initialize`, not before.
+   */
+  private started: Promise<void> = this.first.promise;
 
   constructor(private readonly changed: () => void, private readonly options: HostOptions) {}
 
@@ -59,7 +66,7 @@ export class HostController {
    * settings copy. After a crash this starts over into fresh history; nothing queued is replayed.
    */
   start(personal: Context, settings: DesktopPreferences): Promise<void> {
-    return this.lifecycle(async () => {
+    const attempt = this.lifecycle(async () => {
       await this.stop();
       const epoch = randomUUID();
       const env = providerFreeEnv(process.env);
@@ -113,73 +120,76 @@ export class HostController {
         clearTimeout(unstated);
       }
     });
+    this.started = attempt.then(() => undefined, () => undefined);
+    void this.started.then(this.first.resolve);
+    return attempt;
   }
 
   async createZone(zone: ZoneCreate, enter: boolean): Promise<Zone> {
-    return (await this.request({ op: "zone-create", zone, enter }))!.zone!;
+    return (await this.call({ op: "zone-create", zone, enter }))!.zone!;
   }
   async openZone(zoneId: ZoneId, expectedRevision: number): Promise<void> {
-    await this.request({ op: "zone-enter", zoneId, expectedRevision });
+    await this.call({ op: "zone-enter", zoneId, expectedRevision });
   }
   async updateZone(zoneId: ZoneId, patch: ZonePatch, expectedRevision: number): Promise<Zone> {
-    return (await this.request({ op: "zone-update", zoneId, patch, expectedRevision }))!.zone!;
+    return (await this.call({ op: "zone-update", zoneId, patch, expectedRevision }))!.zone!;
   }
   async zoneContext(zoneId: ZoneId, text: string, expectedRevision: number): Promise<ZoneContext> {
-    return (await this.request({ op: "zone-context", zoneId, text, expectedRevision }))!.context!;
+    return (await this.call({ op: "zone-context", zoneId, text, expectedRevision }))!.context!;
   }
   async deleteZone(zoneId: ZoneId, expectedRevision: number): Promise<{ activeZoneId: ZoneId | null; deletedIds: ZoneId[] }> {
-    return (await this.request({ op: "zone-delete", zoneId, expectedRevision }))!.deleted!;
+    return (await this.call({ op: "zone-delete", zoneId, expectedRevision }))!.deleted!;
   }
   /** Main persisted these first; the host gets its copy. */
   async settings(settings: DesktopPreferences): Promise<void> {
-    await this.request({ op: "settings", settings });
+    await this.call({ op: "settings", settings });
   }
   async agentSelect(choice: AgentChoice | null): Promise<void> {
-    await this.request({ op: "agent-select", choice });
+    await this.call({ op: "agent-select", choice });
   }
   async agentModels(backend: BackendId, login: LoginMethod): Promise<ModelOption[]> {
-    return (await this.request({ op: "agent-models", backend, login }))?.models ?? [];
+    return (await this.call({ op: "agent-models", backend, login }))?.models ?? [];
   }
   async send(binding: RequestBinding, text: string, shares: ShareGrant[], image?: SharedImage): Promise<void> {
-    await this.request({ op: "send", binding, text, shares, ...(image ? { image } : {}) });
+    await this.call({ op: "send", binding, text, shares, ...(image ? { image } : {}) });
   }
   async respond(binding: RequestBinding, decision: { kind: "attest" | "share"; value: boolean }): Promise<void> {
-    await this.request({ op: "respond", binding, decision });
+    await this.call({ op: "respond", binding, decision });
   }
   async command(name: "inspect" | "projects" | "submit" | "remember", argument: string, binding: RequestBinding): Promise<void> {
-    await this.request({ op: "command", name, argument, binding });
+    await this.call({ op: "command", name, argument, binding });
   }
   async panel(panel: Panel): Promise<void> {
-    await this.request({ op: "panel", panel });
+    await this.call({ op: "panel", panel });
   }
   async shareAdd(path: string, kind: "file" | "folder", binding: RequestBinding): Promise<ShareGrant> {
-    return (await this.request({ op: "share-add", path, kind, binding }))!.share!;
+    return (await this.call({ op: "share-add", path, kind, binding }))!.share!;
   }
   async shareRemove(shareId: string, binding: RequestBinding): Promise<void> {
-    await this.request({ op: "share-remove", shareId, binding });
+    await this.call({ op: "share-remove", shareId, binding });
   }
   async followAdd(path: string): Promise<FollowGrant> {
-    return (await this.request({ op: "follow-add", path }))!.follow!;
+    return (await this.call({ op: "follow-add", path }))!.follow!;
   }
   async followRemove(followId: string): Promise<void> {
-    await this.request({ op: "follow-remove", followId });
+    await this.call({ op: "follow-remove", followId });
   }
   async changeRevert(changeId: string, binding: InputBinding): Promise<ChangeReceipt> {
-    return (await this.request({ op: "change-revert", changeId, binding }))!.change!;
+    return (await this.call({ op: "change-revert", changeId, binding }))!.change!;
   }
   async skillEdit(edit: "add" | "remove", skill: SkillRef): Promise<void> {
-    await this.request({ op: "skill-edit", edit, skill });
+    await this.call({ op: "skill-edit", edit, skill });
   }
   /** The page's URL after link or rotate; null otherwise. */
   async treeSync(sync: TreeSync): Promise<string | null> {
-    return (await this.request({ op: "tree-sync", sync }))?.url ?? null;
+    return (await this.call({ op: "tree-sync", sync }))?.url ?? null;
   }
   /** The validated app-owned file main may open. */
   async openRecord(record: "change" | "memory", recordId?: string): Promise<string> {
-    return (await this.request({ op: "open-record", record, ...(recordId ? { recordId } : {}) }))!.path!;
+    return (await this.call({ op: "open-record", record, ...(recordId ? { recordId } : {}) }))!.path!;
   }
   async interrupt(): Promise<void> {
-    await this.request({ op: "interrupt" });
+    await this.call({ op: "interrupt" });
   }
 
   /**
@@ -271,6 +281,12 @@ export class HostController {
         return;
       }
     }
+  }
+
+  /** One operation, once a start in progress has settled. */
+  private async call(value: Record<string, unknown>): Promise<HostResult | undefined> {
+    await this.started;
+    return this.request(value);
   }
 
   private request(value: Record<string, unknown>, ms = REQUEST_MS): Promise<HostResult | undefined> {

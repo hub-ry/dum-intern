@@ -184,13 +184,14 @@ final class DumBridge {
 
     // MARK: validation
 
-    static func isToken(_ value: String) -> Bool {
+    // Pure checks, also used by DumBinding off the main actor.
+    nonisolated static func isToken(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 128 && value.utf8.allSatisfy { byte in
             (0x30...0x39).contains(byte) || (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte) || byte == 0x2D || byte == 0x5F
         }
     }
 
-    static func isZoneId(_ value: String) -> Bool {
+    nonisolated static func isZoneId(_ value: String) -> Bool {
         value.range(of: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", options: .regularExpression) != nil
     }
 

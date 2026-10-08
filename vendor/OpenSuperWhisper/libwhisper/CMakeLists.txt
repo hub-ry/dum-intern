@@ -16,4 +16,10 @@ option(BUILD_SHARED_LIBS "build shared libraries" OFF)
 add_compile_definitions(GGML_MATMUL_INT8=0)
 add_compile_options(-U__ARM_FEATURE_MATMUL_INT8)
 
+# Dum: no OpenMP. Apple's toolchain ships no OpenMP runtime, so using it means bundling a Homebrew
+# libomp built for the build machine's macOS. ggml's own CPU threadpool takes its place, as in
+# whisper.cpp's own Apple build (build-xcframework.sh sets GGML_OPENMP=OFF); Metal does the heavy
+# work on Apple Silicon.
+set(GGML_OPENMP OFF CACHE BOOL "ggml: use OpenMP" FORCE)
+
 add_subdirectory(whisper.cpp)

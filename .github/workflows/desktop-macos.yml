@@ -69,6 +69,15 @@ jobs:
             test -x "$osw/Contents/MacOS/OpenSuperWhisper"
             test -s "$APP/Contents/Resources/OpenSuperWhisper-LICENSE.txt"
             lipo "$osw/Contents/MacOS/OpenSuperWhisper" -verify_arch arm64
+            # The voice helper loads only the OS and what its bundle carries: no OpenMP, nothing from Homebrew.
+            linked="$(otool -L "$osw/Contents/MacOS/OpenSuperWhisper")"
+            echo "$linked"
+            if grep -E 'libomp|/opt/homebrew|/usr/local/' <<<"$linked"; then echo "the voice helper links a build-machine library"; exit 1; fi
+            for lib in $(awk 'NR > 1 && $1 ~ /^@rpath\// {print substr($1, 8)}' <<<"$linked"); do
+              test -f "$osw/Contents/Frameworks/$lib"
+              test "$(otool -D "$osw/Contents/Frameworks/$lib" | sed -n 2p)" = "@rpath/$lib"
+            done
+            if find "$osw" -name 'libomp*' | grep .; then echo "libomp is in the voice helper"; exit 1; fi
           fi
           hdiutil verify release/*.dmg
           mkdir -p "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/dmg-app" "$RUNNER_TEMP/zip-app"

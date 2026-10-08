@@ -11,8 +11,9 @@
  * Off macOS it only creates the output directory, so electron-builder's extraResources entry resolves.
  * Each helper is rebuilt only when its sources change (digests in build/native-stamps/).
  *
- * Voice build prerequisites (Apple Silicon): Xcode, cmake, Rust with the aarch64-apple-darwin target,
- * and Homebrew libomp (/opt/homebrew/opt/libomp). The two upstream git submodules are fetched at the
+ * Voice build prerequisites (Apple Silicon): Xcode, cmake, and Rust with the aarch64-apple-darwin
+ * target. whisper.cpp builds without OpenMP (vendor/OpenSuperWhisper/libwhisper/CMakeLists.txt), so
+ * no Homebrew runtime is linked or shipped. The two upstream git submodules are fetched at the
  * commits pinned in vendor/OpenSuperWhisper/DUM-VENDOR.json; Swift packages resolve from the vendored
  * Package.resolved with automatic resolution disabled.
  *
@@ -30,7 +31,6 @@ const OUTPUT = join(ROOT, 'build', 'extra-resources');
 const STAMPS = join(ROOT, 'build', 'native-stamps');
 const VENDOR = join(ROOT, 'vendor', 'OpenSuperWhisper');
 const FOCUS_SOURCE = join(ROOT, 'native', 'macos', 'FocusBridge.swift');
-const LIBOMP = '/opt/homebrew/opt/libomp/lib/libomp.dylib';
 
 /** SHA-256 over every file under `dir`: sorted relative paths and contents. */
 function treeDigest(dir) {
@@ -115,7 +115,6 @@ async function buildVoice() {
   if (!output('rustup', ['target', 'list', '--installed'], ROOT).split('\n').includes('aarch64-apple-darwin')) {
     throw new Error('prepare-dictation: run `rustup target add aarch64-apple-darwin` first.');
   }
-  if (!existsSync(LIBOMP)) throw new Error('prepare-dictation: Homebrew libomp is required (brew install libomp).');
 
   // Build in a scratch copy so the vendored tree stays exactly as committed.
   const work = join(ROOT, 'build', 'osw-work');
@@ -139,17 +138,13 @@ async function buildVoice() {
   run('cmake', ['-G', 'Xcode', '-B', 'libwhisper/build', '-S', 'libwhisper'], work);
   run('cargo', ['build', '-p', 'autocorrect-swift', '--release', '--target', 'aarch64-apple-darwin',
     '--manifest-path=asian-autocorrect/Cargo.toml'], work);
-  for (const [from, name] of [
-    [join(work, 'asian-autocorrect', 'target', 'aarch64-apple-darwin', 'release', 'libautocorrect_swift.dylib'), 'libautocorrect_swift.dylib'],
-    [LIBOMP, 'libomp.dylib'],
-  ]) {
-    const lib = join(libs, name);
-    // Homebrew's opt path is a symlink into the Cellar; copy the bytes so the edits below stay local.
-    await cp(from, lib, { dereference: true });
-    run('/usr/bin/install_name_tool', ['-id', `@rpath/${name}`, lib], work);
-    run('/usr/bin/codesign', ['--force', '--sign', '-', lib], work);
-  }
+  const autocorrect = join(libs, 'libautocorrect_swift.dylib');
+  await cp(join(work, 'asian-autocorrect', 'target', 'aarch64-apple-darwin', 'release', 'libautocorrect_swift.dylib'), autocorrect);
+  run('/usr/bin/install_name_tool', ['-id', '@rpath/libautocorrect_swift.dylib', autocorrect], work);
+  run('/usr/bin/codesign', ['--force', '--sign', '-', autocorrect], work);
 
+  // Bridge mode (DUM_BRIDGE, Dum's bundle ID, Info.plist and entitlements) is set on the app target
+  // in the vendored project. Settings given here apply to every target, Swift packages included.
   console.log('prepare-dictation: building OpenSuperWhisper in Dum bridge mode …');
   run('/usr/bin/xcodebuild', [
     '-project', 'OpenSuperWhisper.xcodeproj',
@@ -164,11 +159,7 @@ async function buildVoice() {
     'CODE_SIGNING_ALLOWED=NO',
     'CODE_SIGNING_REQUIRED=NO',
     'CODE_SIGN_IDENTITY=',
-    `PRODUCT_BUNDLE_IDENTIFIER=${manifest.bundleId}`,
-    'INFOPLIST_FILE=DumBridge-Info.plist',
     'INFOPLIST_OUTPUT_FORMAT=xml',
-    'CODE_SIGN_ENTITLEMENTS=DumBridge.entitlements',
-    'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DUM_BRIDGE',
     'build',
   ], work);
 
@@ -183,6 +174,14 @@ async function buildVoice() {
   for (const [key, value] of Object.entries(expect)) {
     if (plistString(info, key) !== value) throw new Error(`prepare-dictation: built helper has ${key}=${plistString(info, key)}, expected ${value}`);
   }
+  // The helper may load only the OS and what its own bundle carries: never a build machine path like
+  // Homebrew's, and every @rpath library must be in Contents/Frameworks.
+  const executable = join(product, 'Contents', 'MacOS', 'OpenSuperWhisper');
+  const linked = output('/usr/bin/otool', ['-L', executable], work).split('\n').slice(1).map((line) => line.trim().split(' (')[0]);
+  const foreign = linked.filter((lib) => lib.startsWith('@rpath/')
+    ? !existsSync(join(product, 'Contents', 'Frameworks', lib.slice('@rpath/'.length)))
+    : !/^(\/System\/Library\/|\/usr\/lib\/)/.test(lib));
+  if (foreign.length) throw new Error(`prepare-dictation: the voice helper links outside the OS and its bundle: ${foreign.join(', ')}`);
 
   await rm(target, { recursive: true, force: true });
   run('/usr/bin/ditto', [product, target], work);

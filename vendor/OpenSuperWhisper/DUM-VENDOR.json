@@ -24,6 +24,8 @@
   ],
   "patchedFiles": [
     "OpenSuperWhisper/OpenSuperWhisperApp.swift",
-    "OpenSuperWhisper/AudioRecorder.swift"
+    "OpenSuperWhisper/AudioRecorder.swift",
+    "OpenSuperWhisper.xcodeproj/project.pbxproj",
+    "libwhisper/CMakeLists.txt"
   ]
 }

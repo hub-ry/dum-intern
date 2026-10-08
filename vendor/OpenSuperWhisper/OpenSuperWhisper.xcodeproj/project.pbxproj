@@ -33,7 +33,6 @@
 		CE84E17D2D56550B00C54EA6 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = CE84E17C2D56550B00C54EA6 /* KeyboardShortcuts */; };
 		CEAC00032D82F00200000000 /* libautocorrect_swift.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; };
 		CEAC00042D82F10000000000 /* libautocorrect_swift.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		CEAC00082D82F50000000000 /* libomp.dylib in CopyFiles */ = {isa = PBXBuildFile; fileRef = CEAC00072D82F40000000000 /* libomp.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -117,7 +116,6 @@
 			dstSubfolderSpec = 10;
 			files = (
 				CEAC00042D82F10000000000 /* libautocorrect_swift.dylib in CopyFiles */,
-				CEAC00082D82F50000000000 /* libomp.dylib in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -168,7 +166,6 @@
 		CE84DF772D55789800C54EA6 /* ggml-tiny.en.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; path = "ggml-tiny.en.bin"; sourceTree = "<group>"; };
 		CE84DF792D5578BE00C54EA6 /* jfk.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = jfk.wav; sourceTree = "<group>"; };
 		CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libautocorrect_swift.dylib; path = build/libautocorrect_swift.dylib; sourceTree = "<group>"; };
-		CEAC00072D82F40000000000 /* libomp.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libomp.dylib; path = build/libomp.dylib; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -400,7 +397,6 @@
 			isa = PBXGroup;
 			children = (
 				CEAC00012D82F00000000000 /* libautocorrect_swift.dylib */,
-				CEAC00072D82F40000000000 /* libomp.dylib */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -782,7 +778,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = OpenSuperWhisper/OpenSuperWhisper.entitlements;
+				CODE_SIGN_ENTITLEMENTS = DumBridge.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -806,7 +802,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/libwhisper/**",
 				);
-				INFOPLIST_FILE = "OpenSuperWhisper/OpenSuperWhisper-Info.plist";
+				INFOPLIST_FILE = "DumBridge-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperWhisper needs accessibility access to provide system-wide functionality.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -819,19 +815,18 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/build",
-					/opt/homebrew/opt/libomp/lib,
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ru.starmel.OpenSuperWhisper;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dumintern.opensuperwhisper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DUM_BRIDGE";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Bridge.h";
 				SWIFT_VERSION = 5.0;
@@ -843,7 +838,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = OpenSuperWhisper/OpenSuperWhisper.entitlements;
+				CODE_SIGN_ENTITLEMENTS = DumBridge.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -868,7 +863,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/libwhisper/**",
 				);
-				INFOPLIST_FILE = "OpenSuperWhisper/OpenSuperWhisper-Info.plist";
+				INFOPLIST_FILE = "DumBridge-Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "OpenSuperWhisper needs accessibility access to provide system-wide functionality.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -881,7 +876,6 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/build",
-					/opt/homebrew/opt/libomp/lib,
 				);
 				LLVM_LTO = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -889,12 +883,12 @@
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-lomp",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ru.starmel.OpenSuperWhisper;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dumintern.opensuperwhisper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DUM_BRIDGE";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/Bridge.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
