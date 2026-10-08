@@ -2,9 +2,12 @@
 // decides whether something changed and makes at most one bounded look-model call for it at a time.
 
 import { z } from "zod";
+import { SelectorSchema } from "./agent/schema.ts";
 import { IdSchema, TokenSchema } from "./share-types.ts";
-import type { Picture } from "./agent/types.ts";
+import { IsoSchema } from "./zone-types.ts";
+import type { Picture, Selector } from "./agent/types.ts";
 import type { RequestBinding, ResourcePath } from "./share-types.ts";
+import type { TopicHint } from "./trail-types.ts";
 import type { ZoneContext, ZoneId } from "./zone-types.ts";
 
 export const LOOK = {
@@ -61,8 +64,38 @@ export type AmbientInput = {
   /** What the last look saw, in words: the only thing carried from one call to the next. */
   previous: string | null;
 };
-/** What one look saw, in one sentence, or null when nothing was worth noting. The look never advises. */
-export type AmbientResult = { note: string | null };
+/**
+ * What one look saw, in one sentence, or null when nothing was worth noting, plus at most three
+ * topic hints for the trail. The look never advises.
+ */
+export type AmbientResult = { note: string | null; topics: TopicHint[] };
+
+/** Why the look didn't call, or how its last call went. A subset of the diagnostic codes. */
+export const LOOK_REASONS = [
+  "unchanged", "dedup", "coalesced", "busy", "decision", "voice", "no-zone", "no-frame", "permission",
+  "unverified-model", "stale-epoch", "rate-limit", "timeout", "call-failed",
+] as const;
+export type LookReason = (typeof LOOK_REASONS)[number];
+/** `no-backend`: the look runs and notices changes, but nothing is ever sent. */
+export type LookStatus = "watching" | "checking" | "blocked" | "no-backend" | "failed";
+/** macOS screen-recording access as Electron reports it; `not-required` elsewhere. */
+export type ScreenPermission = "granted" | "denied" | "restricted" | "not-determined" | "unknown" | "not-required";
+/** The host's half of the look status. `seen.stale`: a later call failed, so it may be out of date. */
+export type HostLookStatus = {
+  status: LookStatus;
+  reason: LookReason | null;
+  /** Why pictures can't go to the look model now; "" when they can or screen look is off. */
+  noPictures: string;
+  seen: { text: string; sourceId: string; at: string; stale: boolean } | null;
+  lastTick: string | null;
+  lastAttempt: string | null;
+  lastSuccess: string | null;
+  chosen: Selector | null;
+  /** The model `chosen` runs today, from the live catalog. */
+  resolved: string | null;
+};
+/** What Current context shows: the host's status plus main's pause and permission. */
+export type LookStatusView = HostLookStatus & { paused: boolean; permission: ScreenPermission };
 
 export const LookPrefsSchema = z.object({ apps: z.boolean(), screen: z.boolean() }).strict() satisfies z.ZodType<LookPrefs>;
 
@@ -79,3 +112,25 @@ export const TickSchema = z.object({
   app: AppSignalSchema.nullable(),
   screen: z.object({ changedCells: z.number().int().min(0).max(LOOK.grid[0] * LOOK.grid[1]) }).strict().nullable(),
 }).strict() satisfies z.ZodType<Tick>;
+
+export const LookStatusSchema = z.enum(["watching", "checking", "blocked", "no-backend", "failed"]) satisfies z.ZodType<LookStatus>;
+export const ScreenPermissionSchema = z.enum(["granted", "denied", "restricted", "not-determined", "unknown", "not-required"]) satisfies z.ZodType<ScreenPermission>;
+
+const hostLook = {
+  status: LookStatusSchema,
+  reason: z.enum(LOOK_REASONS).nullable(),
+  noPictures: z.string().max(2000),
+  seen: z.object({
+    text: z.string().min(1).max(280).refine((s) => !/[\u0000-\u001f\u007f]/.test(s), "has control characters"),
+    sourceId: IdSchema,
+    at: IsoSchema,
+    stale: z.boolean(),
+  }).strict().nullable(),
+  lastTick: IsoSchema.nullable(),
+  lastAttempt: IsoSchema.nullable(),
+  lastSuccess: IsoSchema.nullable(),
+  chosen: SelectorSchema.nullable(),
+  resolved: z.string().min(1).max(200).regex(/^[\x21-\x7e]+$/, "not a model id").nullable(),
+};
+export const HostLookStatusSchema = z.object(hostLook).strict() satisfies z.ZodType<HostLookStatus>;
+export const LookStatusViewSchema = z.object({ ...hostLook, paused: z.boolean(), permission: ScreenPermissionSchema }).strict() satisfies z.ZodType<LookStatusView>;
