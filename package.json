@@ -5,26 +5,20 @@
   "description": "One intern. It only writes code on skills you have unlocked.",
   "type": "module",
   "main": "dist/desktop/main.js",
-  "bin": {
-    "dum": "./bin/dum",
-    "dum-dev": "./bin/dum-dev",
-    "dum-intern": "./bin/dum"
-  },
   "engines": {
     "node": ">=22.6"
   },
   "scripts": {
     "typecheck": "tsc --noEmit && tsc -p src/desktop/ui",
-    "practice": "bash tools/practice.sh",
-    "replay": "tsx tools/replay.ts",
     "web": "tsx src/web/server.ts",
     "site:favicon": "tsx tools/site-favicon.mjs",
     "site:add-build": "tsx tools/add-build.mjs",
     "test": "node --import tsx --test test/*.test.ts",
-    "desktop:build": "node tools/desktop-build.mjs",
+    "desktop:build": "node tools/desktop-build.mjs --flavor local",
     "desktop": "npm run desktop:build && electron .",
-    "desktop:pack": "npm run desktop:build && electron-builder --dir --publish never",
-    "desktop:mac": "npm run desktop:build && node tools/prepare-dictation.mjs && electron-builder --mac --publish never",
+    "desktop:pack": "node tools/desktop-build.mjs --flavor public && electron-builder --dir --publish never",
+    "desktop:mac": "node tools/desktop-build.mjs --flavor public && node tools/prepare-dictation.mjs && electron-builder --mac --publish never",
+    "desktop:mac-local": "node tools/desktop-build.mjs --flavor local && node tools/prepare-dictation.mjs && electron-builder --mac --publish never",
     "desktop:smoke": "node tools/desktop-smoke.mjs"
   },
   "devDependencies": {

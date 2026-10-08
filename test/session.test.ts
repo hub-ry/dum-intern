@@ -1,278 +1,349 @@
-// The session's tools, exercised without a model: what dum may change, what counts as evidence,
-// and what reaches dum from your commands. The gate and the ledger decide; the model can't.
+// The zone conversation on a fake agent backend: what reaches the model, which actions it gets,
+// what a change may write, and what Stop and close withdraw. The gate and the ledger decide.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
-import { mainLang, prepare, toolkit, applyEdits, type Ctx } from "../src/session.ts";
+import { basename, join } from "node:path";
+import { prepare, run, systemPrompt, type Ctx } from "../src/session.ts";
 import { Store } from "../src/store.ts";
+import { Evidence } from "../src/evidence.ts";
+import { SharedFiles } from "../src/shared-files.ts";
+import { listChanges } from "../src/changes.ts";
+import { createRegistry } from "../src/agent/registry.ts";
 import * as skills from "../src/skills.ts";
-import * as todos from "../src/todos.ts";
+import type { AgentBackend, AgentEvent, AgentSession, OpenOptions, UserTurn } from "../src/agent/types.ts";
+import type { RequestBinding } from "../src/share-types.ts";
+import type { ZoneContext } from "../src/zone-types.ts";
+
+process.env.DUM_CONTEXT = "off";
 
 const tick = () => new Promise((r) => setImmediate(r));
+const ACTIONS = ["ask", "change", "check_answer", "list_files", "read_file", "remember", "review_submission", "suggest_projects", "wizard_aside"];
 
-/** A scratch repo and tree, dum wired to it, and its tools by name. */
-function setup(files: Record<string, string> = {}) {
-  const home = mkdtempSync(`${tmpdir()}/dum-home-`);
+/** What one request's model does: events it yields, actions it calls through `act`. */
+type Script = (input: UserTurn, act: (name: string, args: unknown) => Promise<{ text: string; isError?: boolean }>, o: OpenOptions) => AsyncGenerator<AgentEvent>;
+
+/** A backend whose session plays a script, recording what it was opened with and whether it closed. */
+function fakeBackend() {
+  const opened: OpenOptions[] = [];
+  const inputs: UserTurn[] = [];
+  let closed = 0;
+  let script: Script = async function* () { yield { type: "end", error: null, interrupted: false }; };
+  const backend: AgentBackend = {
+    id: "local",
+    label: "Fake",
+    models: async () => [],
+    capabilities: () => ({ images: false, interrupt: true, runtimeActionCheck: true }),
+    async open(o) {
+      opened.push(o);
+      const session: AgentSession = {
+        turn(input) {
+          inputs.push(input);
+          const act = (name: string, args: unknown) => o.actions.find((a) => a.name === name)!.call(args, o.signal);
+          return script(input, act, o);
+        },
+        interrupt: async () => {},
+        close: () => void closed++,
+      };
+      return session;
+    },
+  };
+  const agent = createRegistry([backend], new Set(["local"]));
+  agent.set({
+    backend: "local",
+    login: "none",
+    intern: { backend: "local", model: "fake-intern", effort: null },
+    helper: { backend: "local", model: "fake-helper", effort: null },
+  });
+  return { agent, opened, inputs, closes: () => closed, play: (s: Script) => { script = s; } };
+}
+
+/** A fresh home, a zone, a shared folder of files, a store, the evidence service and a fake backend. */
+async function setup(files: Record<string, string> = {}) {
+  const home = mkdtempSync(join(tmpdir(), "dum-session-home-"));
   process.env.DUM_HOME = home;
-  const root = mkdtempSync(`${tmpdir()}/dum-repo-`);
-  execFileSync("git", ["init", "-q"], { cwd: root });
-  for (const [path, body] of Object.entries(files)) writeFileSync(`${root}/${path}`, body);
-  const store = new Store("scratch", "understand", root, Object.keys(files));
-  const ctx = prepare({ name: "scratch", root, files: Object.keys(files), readme: "" }, "understand", store, { path: "", text: "", warning: "" });
-  const tools = Object.fromEntries(toolkit(ctx).map((t) => [t.name, t.run]));
+  const root = mkdtempSync(join(tmpdir(), "dum-session-files-"));
+  for (const [path, body] of Object.entries(files)) writeFileSync(join(root, path), body);
+  const id = randomUUID();
+  const zone: ZoneContext = {
+    id, revision: 1, breadcrumb: [{ id, name: "Data Structures" }], goal: "Learn hash maps in python",
+    ancestorGoals: [], language: "python", focusSkills: [{ name: "hash maps", lang: "python" }],
+    notes: [{ id, name: "Data Structures", text: "they like small examples" }],
+  };
+  const store = new Store({ id, name: "Data Structures" }, "understand");
+  const evidence = new Evidence(home);
+  const fake = fakeBackend();
+  const personal = { path: "", text: "", warning: "" };
+  /** One request: a fresh binding and share of the folder, prepared the way the host does it. */
+  const request = async () => {
+    const binding: RequestBinding = { zoneId: id, zoneEpoch: "epoch-1", inputToken: "token-1", requestId: randomUUID() };
+    const shares = new SharedFiles(binding, null);
+    const grant = await shares.grant(root, "folder");
+    shares.activate();
+    const ctx = prepare(zone, "understand", store, personal, evidence, shares, fake.agent, binding);
+    return { ctx, shares, grant, file: (rel: string) => `${grant.id}/${rel}` };
+  };
   const done = () => {
+    store.close();
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   };
-  return { root, store, ctx, tools, done };
-}
-
-/** Answer the prompt of this type once it shows and takes input: a running command suspends it. */
-async function reply(store: Store, type: string, text: string) {
-  for (let i = 0; i < 200 && !(store.getSnapshot().prompt?.type === type && store.inputReady); i++) await tick();
-  assert.equal(store.getSnapshot().prompt?.type, type);
-  assert.ok(store.inputReady, `the ${type} prompt never took input`);
-  store.submit(text);
+  return { home, root, zone, store, evidence, fake, request, done };
 }
 
 function built(name: string, lang: string) {
   skills.write(skills.unlock(skills.read(), { name, lang, how: "typed", why: "test" }));
 }
 
-test("nothing changes before a plan is approved, and refusals are shown", async () => {
-  const { root, store, tools, done } = setup({ "main.py": "print('hi')\n" });
+const sha = (text: string) => /sha256 ([0-9a-f]{64})/.exec(text)![1]!;
+
+async function until(ok: () => boolean) {
+  for (let i = 0; i < 500 && !ok(); i++) await tick();
+  assert.ok(ok(), "never happened");
+}
+
+test("the zone's context and the request's shares reach the system prompt, and only Dum's actions are offered", async () => {
+  const s = await setup({ "main.py": "print('hi')\n" });
   try {
-    built("printing", "python");
-    assert.match(await tools.propose_change!({ path: "main.py", skills: ["printing"], edits: [{ old_text: "hi", new_text: "hello" }] }), /approve a plan/);
-    assert.match(await tools.create_file!({ path: "extra.py", skills: ["printing"], content: "print(1)\n" }), /approve a plan/);
-    assert.equal(readFileSync(`${root}/main.py`, "utf8"), "print('hi')\n");
-    assert.ok(!existsSync(`${root}/extra.py`));
-    assert.equal(store.getSnapshot().transcript.filter((e) => e.kind === "tool" && e.outcome === "held").length, 2);
-  } finally { done(); }
+    const { ctx, grant } = await s.request();
+    await run("what should I build next?", ctx);
+    const o = s.fake.opened[0]!;
+    assert.match(o.systemPrompt, /Learn hash maps in python/);
+    assert.match(o.systemPrompt, /they like small examples/);
+    assert.ok(o.systemPrompt.includes(basename(s.root)), "the shared folder is in the boundary");
+    assert.ok(o.systemPrompt.startsWith(systemPrompt(s.zone, "understand")));
+    assert.doesNotMatch(o.systemPrompt, /propose_plan|propose_change|create_file|run_command|course/);
+    assert.deepEqual(o.actions.map((a) => a.name).sort(), ACTIONS);
+    assert.deepEqual(o.selector, { backend: "local", model: "fake-intern", effort: null });
+    assert.equal(o.login, "none");
+    assert.equal(o.cwd, join(s.home, "zones", s.zone.id, "runtime"));
+    assert.ok(existsSync(o.cwd), "the zone's empty runtime directory is the session's cwd");
+    assert.equal(o.binding, ctx.binding);
+    assert.match(s.fake.inputs[0]!.text, /THEIR REQUEST:\nwhat should I build next\?$/);
+    assert.equal(s.fake.closes(), 1, "one session per request, closed when it ends");
+    assert.ok(grant.files.length === 1);
+    assert.deepEqual(s.store.getSnapshot().models.intern, { backend: "local", model: "fake-intern", effort: null });
+  } finally { s.done(); }
 });
 
-test("an approved plan lets dum propose unlocked pieces as diffs and refuses locked pieces", async () => {
-  const { root, store, ctx, tools, done } = setup({ "main.py": "print('hi')\n", "detect.py": "# yours\n" });
+test("an action outside Dum's set stops the request", async () => {
+  const s = await setup();
   try {
-    built("printing", "python");
-    const pieces = [
-      { skill: "printing", lang: "python", what: "print the result", paths: ["main.py", "util.py"] },
-      { skill: "recursion", lang: "python", what: "walk the folders", paths: ["walk.py"] },
-      { skill: "change detection", lang: "python", what: "which files changed", core: true, paths: ["detect.py"] },
-    ];
-    assert.match(await tools.propose_plan!({ summary: "x", pieces: pieces.map(({ core, ...p }) => p) }), /core: true/, "no core, no plan");
-    const plan = tools.propose_plan!({ summary: "a backup tool", pieces });
-    await reply(store, "plan", "y");
-    const approved = await plan;
-    assert.match(approved, /You may propose changes for: printing \(python\)/);
-    assert.match(approved, /Theirs to implement.*change detection/s);
-    assert.ok(ctx.plan);
-
-    const proposed = await tools.propose_change!({ path: "main.py", skills: ["printing"], edits: [{ old_text: "hi", new_text: "hello" }] });
-    assert.match(proposed, /NOT applied/);
-    assert.equal(readFileSync(`${root}/main.py`, "utf8"), "print('hi')\n", "their file is untouched");
-    const diff = store.getSnapshot().transcript.find((e) => e.kind === "diff");
-    assert.ok(diff?.kind === "diff" && diff.outcome === "proposed" && diff.artifact && existsSync(resolve(root, diff.artifact)));
-    assert.match(readFileSync(resolve(root, diff.artifact), "utf8"), /hello/, "the proposal holds the change for their editor");
-
-    assert.match(await tools.propose_change!({ path: "detect.py", skills: ["printing"], edits: [{ old_text: "# yours", new_text: "x = 1" }] }), /Refused: .*change detection/);
-    assert.match(await tools.create_file!({ path: "walk.py", skills: ["recursion"], content: "def walk(): pass\n" }), /Refused/);
-    assert.match(await tools.create_file!({ path: "other.py", skills: ["printing"], content: "print(2)\n" }), /Refused: .*isn't a file the approved plan lists/);
-    assert.equal(readFileSync(`${root}/detect.py`, "utf8"), "# yours\n");
-    assert.ok(!existsSync(`${root}/walk.py`) && !existsSync(`${root}/other.py`));
-
-    assert.match(await tools.create_file!({ path: "util.py", skills: ["printing"], content: "def show(x):\n    print(x)\n" }), /Created util\.py/);
-    assert.equal(readFileSync(`${root}/util.py`, "utf8"), "def show(x):\n    print(x)\n");
-    writeFileSync(`${root}/util.py`, "# their save\n");
-    assert.match(await tools.create_file!({ path: "util.py", skills: ["printing"], content: "print(3)\n" }), /Not created/);
-    assert.equal(readFileSync(`${root}/util.py`, "utf8"), "# their save\n", "an existing file is never overwritten");
-  } finally { done(); }
+    const { ctx } = await s.request();
+    s.fake.play(async function* () {
+      yield { type: "action", name: "Bash" };
+      yield { type: "text", text: "ran it anyway" };
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("clean up the build folder", ctx);
+    const t = s.store.getSnapshot().transcript;
+    assert.ok(t.some((e) => e.kind === "note" && /Bash, which dum doesn't allow - stopped/.test(e.text)));
+    assert.ok(!t.some((e) => e.kind === "say"), "nothing after it is shown");
+    assert.equal(s.fake.closes(), 1);
+  } finally { s.done(); }
 });
 
-test("an unlocked core algorithm can be approved, proposed and created in either mode", async () => {
-  for (const mode of ["understand", "anti-vibe"] as const) {
-    const { root, store, ctx, done } = setup({ "walk.py": "# current\n" });
-    try {
-      ctx.mode = mode;
-      const tools = Object.fromEntries(toolkit(ctx).map((t) => [t.name, t.run]));
-      for (const name of ["printing", "variables", "functions", "conditionals", "return values", "recursion"]) built(name, "python");
-      const plan = tools.propose_plan!({
-        summary: "walk the supplied tree recursively",
-        pieces: [{ skill: "recursion", lang: "python", what: "walk the tree", core: true, paths: ["walk.py", "copy.py"] }],
-      });
-      await reply(store, "plan", "y");
-      await plan;
-      assert.ok(ctx.plan);
-      const proposed = await tools.propose_change!({
-        path: "walk.py", skills: ["recursion"],
-        edits: [{ old_text: "# current", new_text: "def walk(node):\n    return [node] + [item for child in node.children for item in walk(child)]" }],
-      });
-      assert.match(proposed, /NOT applied/);
-      assert.equal(readFileSync(`${root}/walk.py`, "utf8"), "# current\n");
-      await tools.create_file!({ path: "copy.py", skills: ["recursion"], content: "def walk(node):\n    return [node] + [item for child in node.children for item in walk(child)]\n" });
-      assert.ok(existsSync(`${root}/copy.py`));
-      ctx.evidence.undo("return values");
-      assert.match(await tools.propose_change!({
-        path: "walk.py", skills: ["recursion"], edits: [{ old_text: "# current", new_text: "# changed" }],
-      }), /Refused/);
-    } finally { done(); }
-  }
+test("a locked concept is refused and nothing is written", async () => {
+  const s = await setup({ "walk.py": "def walk(n):\n    return n\n" });
+  try {
+    const { ctx, file } = await s.request();
+    let reply = "";
+    s.fake.play(async function* (_input, act) {
+      const read = await act("read_file", { path: file("walk.py") });
+      reply = (await act("change", {
+        path: file("walk.py"), base_sha: sha(read.text),
+        edits: [{ old_text: "return n", new_text: "return walk(n - 1) if n else 0" }],
+        skills: [{ name: "recursion", lang: "python" }],
+      })).text;
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("make walk recursive", ctx);
+    assert.match(reply, /^Refused: .*recursion.*nothing written/);
+    assert.equal(readFileSync(join(s.root, "walk.py"), "utf8"), "def walk(n):\n    return n\n");
+    assert.deepEqual(listChanges(s.home, s.zone.id), []);
+    assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "tool" && e.name === "change" && e.outcome === "refused"));
+    assert.ok(!s.store.getSnapshot().transcript.some((e) => e.kind === "diff"));
+  } finally { s.done(); }
 });
 
-test("a declined plan approves nothing, and a not-yet locks a piece again at execution time", async () => {
-  const { store, ctx, tools, done } = setup({ "main.py": "print('hi')\n" });
+test("a held skill writes the change directly and returns the diff and receipt; a new file needs a shared folder and null base", async () => {
+  const s = await setup({ "main.py": "print('hi')\n" });
   try {
     built("printing", "python");
-    const pieces = [
-      { skill: "printing", lang: "python", what: "print", paths: ["main.py"] },
-      { skill: "change detection", lang: "python", what: "core", core: true, paths: ["core.py"] },
-    ];
-    const declined = tools.propose_plan!({ summary: "x", pieces });
-    await reply(store, "plan", "smaller please");
-    assert.match(await declined, /Not approved\. They said: "smaller please"/);
-    assert.equal(ctx.plan, null);
-    const again = tools.propose_plan!({ summary: "x", pieces });
-    await reply(store, "plan", "y");
-    await again;
-    ctx.evidence.undo("printing");
-    assert.match(await tools.propose_change!({ path: "main.py", skills: ["printing"], edits: [{ old_text: "hi", new_text: "yo" }] }), /Refused/);
-  } finally { done(); }
-});
-
-test("a new plan revokes the old approval even when it's refused before it's shown", async () => {
-  const { root, store, ctx, tools, done } = setup({ "main.py": "print('hi')\n" });
-  try {
-    built("printing", "python");
-    const approved = [
-      { skill: "printing", lang: "python", what: "print", paths: ["util.py"] },
-      { skill: "change detection", lang: "python", what: "core", core: true, paths: ["core.py"] },
-    ];
-    const invalid = [
-      // No core path: the files the algorithm touches aren't named.
-      [approved[0]!, { ...approved[1]!, paths: [] }],
-      // The core spells an earlier piece again, so it classifies away.
-      [approved[0]!, { ...approved[0]!, core: true }],
-      // No core at all.
-      [approved[0]!],
-    ];
-    for (const pieces of invalid) {
-      const plan = tools.propose_plan!({ summary: "x", pieces: approved });
-      await reply(store, "plan", "y");
-      await plan;
-      assert.ok(ctx.plan);
-      await tools.propose_plan!({ summary: "y", pieces });
-      assert.equal(ctx.plan, null);
-      await tools.create_file!({ path: "util.py", skills: ["printing"], content: "print(1)\n" });
-      assert.ok(!existsSync(`${root}/util.py`), "the old approval created nothing");
+    const { ctx, file } = await s.request();
+    const replies: string[] = [];
+    s.fake.play(async function* (_input, act) {
+      const read = await act("read_file", { path: file("main.py") });
+      replies.push((await act("change", {
+        path: file("main.py"), base_sha: sha(read.text), edits: [{ old_text: "hi", new_text: "hello" }], skills: [{ name: "printing" }],
+      })).text);
+      replies.push((await act("change", {
+        path: file("extra.py"), base_sha: null, content: "print('extra')\n", skills: [{ name: "printing", lang: "python" }],
+      })).text);
+      replies.push((await act("change", {
+        path: file("main.py"), base_sha: null, content: "x", edits: [{ old_text: "a", new_text: "b" }], skills: [{ name: "printing" }],
+      })).text);
+      yield { type: "text", text: "Changed the greeting." };
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("say hello instead", ctx);
+    assert.match(replies[0]!, /^Written to .*main\.py; its sha256 is now [0-9a-f]{64}/);
+    assert.match(replies[1]!, /^Written to .*extra\.py/);
+    assert.match(replies[2]!, /^Refused: send exactly one of edits/);
+    assert.equal(readFileSync(join(s.root, "main.py"), "utf8"), "print('hello')\n");
+    assert.equal(readFileSync(join(s.root, "extra.py"), "utf8"), "print('extra')\n");
+    const diffs = s.store.getSnapshot().transcript.filter((e) => e.kind === "diff");
+    assert.equal(diffs.length, 2);
+    const kept = listChanges(s.home, s.zone.id);
+    assert.equal(kept.length, 2);
+    for (const d of diffs) {
+      assert.ok(d.kind === "diff" && d.outcome === "applied" && kept.some((c) => c.id === d.changeId), "each diff carries the change to revert");
     }
-  } finally { done(); }
+    assert.ok(diffs[0]!.kind === "diff" && /-print\('hi'\)\n\+print\('hello'\)/.test(diffs[0]!.diff));
+    assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "say" && e.text === "Changed the greeting."));
+  } finally { s.done(); }
 });
 
-test("an explanation counts only when quoted from what they said this turn, and only as recognition", async () => {
-  const { store, ctx, tools, done } = setup();
+test("a change is refused when the file changed since dum read it, or dum never read it this request", async () => {
+  const s = await setup({ "main.py": "print('hi')\n" });
   try {
-    ctx.said = ["make it print hello"];
+    built("printing", "python");
+    const first = await s.request();
+    const replies: string[] = [];
+    s.fake.play(async function* (_input, act) {
+      const read = await act("read_file", { path: first.file("main.py") });
+      writeFileSync(join(s.root, "main.py"), "print('mine')\n");
+      replies.push((await act("change", {
+        path: first.file("main.py"), base_sha: sha(read.text), edits: [{ old_text: "print(", new_text: "print(1, " }], skills: [{ name: "printing" }],
+      })).text);
+      replies.push((await act("change", {
+        path: first.file("main.py"), base_sha: sha(read.text), content: "print('whole')\n", skills: [{ name: "printing" }],
+      })).text);
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("tweak it", first.ctx);
+    assert.match(replies[0]!, /^Refused: .*changed since you read it/);
+    assert.match(replies[1]!, /^Refused: .*changed since Dum read it - nothing written/);
+    assert.equal(readFileSync(join(s.root, "main.py"), "utf8"), "print('mine')\n", "their save wins");
+
+    // A SHA from an earlier request isn't a read in this one.
+    const stale = (await first.shares.file(first.file("main.py"))).sha;
+    const second = await s.request();
+    let reply = "";
+    s.fake.play(async function* (_input, act) {
+      reply = (await act("change", { path: second.file("main.py"), base_sha: stale, content: "print('x')\n", skills: [{ name: "printing" }] })).text;
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("again", second.ctx);
+    assert.match(reply, /^Refused: base_sha must be the sha256 read_file gave you/);
+    assert.deepEqual(listChanges(s.home, s.zone.id), []);
+  } finally { s.done(); }
+});
+
+test("Stop withdraws dum's question without answering it, and close ends the request", async () => {
+  const s = await setup();
+  try {
+    const stopped = await s.request();
+    let answer = "";
+    s.fake.play(async function* (_input, act) {
+      answer = (await act("ask", { question: "which approach?", why_it_matters: "" })).text;
+      yield { type: "end", error: null, interrupted: true };
+    });
+    const going = run("help me pick", stopped.ctx);
+    await until(() => s.store.getSnapshot().prompt?.type === "question");
+    s.store.onInterrupt!();
+    await going;
+    assert.match(answer, /Stopped by them - nothing was answered/);
+    assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "question" && e.answer === null));
+    assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "note" && /stopped - say what to do instead/.test(e.text)));
+    assert.equal(s.store.onInterrupt, null);
+    s.store.submit("a late yes");
+    assert.ok(!s.store.getSnapshot().transcript.some((e) => e.kind === "question" && e.answer !== null), "a late line answers nothing");
+
+    const closing = await s.request();
+    const abort = new AbortController();
+    s.fake.play(async function* (_input, act, o) {
+      answer = (await act("ask", { question: "and now?", why_it_matters: "" })).text;
+      if (o.signal.aborted) return;
+      yield { type: "end", error: null, interrupted: false };
+    });
+    const ending = run("one more", closing.ctx, { signal: abort.signal });
+    await until(() => s.store.getSnapshot().prompt?.type === "question");
+    abort.abort();
+    s.store.close();
+    await ending;
+    assert.match(answer, /Stopped by them/);
+    assert.equal(s.fake.closes(), 2);
+  } finally { s.done(); }
+});
+
+test("an explanation counts only when quoted from this request, and only as recognition", async () => {
+  const s = await setup();
+  try {
     const quote = "print puts text on the screen so you can see what the program did";
-    assert.match(await tools.check_answer!({ skill: "printing", lang: "python", quote, holds: true, feedback: "right" }), /Not recorded/);
+    const verdicts: string[] = [];
+    const explain: Script = async function* (_input, act) {
+      verdicts.push((await act("check_answer", { skill: "printing", lang: "python", quote, holds: true, feedback: "that's what it's for" })).text);
+      yield { type: "end", error: null, interrupted: false };
+    };
+    s.fake.play(async function* () { yield { type: "end", error: null, interrupted: false }; });
+    await run(`I think ${quote}.`, (await s.request()).ctx);
+    s.fake.play(explain);
+    await run("anyway, what next?", (await s.request()).ctx);
+    assert.match(verdicts[0]!, /^Not recorded/, "an earlier request's words aren't this request's");
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
-    assert.match(await tools.check_answer!({ skill: "printing", lang: "python", quote: "x", holds: false, feedback: "what does it show?" }), /Nothing recorded/);
-    ctx.said = [`I think ${quote}.`];
-    assert.doesNotMatch(await tools.check_answer!({ skill: "printing", lang: "python", quote, holds: true, feedback: "that's what it's for" }), /Not recorded/);
+    await run(`so: ${quote}`, (await s.request()).ctx);
+    assert.doesNotMatch(verdicts[1]!, /Not recorded/);
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize", "an explanation is never a build");
-    store.submit("not yet");
+    s.store.submit("not yet");
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
-  } finally { done(); }
+  } finally { s.done(); }
 });
 
-test("a post-build story remembers reasoning without borrowing mastery or skipping the unaided answer", async () => {
-  const { root, store, ctx, tools, done } = setup({ "hello.py": "print('hello')\n" });
+test("a reviewed submission builds only on their own unaided yes, given by the attest button", async () => {
+  const s = await setup({ "hello.py": "print('hello')\n" });
   try {
-    built("printing", "rust");
-    const reasoning = "print puts text on the screen so I can see what the program did";
-    ctx.said = [`I'm happy with hello.py. I built it after using Rust for years. ${reasoning}.`];
-    await tools.remember!({ note: "They used a visible greeting to check their first Python program." });
-    assert.match(readFileSync(`${root}/.dum/memory.md`, "utf8"), /visible greeting/);
+    const { ctx, file } = await s.request();
+    const replies: string[] = [];
+    s.fake.play(async function* (_input, act) {
+      for (let i = 0; i < 2; i++) {
+        replies.push((await act("review_submission", { skill: "printing", lang: "python", paths: [file("hello.py")], passed: true, feedback: "prints the greeting it should" })).text);
+      }
+      yield { type: "end", error: null, interrupted: false };
+    });
+    const going = run("I wrote hello.py, review it", ctx);
+    await until(() => s.store.getSnapshot().prompt?.type === "question");
+    assert.throws(() => s.store.respond({ kind: "share", value: true }), /nothing is waiting/);
+    s.store.respond({ kind: "attest", value: false });
+    await until(() => replies.length === 1 && s.store.getSnapshot().prompt?.type === "question");
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
-    await tools.check_answer!({ skill: "printing", lang: "python", quote: reasoning, holds: true, feedback: "the output lets you see the result" });
-    assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize");
-    assert.equal(ctx.plan, null, "sharing reasoning doesn't approve implementation work");
-
-    const review = tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: true, feedback: "the program prints a greeting" });
-    await reply(store, "question", "I built it and I'm happy with it");
-    assert.match(await review, /Not recorded/);
-    assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize", "ownership and satisfaction don't attest to unaided work");
-
-    const unaided = tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: true, feedback: "the program prints a greeting" });
-    await reply(store, "question", "yes");
-    assert.match(await unaided, /Recorded/);
+    s.store.respond({ kind: "attest", value: true });
+    await going;
+    assert.match(replies[0]!, /^Not recorded/);
+    assert.match(replies[1]!, /^Recorded/);
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), "build");
-    assert.equal(skills.levelIn(skills.read(), "printing", "rust"), "build");
-    assert.equal(ctx.plan, null);
-  } finally { done(); }
+  } finally { s.done(); }
 });
 
-test("a reviewed submission builds only on their own direct unaided yes, and settles an old handoff", async () => {
-  const { root, store, ctx, tools, done } = setup({ "hello.py": "print('hello')\n" });
+test("what they share with :inspect reaches dum with its next turn, once, and counts as read", async () => {
+  const s = await setup({ "main.py": "a = 1\nb = 2\n" });
   try {
-    mkdirSync(`${root}/.dum`, { recursive: true });
-    writeFileSync(`${root}/.dum/todos.json`, JSON.stringify({ todos: [{ concept: "printing", path: "hello.py", what: "say hello", requires: [], before: "", lang: "python" }] }));
-    ctx.legacy = todos.load(root);
-    assert.equal(ctx.legacy.length, 1);
-
-    const failed = await tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: false, feedback: "what does it print when the name is empty?" });
-    const asked = store.getSnapshot().transcript.some((e) => e.kind === "question" && /yourself/.test(e.question));
-    assert.match(failed, /Not passed/);
-    assert.ok(!asked, "no self-report is asked for a failing review");
-
-    const no = tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: true, feedback: "prints the greeting it should" });
-    await reply(store, "question", "no, copilot helped");
-    assert.match(await no, /Not recorded/);
-    assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
-
-    const yes = tools.review_submission!({ skill: "printing", lang: "python", paths: ["hello.py"], passed: true, feedback: "prints the greeting it should" });
-    await reply(store, "question", "y");
-    assert.match(await yes, /Recorded/);
-    assert.equal(skills.levelIn(skills.read(), "printing", "python"), "build");
-    assert.deepEqual(ctx.legacy, []);
-    assert.deepEqual(JSON.parse(readFileSync(`${root}/.dum/todos.json`, "utf8")).todos, []);
-  } finally { done(); }
-});
-
-test("what they share with a command reaches dum with its next answer, without answering for them", async () => {
-  const { store, ctx, tools, done } = setup({ "main.py": "a = 1\nb = 2\n" });
-  try {
-    const asked = tools.ask!({ question: "which file holds the loop?", why_it_matters: "" });
-    await reply(store, "question", ":inspect main.py");
-    for (let i = 0; i < 200 && !ctx.shared.length; i++) await tick();
-    assert.equal(store.getSnapshot().prompt?.type, "question", "the command didn't answer the question");
-    assert.ok(store.getSnapshot().transcript.some((e) => e.kind === "excerpt" && e.path === "main.py" && e.by === "you"));
-    await reply(store, "question", "main.py, line 2");
-    const back = await asked;
-    assert.match(back, /They shared main\.py/);
-    assert.match(back, /b = 2/);
-    assert.match(back, /They said: main\.py, line 2/);
+    built("printing", "python");
+    const { ctx } = await s.request();
+    await s.store.command("inspect", "main.py:2");
+    assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "excerpt" && e.by === "you" && e.from === 2 && e.text === "b = 2"));
+    let replied: Ctx["reads"] | null = null;
+    s.fake.play(async function* () {
+      replied = new Map(ctx.reads);
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("look at line 2", ctx);
+    assert.match(s.fake.inputs[0]!.text, /They shared .*main\.py with :inspect/);
+    assert.match(s.fake.inputs[0]!.text, /2  b = 2/);
     assert.deepEqual(ctx.shared, [], "shared once, not every turn");
-    assert.ok(ctx.said.includes("main.py, line 2"), "their answer is what explanations quote");
-  } finally { done(); }
-});
-
-
-test("edits apply only where old text appears exactly once", () => {
-  assert.deepEqual(applyEdits("a\nb\n", [{ old_text: "b", new_text: "c" }]), { next: "a\nc\n" });
-  for (const bad of [
-    applyEdits("a\na\n", [{ old_text: "a", new_text: "c" }]),
-    applyEdits("a\n", [{ old_text: "z", new_text: "c" }]),
-    applyEdits("a\n", [{ old_text: "a", new_text: "a" }]),
-    applyEdits("a\nb\n", [{ old_text: "b", new_text: "c" }, { old_text: "b", new_text: "d" }]),
-  ]) assert.ok("why" in bad, "ambiguous, stale or empty edits propose nothing");
-});
-
-
-test("the language a repo is written in is the one most of its files are", () => {
-  assert.equal(mainLang({ files: ["a.py", "b.py", "c.rs", "README.md"] }), "python");
-  assert.equal(mainLang({ files: ["README.md"] }), "");
+    assert.equal(replied!.size, 1);
+  } finally { s.done(); }
 });

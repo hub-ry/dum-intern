@@ -1,4 +1,4 @@
-// The terminal's side of the web copy: make the link, keep both copies in step, take it down.
+// The app's side of the web copy: make the link, keep both copies in step, take it down.
 // Every call here fails quietly - dum works offline, and a sync that can't happen just waits.
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
@@ -63,7 +63,7 @@ export type Result = { ok: true; pulled: boolean } | { ok: false; why: string };
  */
 export async function syncNow(): Promise<Result> {
   const c = config();
-  if (!c) return { ok: false, why: "not linked - dum --web <server> makes a link" };
+  if (!c) return { ok: false, why: "not linked - link a web tree in Settings first" };
   try {
     let remote = await call(apiUrl(c));
     for (let tries = 0; tries < 3; tries++) {
@@ -72,7 +72,14 @@ export async function syncNow(): Promise<Result> {
       const here = sync.local();
       const merged = sync.merge(here, remote.body.snapshot);
       const pulled = !sync.same(merged, here);
-      if (pulled) sync.apply(merged);
+      if (pulled) {
+        // A failed write here is this machine's problem, not the server's: say so, and push nothing.
+        try {
+          sync.apply(merged);
+        } catch (err) {
+          return { ok: false, why: `couldn't save the synced tree here: ${(err as Error).message}` };
+        }
+      }
       if (sync.same(merged, remote.body.snapshot)) return { ok: true, pulled };
       const put = await call(apiUrl(c), { method: "PUT", body: JSON.stringify({ version: remote.body.version, snapshot: merged }) });
       if (put.status === 200) return { ok: true, pulled };

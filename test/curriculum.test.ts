@@ -1,4 +1,4 @@
-// The gate the whole thing rests on: a course opens only above what you already have.
+// The gate the whole thing rests on: a skill opens only above what you already have.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,13 +31,13 @@ test("every track parses, and only builds on skills above it or on its language'
   }
 });
 
-test("every curated skill is reachable from an empty tree, one course at a time", () => {
+test("every curated skill is reachable from an empty tree, one skill at a time", () => {
   for (const lang of [...languages(), ""]) {
     let t = lang ? empty : has("python", ["functions"]);
     for (let i = 0; i < 200; i++) {
       const open = tracks().filter((tr) => tr.lang === lang).flatMap((tr) => frontier(t, tr));
       if (!open.length) break;
-      t = unlock(t, { name: open[0]!, lang, how: "course", why: "" });
+      t = unlock(t, { name: open[0]!, lang, how: "typed", why: "" });
     }
     for (const tr of tracks().filter((x) => x.lang === lang)) {
       const p = progress(t, tr);
@@ -98,7 +98,7 @@ test("a language with no track only knows what was mapped", () => {
   assert.equal(status(empty, "printing", "cobol").state, "open");
 });
 
-test("a broken track is no track, and the long form carries a course language", () => {
+test("a broken track is no track, and the long form carries the language its projects use", () => {
   assert.equal(parseTrack("lang: [nope"), null);
   assert.equal(parseTrack("skills: []"), null);
   assert.deepEqual(parseTrack("lang: Py\nskills:\n  - a\n  - b: [a]\n  - c: { requires: [b], in: sh }\n  - 7", "f"), {

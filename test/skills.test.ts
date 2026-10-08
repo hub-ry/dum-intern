@@ -1,11 +1,11 @@
 // The tree decides what dum writes for you, so the failure that matters is it drifting upward
-// on its own - a skill that was never shown means code you never wrote, in every repo.
+// on its own - a skill that was never shown means code you never wrote, in every zone.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { unlock, find, named, holds, spoken, levelIn, key, id, read, write, remove, reset, folder, describe, label, langOf, extFor, type Tree } from "../src/skills.ts";
+import { unlock, find, named, holds, spoken, levelIn, key, id, read, write, remove, reset, folder, describe, label, langOf, type Tree } from "../src/skills.ts";
 
 const empty: Tree = { skills: [] };
 const home = () => mkdtempSync(`${tmpdir()}/dum-skills-`);
@@ -127,14 +127,34 @@ test("the intern sees what's unlocked by language, and that everything else is l
   assert.match(text, /any language:\n  - recursion \(recognize\)/);
 });
 
-test("file extensions map to languages and back", () => {
+test("file extensions map to languages", () => {
   assert.equal(langOf("src/a.cpp"), "c++");
+  assert.equal(langOf("0b6f2a1e-1c3d-4e5f-8a9b-0c1d2e3f4a5b/walk.py"), "python");
   assert.equal(langOf("README.md"), "");
-  assert.equal(extFor("python"), "py");
-  assert.equal(extFor("c++"), "cc");
-  assert.equal(extFor("brainfuck"), "txt");
 });
 
+test("a note that can't be written throws instead of passing for saved", () => {
+  const dir = home();
+  writeFileSync(`${dir}/skills`, "not a folder");
+  assert.throws(() => write(unlock(empty, { name: "printing", lang: "python", how: "typed", why: "" }), dir));
+
+  const ro = home();
+  mkdirSync(folder(ro));
+  chmodSync(folder(ro), 0o500);
+  try {
+    assert.throws(() => write(unlock(empty, { name: "printing", lang: "python", how: "typed", why: "" }), ro));
+    assert.deepEqual(readdirSync(folder(ro)), [], "no temp file left behind");
+  } finally {
+    chmodSync(folder(ro), 0o700);
+  }
+});
+
+test("a note left by a guided course still reads as history", () => {
+  const dir = home();
+  mkdirSync(folder(dir));
+  writeFileSync(`${folder(dir)}/loops (python).md`, "---\nname: loops\nlang: python\nhow: course\nlevel: recognize\n---\n\nfinished a course\n");
+  assert.equal(find(read(dir), "loops", "python")?.how, "course");
+});
 
 test("reasoning about an unfamiliar skill does not prove they can implement it", () => {
   const t = unlock(empty, { name: "recursion", lang: "python", how: "reasoned", why: "chose a recursive traversal" });

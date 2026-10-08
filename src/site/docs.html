@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>docs — dum intern</title>
-  <meta name="description" content="How Dum works: the skill tree, evidence, building and telling, the wizard, screen advice, and suggested projects.">
+  <meta name="description" content="How Dum works: zones, the skill tree and evidence, voice and keyboard, direct changes with revert, the look, suggested projects, the Wizard, backends and privacy.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -14,133 +14,448 @@
 <!--NAV-->
 
 <main>
-  <h1>How it works</h1>
+  <h1>Docs</h1>
 
-  <p>Dum tracks what you can build and implement only that.
-     The goal: you could take the AI away and still understand
-     the architecture, start implementing, and ask precise questions.</p>
+  <p>Dum is a Mac app that stays on in the menu bar. It follows what you're learning across a
+     tree of zones, keeps track of the skills you've shown you have, and writes code when you
+     ask, but only with those skills. The point is that you could take the AI away and still
+     understand the architecture, start implementing, and ask precise questions.</p>
 
-  <p>The corner pair stays out of your way. Choose <em>Write to dum</em> or
-     <em>Tell dum what I built</em> when you're ready; hiding input keeps the draft.</p>
+  <p>Two characters talk to you. Dum is the intern you work with. The Wizard is the advisor
+     who speaks up now and then.</p>
 
-  <p>The thin top strip reads <em>newbie → intern → good → cracked</em> at
-     0 / 8 / 24 / 64 currently usable built skills. Recognition and chat volume don't
-     advance it; revoked prerequisites can lower it. The labels aren't proficiency ratings.</p>
-
-  <h2>Skill tree</h2>
-
-  <p>Your skills are stored locally in <code>~/.dum/skills/</code> as plain Markdown files
-     you can read, edit, or delete. Nothing is inferred from the code in your project.</p>
-
-  <p>Skills come in two categories:</p>
   <ul>
-    <li><strong>Concepts</strong> — require build evidence before dum may implement them.</li>
-    <li><strong>Tools</strong> — require recognition evidence (no build required,
-        but build still counts).</li>
+    <li><a href="#start">Getting started</a></li>
+    <li><a href="#zones">Zones</a></li>
+    <li><a href="#skills">Skills and evidence</a></li>
+    <li><a href="#talking">Talking to Dum</a></li>
+    <li><a href="#changes">Changes</a></li>
+    <li><a href="#look">The look</a></li>
+    <li><a href="#projects">Suggested projects</a></li>
+    <li><a href="#wizard">The Wizard</a></li>
+    <li><a href="#backends">Who powers Dum</a></li>
+    <li><a href="#privacy">Privacy</a></li>
   </ul>
 
-  <p>Prerequisites and language scope are enforced in code. Unlocking a skill in Python
-     does not grant it in Go. Revoking a prerequisite locks dependent capability
-     without deleting historical notes.</p>
+  <h2 id="start">Getting started</h2>
 
-  <p><code>:tree</code> or <code>:skills</code> shows tracks, levels, prerequisites,
-     and available next steps.</p>
+  <p>See <a href="/install">installation</a>. Dum needs macOS 13 or later. Voice needs macOS 14
+     or later on Apple Silicon; everything else works from the keyboard on Intel too.</p>
 
-  <h2>Evidence levels</h2>
+  <p>Dum has no Dock icon. It lives in the menu bar, where its icon is Dum's own face. The menu
+     has <em>Ask Dum…</em>, <em>Open Panel</em>, <em>Switch Zone</em>, <em>Start Voice</em>,
+     <em>Send Draft</em>, <em>Pause the Look</em> and <em>Quit Dum</em>.</p>
 
-  <h3>Recognize</h3>
-  <p>Explain what a skill is and why it fits a problem.
-     Tools become available after recognition.
-     Advice, images, and personal context never count as recognition.</p>
+  <p>On first launch Dum asks <em>What are you trying to learn?</em> Type an answer or say it.
+     It becomes your first zone: the answer is the zone's goal, and its first 80 characters are
+     the name, which you can change later. Nothing is sent to a model for this.</p>
 
-  <h3>Build</h3>
-  <p>Implement the skill yourself, without AI assistance, then explicitly say so.
-     Use <code>:submit &lt;task&gt; &lt;file&gt; --unaided</code> to submit an implementation
-     for review. A saved file alone is not proof of unaided authorship — the
-     self-report is required. Concepts become available after build evidence.</p>
+  <p>Because the look is on by default, macOS asks for Screen Recording permission the first time
+     Dum starts. You can say no; see <a href="#look">the look</a> for what changes.</p>
 
-  <h3>Apply</h3>
-  <p>Explain when and why to use the skill, citing a real decision, after build evidence
-     is on record. Reasoning without prior build evidence only records recognition.</p>
+  <p>Next, Dum needs someone to power it. A banner says <em>Dum isn't powered yet</em> with a
+     <em>Who powers Dum?</em> button. Zones, skills, notes and commands like <code>:tree</code>
+     work without a backend. Messages to Dum, <code>:projects</code> and <code>:submit</code>
+     don't. If you send a message first, it stays in the box until you've picked one. See
+     <a href="#backends">who powers Dum</a>.</p>
 
-  <p class="note">A separate model audits implied requirements and prerequisite coverage.
-     Reviews and expected outputs are model judgments — dum can get arithmetic wrong,
-     so check its numbers. The tree is yours to correct with <code>:skill -name</code>.</p>
+  <h2 id="zones">Zones</h2>
 
-  <hr class="section-divider">
+  <p>A zone is something you're learning, like <code>Programming › Data Structures</code>. It's
+     not a folder or a Git repository. Zones are the only scope Dum has.</p>
 
-  <h2>Building and telling</h2>
+  <ul>
+    <li>Each zone has a name, a goal in your words, and an optional language. Leave the language
+        empty and the zone uses its parent's.</li>
+    <li>Zones nest, up to 16 levels deep. Names must differ between siblings.</li>
+    <li>The <em>Zones</em> tab has <em>New zone</em>, and for the selected zone <em>Enter</em>,
+        <em>New zone inside</em>, <em>Edit</em> and <em>Delete</em>. There's no way to move a
+        zone to a new parent.</li>
+    <li>The <em>Context</em> tab holds <em>Notes for this zone</em>: background Dum reads in this
+        zone and the zones inside it, up to 16 KiB per zone. Notes are context. They never unlock
+        a skill or give Dum access to a file.</li>
+  </ul>
 
-  <p>Work in your own editor. Run builds, tests, and programs in your own terminal.
-     Dum has no integrated editor, file tree, or embedded shell.</p>
+  <p>Entering a zone makes it the active context. Do it from the Zones tab, with
+     <code>⌘K</code> in the command bar, or from <em>Switch Zone</em> in the menu bar. Switching
+     stops whatever Dum was doing in the old zone. Earlier conversation in the new zone comes
+     back as history; a question Dum asked last time isn't waiting for an answer any more.</p>
 
-  <p>When you are satisfied with what you built, open <em>Tools → Tell dum what I built</em>.
-     This prepares a draft — the story of what you made, the decisions, and why they fit.
-     The draft never sends automatically. You review it and send it yourself.</p>
+  <p>A zone inherits its ancestors' goals, nearest language and notes, up to
+     64 KiB of notes in total, keeping the nearest zones first. It doesn't inherit their
+     conversation, memory, suggested projects, change history or followed folders. Those belong
+     to one zone. Your skills belong to none: there's one tree, and a skill you prove in one zone
+     counts in all of them.</p>
 
-  <p>Explaining what you built is not the same as build evidence.
-     A story written with wizard help is AI-assisted and does not establish unaided build.
-     Core algorithms use the same evidence gates as everything else; the gate is checked in
-     code even when a prerequisite is later removed.</p>
+  <p>Deleting a zone also deletes the zones inside it. Your skills, memory notes and evidence
+     stay, and the zone's files stay on disk in <code>~/.dum/zones/</code> for you to look at.</p>
 
-  <p><code>:changes</code> shares your current saved diff.
-     <code>:inspect path/to/file</code> shares a bounded excerpt.
-     Dum can also read bounded files in the selected project when needed.
-     It does not watch keystrokes or scan your home directory.</p>
+  <h2 id="skills">Skills and evidence</h2>
 
-  <hr class="section-divider">
+  <p>Your skills are plain Markdown files in <code>~/.dum/skills/</code>, one per skill. You can
+     read, edit or delete them; they open in Obsidian. A skill is scoped to a language or to
+     none, so <code>printing</code> in Python doesn't count in Go.</p>
 
-  <h2>The wizard</h2>
+  <p>The <em>Skills</em> tab shows curated tracks: basics for C, C++, Go, Java, JavaScript,
+     Python, Rust and TypeScript, plus graphics, interview, systems and a language-free builder
+     track. Each skill shows as built, recognized, open (everything under it is built) or
+     locked. Skills you add that aren't on a track still get up to three mapped prerequisites.</p>
 
-  <p>The wizard is the taller character floating beside your IDE.
-     It gives occasional unprompted advice — not on every action, and not as a tutor.</p>
+  <h3>Recognize, build, apply</h3>
 
-  <p>When the wizard cites a source, the anchor words and link come from a verified catalog.
-     The connecting sentence passes a word-pattern screen for dates, statistics,
-     unsourced names, and causal claims. The screen does not fact-check everything,
-     and the wizard may stay silent when no anchor fits.</p>
+  <ul>
+    <li><strong>Recognize.</strong> You explained what the skill is and what it's for, in your own
+        words. Dum quotes the sentence it's crediting, and the quote has to come from your message
+        in that request. Its prerequisites have to be recognized too.</li>
+    <li><strong>Build.</strong> You wrote it yourself, unaided. Share the files, Dum reviews them,
+        then asks whether you wrote them yourself without AI or copied code. Only
+        <code>y</code> or <code>yes</code> records the build; anything else keeps the review and
+        records nothing. When you hand in a <a href="#projects">suggested project</a>, the
+        <code>--unaided</code> flag is that yes. A build also needs its prerequisites built.</li>
+    <li><strong>Apply.</strong> You built it and then reasoned about when and why to use it. The
+        same reasoning without a build only records recognition.</li>
+  </ul>
 
-  <h2>Screen advice and sharing</h2>
+  <p>Screens, files Dum reads, suggestions, memory, zone notes and code Dum wrote never count as
+     evidence. A saved file doesn't prove you wrote it; your own yes does, and it can be wrong.
+     Reviews are model judgments, so check them.</p>
 
-  <p>On a fresh install, the wizard uses periodic screen snapshots for unprompted advice.
-     Pause or resume advice with the one-click button in the companion panel, or switch
-     its source to saved project files in Settings.
-     Screen mode can see anything visible, including private information and unsent drafts.
-     macOS requires Screen Recording permission; denied access pauses advice, not a silent
-     switch to files.</p>
+  <p>You can also add a skill you already have with <code>:skill name</code> or
+     <code>:skill name in python</code>. That records a self-report that you can write it unaided,
+     and it isn't reviewed. <code>:skill -name</code> takes a skill off the tree.</p>
 
-  <p>Manual sharing is separate: pick a screen or window, review the preview, then press
-     <em>Send</em> with a message. An unsent preview expires after five minutes.
-     Neither path writes screenshots to disk.</p>
+  <h3>The gate</h3>
 
-  <p>When you send, a text description of what Claude sees enters the local conversation
-     and may persist in project memory. That does not mean Claude's service never retains
-     an image on its end.</p>
+  <p>The gate decides what Dum may write for you. It's checked in code, not just asked of the
+     model. Concepts (language features, data structures, algorithms) need build. Tools (one
+     library, framework, API or command) need recognize. Skills on a curated track always count
+     as concepts. Every prerequisite under a skill has to hold too, so if you take an early rung
+     back, the skills that rest on it lock again, though their notes stay.</p>
 
-  <p>No key logging or passive audio recording. Voice uses bundled OpenSuperWhisper
-     on macOS 14+ with Apple Silicon: configure its local model, permissions, and shortcut;
-     focus dum's input, dictate, review the transcript, then Send. Opening voice setup
-     doesn't start recording. OpenSuperWhisper may keep recordings locally in its own storage.</p>
+  <p>The <em>Boundary</em> tab, or <code>:boundary</code>, shows what Dum may do right now: what
+     it may write, what it may use as a tool, what's closed, and which files it may read and
+     change.</p>
 
-  <hr class="section-divider">
+  <h3>"not yet"</h3>
 
-  <h2>Project ideas</h2>
+  <p>If Dum just credited you with something you don't think you've earned, say
+     <code>not yet</code>, or <code>not yet recursion</code> to name the skill. The skill goes
+     back to where it was, and Dum holds it there across zones and restarts. Only a reviewed
+     unaided build or a <code>:skill</code> self-report lifts the hold.</p>
 
-  <p><code>:practice projects in go</code> (or another language) suggests substantial
-     projects sized to your current tree. Suggestions draw on your skill tree,
-     project memory, and — if you have configured it — optional personal context.</p>
+  <p>The strip at the top of the panel reads newbie, intern, good and cracked at 0, 8, 24 and 64
+     built skills with their prerequisites intact. Messages and recognition don't move it. It's a
+     joke label, not a rating.</p>
 
-  <p>Projects are ordered by estimated active-work hours, then difficulty.
-     Each suggestion shows why it fits and an ordered path through several skill levels,
-     so you have milestones rather than a single finish line.</p>
+  <h2 id="talking">Talking to Dum</h2>
 
-  <p>Choosing a project does not unlock anything.
-     Cross-language experience informs suggestions but does not grant skill credit
-     in an unfamiliar language. Build evidence is always language-specific.</p>
+  <p>There are three surfaces, all sharing one conversation and one draft per zone.</p>
 
-  <p class="note">Estimates and recommendations are model judgments, not promises.
-     <code>:practice &lt;skill&gt;</code> stays available for focused work on a single
-     skill when a large project is not what you need.</p>
+  <ul>
+    <li><strong>The panel</strong> has the tabs: Conversation, Zones, Skills, Memory, History,
+        Context, Evidence, Boundary, Suggested projects, Changes and Settings. Closing it hides
+        it.</li>
+    <li><strong>The command bar</strong> opens with <code>⌘⇧D</code> in the middle of the screen
+        your cursor is on. Type a message or a command, see the latest reply, switch zones with
+        <code>⌘K</code>, or jump to a panel tab. <code>Esc</code> closes it and gives focus back to
+        the app you were in. Your draft stays.</li>
+    <li><strong>The bubble</strong> appears near your cursor when you use voice. It shows what
+        you said and Dum's reply. You can't click it; clicks go through to whatever is under
+        it.</li>
+  </ul>
+
+  <h3>Voice</h3>
+
+  <p>Hold <code>⌃⌥Space</code> and talk; let go to stop. Speech is turned into text on your Mac
+     by a bundled copy of OpenSuperWhisper, set up under <em>Set up voice</em> in Settings, where
+     you allow the microphone and pick a language and a speech model. The text lands in your
+     draft. It never sends itself. The bubble shows it for 20 seconds; press <code>⌘⇧↩</code> to
+     send it, or open the command bar to edit it.</p>
+
+  <ul>
+    <li>Voice won't start over a draft that isn't empty. Send it, edit it or clear it first.</li>
+    <li>A recording stops after two minutes and is thrown away.</li>
+    <li>The audio is a temporary file, deleted when transcription finishes or fails.</li>
+    <li>You can also start and stop voice with the <em>Voice</em> button or the menu bar.</li>
+    <li>Voice comes with the packaged app on Apple Silicon. Running Dum straight from a checkout
+        with <code>npm run desktop</code> has no voice.</li>
+  </ul>
+
+  <h3>Keyboard only</h3>
+
+  <p>Everything works without the mouse.</p>
+
+  <ul>
+    <li><code>Return</code> sends, <code>Shift-Return</code> adds a line, <code>⌘.</code> stops
+        Dum.</li>
+    <li><code>Esc</code> backs out one step: it closes an open chooser first, then the command
+        bar. In the panel it goes back to Conversation, then hides the panel. It never stops Dum
+        or answers a question.</li>
+    <li>Panel tabs: arrow keys move, <code>Home</code> and <code>End</code> jump, Return
+        opens.</li>
+    <li>Zone tree: Up and Down move, Right and Left open and close, Return enters,
+        <code>F2</code> edits.</li>
+    <li>The <code>⌘K</code> switcher filters as you type.</li>
+    <li>The three global shortcuts (command bar, hold to talk, send the draft) can be changed in
+        Settings. Each needs <code>⌘</code>, <code>⌃</code> or <code>⌥</code>.</li>
+  </ul>
+
+  <h3>Sharing</h3>
+
+  <p>Dum can't see your files unless you show it. <em>Share</em> in the message box offers
+     <em>A file…</em>, <em>A folder…</em>, <em>Type a path…</em> and <em>A screen or window…</em>.
+     A typed path still needs your confirmation in a macOS dialog. A share lasts for one message:
+     once Dum finishes answering, it can't read the files again. Text it already read stays in
+     the conversation. A share you don't send expires after five minutes. For a folder Dum should
+     keep seeing, <a href="#look">follow it</a>.</p>
+
+  <p>A screenshot is previewed before you send it. It goes once to the helper model, and only the
+     helper's text description goes into the conversation. Dum doesn't save it to disk.</p>
+
+  <h3>Commands</h3>
+
+  <ul>
+    <li><code>:tree</code> or <code>:skills</code>: your skill tree.</li>
+    <li><code>:inspect file</code> or <code>:inspect file:10-40</code>: show Dum a file you
+        shared or follow.</li>
+    <li><code>:projects</code>: <a href="#projects">suggested projects</a>.</li>
+    <li><code>:submit p1 file --unaided</code>: hand in your work on a project.</li>
+    <li><code>not yet</code>: undo the skill just recorded.</li>
+    <li><code>:skill x</code>, <code>:skill -x</code>: add or remove a skill.</li>
+    <li><code>:memory</code>, <code>:remember note</code>: this zone's notes.</li>
+    <li><code>:context</code>: the personal background used for suggestions.</li>
+    <li><code>:evidence</code>: what each skill rests on.</li>
+    <li><code>:boundary</code>: what Dum may do right now.</li>
+    <li><code>:log</code>: everything said in this zone.</li>
+    <li><code>:help</code>: this list.</li>
+  </ul>
+
+  <p><em>Mode</em> in Settings is <em>understand</em> or <em>anti-vibe</em>. Both use the same
+     gate. Anti-vibe asks for your approach first, then Dum does the unlocked parts.</p>
+
+  <p class="note">Voice, giving focus back to your previous app, and the bubble floating over
+     full-screen apps use macOS APIs that haven't been tried on a real Mac yet.</p>
+
+  <h2 id="changes">Changes</h2>
+
+  <p>Ask Dum to change a file and, if you hold the skills, it writes the change straight into the
+     file. There's no yes/no step. You see the diff afterward, with a <em>Revert</em> button.</p>
+
+  <ul>
+    <li>Dum only writes files you shared with the message or that sit in a folder you follow in
+        this zone. A new file can only go inside a shared or followed folder.</li>
+    <li>Each change names the skills it uses. If one is locked, nothing is written and Dum says
+        which skill and why.</li>
+    <li>Dum reads a file before changing it, and writes only if the file is byte-for-byte what
+        it read. If you saved in your editor since, the change is refused and Dum reads it
+        again. It never writes over a save it hasn't seen.</li>
+    <li>A new file is never created over one that appeared in the meantime. Yours is kept.</li>
+  </ul>
+
+  <p>The diff shows in the conversation, and the <em>Changes</em> tab lists every change in the
+     zone, newest first. <em>Revert</em> puts the file back the way it was, or deletes a file Dum
+     created. It works after the share has ended. If you've edited the file since Dum wrote it,
+     Revert refuses and your edits stay.</p>
+
+  <p>Each change is kept in <code>~/.dum/zones/&lt;zone&gt;/changes/</code> with the file before,
+     after, and the full patch. <em>open the change record</em> opens the patch.</p>
+
+  <p>Dum doesn't run your programs, tests or builds. Run them in your own terminal.</p>
+
+  <h2 id="look">The look</h2>
+
+  <p>Dum is always on. While you're in a zone it looks every 3 seconds, without a model, and
+     calls a model only when something changed. It never reads keystrokes, the clipboard or your
+     editor's unsaved text.</p>
+
+  <h3>What it reads every 3 seconds</h3>
+
+  <ul>
+    <li><strong>Apps</strong>: which app is in front, its name and window number. Not window
+        titles.</li>
+    <li><strong>Screen</strong>: a 320-pixel-wide image of the display your cursor is on, shrunk
+        to a 64 × 40 grid of gray levels and compared with the last one. Only the number of
+        changed cells leaves the main app process. The image isn't kept or saved.</li>
+    <li><strong>Followed folders</strong>: whether any file's size or timestamps changed. A file
+        that changed is read in full. New files are picked up about every 15 seconds.</li>
+  </ul>
+
+  <p>While a Dum window has focus, the app and screen are ignored.</p>
+
+  <h3>What makes it call a model</h3>
+
+  <ul>
+    <li>You saved, added or removed a file in a followed folder, and it stayed quiet for two
+        looks.</li>
+    <li>You switched apps or windows and stayed for two looks.</li>
+    <li>The screen was busy for a bit, then went still.</li>
+  </ul>
+
+  <p>The call goes to the helper model and the Wizard answers, or stays quiet. If you switched
+     apps or the screen settled, the screen look is on and the helper can see pictures, Dum sends
+     one 1280-pixel-wide frame of the screen with it. A saved file sends the diff, not a frame.
+     The Wizard may also keep one short note in the zone's memory.</p>
+
+  <h3>The caps</h3>
+
+  <ul>
+    <li>At most 40 calls an hour, and one at a time.</li>
+    <li>At least 30 seconds between any two calls; a minute between file triggers, 90 seconds
+        between screen triggers, two minutes between app triggers.</li>
+    <li>The same app window doesn't trigger again for 10 minutes.</li>
+    <li>Up to four file diffs and 96 KiB per call. A frame over 3.75 MB isn't sent.</li>
+    <li>No calls while Dum is answering you or waiting on your answer.</li>
+  </ul>
+
+  <h3>Screen look and permission</h3>
+
+  <p>Settings → <em>Look</em> has two switches, <em>Apps</em> and <em>Screen</em>, both on in a new
+     install. The screen look needs macOS Screen Recording permission, which macOS asks for on
+     first launch. If you say no, Dum looks at app switches and saved files only, until you allow
+     it under <em>Screen Recording settings</em>.</p>
+
+  <h3>Pausing</h3>
+
+  <p>Pause from the menu bar (<em>Pause the Look</em>), the <em>looking</em> pill at the top of
+     the panel, or Settings. It stays paused until you resume or restart Dum. The look also
+     stops while you're recording voice and while the Mac sleeps or is locked.</p>
+
+  <h3>Followed folders</h3>
+
+  <p>Settings → <em>Followed folders</em> → <em>Follow a folder…</em> picks a folder for this
+     zone. Dum may read the saved files in it, notices when you save, and can write
+     <a href="#changes">changes</a> there. Up to eight folders per zone.</p>
+
+  <ul>
+    <li>Only text files up to 256 KiB are read, up to 2,000 files per folder.</li>
+    <li>Hidden files and folders are skipped, which includes <code>.git</code> and
+        <code>.env</code>, and so are <code>node_modules</code>, <code>dist</code>,
+        <code>build</code> and <code>target</code>.</li>
+    <li>Credential-looking files are skipped: SSH keys, <code>.pem</code> and <code>.key</code>
+        files, token and secret files, and the like. That's by name; a secret pasted into an
+        ordinary source file isn't detected.</li>
+    <li>Your home folder, the whole disk, system folders and <code>~/Library</code> can't be
+        followed.</li>
+  </ul>
+
+  <p>Without a backend Dum still watches, and the status says advice needs a backend.</p>
+
+  <p class="note">Noticing app switches and the Screen Recording prompt use macOS APIs that
+     haven't been tried on a real Mac yet.</p>
+
+  <h2 id="projects">Suggested projects</h2>
+
+  <p>Dum doesn't run courses or quizzes. When you want practice it suggests projects that fit a
+     skill's scope and your zone.</p>
+
+  <ul>
+    <li><code>:projects new</code> suggests projects for this zone; <code>:projects recursion</code>
+        sizes them to one skill. Add <code>in go</code> for a language. The Skills tab has a
+        <em>suggest projects</em> button on each skill.</li>
+    <li>Each project says what done means, roughly how many active hours it takes, how hard it is,
+        why it fits, and an ordered list of milestones, prerequisites first.</li>
+    <li>Projects are sorted by estimated time, then difficulty. A second model call checks each
+        one covers what it claims; up to four come back.</li>
+    <li>Suggestions use the zone's goal and notes, your tree, the zone's memory, and your personal
+        context file if you turned it on in Settings.</li>
+    <li><code>:projects start p1</code> marks one you're working on. The Wizard keeps its asides to
+        itself until you <code>:projects stop</code> or pass every milestone unaided.</li>
+    <li><code>:submit p1 main.go --unaided</code> hands in your work, as does <em>Hand it in</em> in
+        the Suggested projects tab. Each milestone is reviewed on its own, in prerequisite order.
+        Without <code>--unaided</code>, or the <em>I wrote this myself</em> box, you get the review
+        but no build credit.</li>
+  </ul>
+
+  <p>Choosing or starting a project unlocks nothing. Time estimates are model guesses.</p>
+
+  <h2 id="wizard">The Wizard</h2>
+
+  <p>The Wizard is the advisor. It speaks up during a conversation when it suspects a concrete
+     mistake, at most once per request, and after <a href="#look">the look</a> notices something.
+     Most of the time it says nothing.</p>
+
+  <p>When it cites something, the claim and the link come from a fixed catalog of primary sources:
+     Git, SQLite, Python, Node and Effective Go docs, the Rust Book, cppreference, MDN and the HTTP
+     RFC. Its own sentence passes a word screen that drops dates, statistics, quotes, unsourced
+     names and claims about what everyone does. The screen is a filter, not a fact-checker. If no
+     source fits, the Wizard stays quiet.</p>
+
+  <h2 id="backends">Who powers Dum</h2>
+
+  <p><em>Who powers Dum?</em> picks the backend and two models: <em>Dum's model</em> for the
+     conversation and the <em>Helper model</em> for the Wizard, the look, screenshots and project
+     suggestions. Both come from the same backend. Change them later under Settings →
+     <em>Agent</em>.</p>
+
+  <h3>Backends</h3>
+
+  <ul>
+    <li><strong>Claude.</strong> Public builds connect with your own Anthropic API key. Local builds
+        can also <em>Sign in with Claude</em> and use a Claude subscription. Defaults are
+        <code>claude-opus-5-5</code> for Dum and <code>claude-fable-5-1</code> for the helper, both
+        at high effort. Dum ships with its own Claude Code, so you don't install anything.</li>
+    <li><strong>On this Mac.</strong> Models you run in Ollama or LM Studio. Dum installs neither.
+        It finds them on <code>127.0.0.1</code> (ports 11434 and 1234) and won't talk to any other
+        address. Ollama cloud models are refused. LM Studio models are text-only in Dum, so they
+        can't look at the screen.</li>
+    <li><strong>ChatGPT.</strong> Sign-in with your ChatGPT account is built, but it's switched off
+        in current builds.</li>
+  </ul>
+
+  <p>Model lists come live from the backend. Dum's model has to support function calling. If the
+     helper can't see pictures, the screen look and shared screenshots don't work with it. Models
+     Dum hasn't been verified with are marked <em>untested</em>; so far that's every model but the
+     two Claude defaults.</p>
+
+  <p>There's no fallback. If the backend you picked fails, Dum tells you; it never quietly
+     switches to another one.</p>
+
+  <h3>Build flavors</h3>
+
+  <p>Every build is public or local, fixed when it's built. A public build follows each
+     provider's rules: Claude only with an API key, never subscription sign-in. A local build,
+     which you make from source for yourself, may also sign in with a Claude subscription.
+     <code>npm run desktop</code> and <code>npm run desktop:mac-local</code> make local builds;
+     <code>npm run desktop:mac</code> makes the public Mac app.</p>
+
+  <p>Your API key is encrypted with Electron's safe storage, which uses the macOS Keychain, and
+     kept in Dum's app data, never in settings. Subscription sign-in is handled by the bundled
+     Claude Code, and signing out there also signs Claude Code out on your Mac.</p>
+
+  <p class="note">Key encryption and subscription sign-in haven't been tried on a real Mac
+     yet.</p>
+
+  <h2 id="privacy">Privacy</h2>
+
+  <h3>What stays on your Mac</h3>
+
+  <ul>
+    <li>Your skill tree, zones, conversations, memory, evidence, suggested projects and change
+        records, all as plain files in <code>~/.dum/</code>.</li>
+    <li>Settings and the encrypted API key, in Dum's app data folder.</li>
+    <li>Voice: audio and transcription never leave the Mac.</li>
+    <li>The look's routine screen samples. Only frames sent with a model call leave, and none are
+        saved.</li>
+  </ul>
+
+  <h3>What goes to the backend</h3>
+
+  <p>Your messages, the zone's goal and notes, your skills and boundary, recent conversation, and
+     the text of files Dum reads from shares and followed folders. For the look: the front app's
+     name, diffs of saved files, and sometimes a screen frame. For suggestions: your personal
+     context file, if you turned it on.</p>
+
+  <ul>
+    <li><strong>Claude</strong>: sent to Anthropic, through Claude Code, under your API key or
+        subscription.</li>
+    <li><strong>On this Mac</strong>: sent only to Ollama or LM Studio on <code>127.0.0.1</code>.
+        Dum can't control what that server does next, so check its settings if it can reach the
+        internet.</li>
+  </ul>
+
+  <p>The web tree is off unless you link it under Settings → <em>Web tree</em>. Then only your
+     skills and removals go to that server: no zones, conversations, holds or files. Anyone with
+     the link can see and edit the tree there.</p>
 
   <p>Using Dum outside programming? See <a href="/subjects">other subjects</a>.</p>
 

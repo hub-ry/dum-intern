@@ -1,15 +1,24 @@
 {
   "compilerOptions": {
     "target": "es2023",
-    "lib": ["es2024", "dom", "dom.iterable"],
+    "lib": [
+      "es2024",
+      "dom",
+      "dom.iterable"
+    ],
     "module": "esnext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "strict": true,
     "noEmit": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "skipLibCheck": true
   },
-  "include": ["./**/*.ts"]
+  "files": [
+    "./art.d.ts",
+    "./renderer.ts"
+  ]
 }

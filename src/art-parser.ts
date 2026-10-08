@@ -1,4 +1,4 @@
-// The pixel art format, with no file or terminal access: the terminal and the desktop renderer share it.
+// The pixel art format, with no file access: the desktop renderer and the build's app icon share it.
 
 export type Frame = { name: string; rows: string[] };
 export type Sprite = { palette: Map<string, string | null>; frames: Frame[] };

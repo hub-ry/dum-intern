@@ -3,6 +3,15 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { appIconPng } from './app-icon.mjs';
 
+// The flavor is fixed at build time (docs/llm-setup-design.md §8.3); main reads build-info.json.
+const FLAVORS = ['public', 'local'];
+const at = process.argv.indexOf('--flavor');
+const flavor = at === -1 ? undefined : process.argv[at + 1];
+if (!FLAVORS.includes(flavor)) {
+  console.error(`desktop-build: --flavor ${FLAVORS.join('|')} is required`);
+  process.exit(1);
+}
+
 await rm('dist', { recursive: true, force: true });
 execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.desktop.json'], { stdio: 'inherit' });
 await Promise.all([
@@ -11,12 +20,15 @@ await Promise.all([
   cp('src/desktop/ui/index.html', 'dist/desktop/ui/index.html'),
   cp('src/desktop/ui/style.css', 'dist/desktop/ui/style.css'),
   build({ entryPoints: ['src/desktop/preload.ts'], outfile: 'dist/desktop/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
+  build({ entryPoints: ['src/desktop/bubble-preload.ts'], outfile: 'dist/desktop/bubble-preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
   build({ entryPoints: ['src/desktop/ui/renderer.ts'], outfile: 'dist/desktop/ui/renderer.js', bundle: true, platform: 'browser', format: 'iife', loader: { '.txt': 'text' }, target: 'chrome144' }),
 ]);
 await rm('dist/desktop/preload.js', { force: true });
+await rm('dist/desktop/bubble-preload.js', { force: true });
+await writeFile('dist/desktop/build-info.json', `${JSON.stringify({ flavor })}\n`);
 
 // Reuse Dum's original portrait for the app icon.
-const { parse } = await import('../dist/sprite.js');
+const { parse } = await import('../dist/art-parser.js');
 const png = appIconPng(parse(await readFile('src/art/intern.txt', 'utf8')));
 await mkdir('build', { recursive: true });
 await writeFile('build/icon.png', png);
@@ -30,4 +42,4 @@ if (process.platform === 'darwin') {
   }
   execFileSync('/usr/bin/iconutil', ['-c', 'icns', 'build/icon.iconset', '-o', 'build/icon.icns'], { stdio: 'inherit' });
 }
-console.log('Desktop compiled with local renderer, curriculum, portraits and app icon.');
+console.log(`Desktop compiled (${flavor} flavor) with renderer, curriculum, portraits and app icon.`);

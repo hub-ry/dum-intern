@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>installation — dum intern</title>
-  <meta name="description" content="How to install dum: download the Mac app or build from source.">
+  <meta name="description" content="How to install Dum, the Mac app: requirements, choosing a backend, and building it from source.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -18,115 +18,89 @@
   <h1>Installation</h1>
   <p class="jump-link"><a href="#ai-install">Have your AI install it <span aria-hidden="true">↓</span></a></p>
 
-  <h2>Mac app</h2>
-
-  <h3>Prerequisites</h3>
+  <h2>Requirements</h2>
   <ul>
-    <li>macOS 13 or later</li>
-    <li>Git — comes with Apple's Command Line Tools; dum offers to install them if missing</li>
-    <li>A Claude subscription that includes <code>claude-opus-5-5</code> and <code>claude-fable-5-1</code>.
-        No API key or paid-usage route. The subscription must grant access to both models.</li>
+    <li>macOS 13 or later, on Apple Silicon or Intel.</li>
+    <li>Voice needs macOS 14 or later on Apple Silicon. Everything voice does also works from
+        the keyboard.</li>
+    <li>A backend to power Dum. Either your own Anthropic API key for Claude, or models running on
+        your Mac in Ollama or LM Studio. A build you make yourself can also use a Claude
+        subscription. See <a href="/docs#backends">who powers Dum</a>.</li>
   </ul>
-  <p class="note">The app carries its own Node and Claude Code runtime. No terminal is needed.</p>
-  <p>Optional bundled voice dictation needs macOS 14 or later on Apple Silicon.
-     It uses OpenSuperWhisper's local model and your configured recording shortcut;
-     microphone and Accessibility permissions are required.</p>
+  <p class="note">The app carries its own Claude Code. You don't install anything else to use
+     Claude.</p>
 
-  <h3>Download</h3>
-  <p class="note">Test prerelease — these artifacts predate the current companion redesign.
-     Build from source to try the current version.</p>
-
-  <div class="dl-block">
-    <a href="https://github.com/hub-ry/dum-intern/releases/download/desktop-macos-c37b371-test/Dum-0.0.1-mac-arm64.dmg">
-      Dum-0.0.1-mac-arm64.dmg
-    </a>
-    <span class="dl-meta">Apple Silicon</span>
-  </div>
-
-  <div class="dl-block">
-    <a href="https://github.com/hub-ry/dum-intern/releases/download/desktop-macos-c37b371-test/Dum-0.0.1-mac-x64.dmg">
-      Dum-0.0.1-mac-x64.dmg
-    </a>
-    <span class="dl-meta">Intel</span>
-  </div>
-
-  <p>ZIPs and <code>SHA256SUMS.txt</code> are on the
-    <a href="https://github.com/hub-ry/dum-intern/releases/tag/desktop-macos-c37b371-test">release page</a>.
-  </p>
-
-  <pre><code>2941c6724c442dbca50c24b732cfdfb22940605c9e26103b569b052a29ce66bd  Dum-0.0.1-mac-arm64.dmg
-79c13ce09abddcd8cea3588b1fe49167119ba616f1a181b4c16aec1035f27178  Dum-0.0.1-mac-x64.dmg
-04ee99ed13e0cb5fea1f35020abb61c46b91ceac6ab2ab1e2d864a54d0f392f2  Dum-0.0.1-mac-arm64.zip
-869351dc471645ea22e1ee8187e68f7d87e2063d1eb321df3387e26f78653397  Dum-0.0.1-mac-x64.zip</code></pre>
+  <h2>Download</h2>
+  <p class="note">There's no public release of this version yet. Build it from source below.</p>
+  <p>Test builds come out of the
+    <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>
+    on pushes to <code>main</code>. They're public builds, ad-hoc signed and not notarized, and
+    only signed-in GitHub accounts can download them. The older test prerelease on the releases
+    page predates zones and doesn't match these docs.</p>
 
   <h3>First run</h3>
   <ol>
     <li>Open the DMG, drag Dum into Applications, and launch it.</li>
-    <li>If macOS blocks it: open System Settings → Privacy &amp; Security → Security → Open Anyway.</li>
-    <li>Sign in to Claude when prompted. Dum never sees your password.</li>
-    <li>Choose a Git project folder.</li>
-    <li>Click the characters or press <code>Cmd+Shift+D</code> to open the conversation.</li>
+    <li>If macOS blocks it: System Settings → Privacy &amp; Security → Security → Open Anyway.</li>
+    <li>macOS asks for Screen Recording permission, for Dum's look. If you say no, Dum looks at
+        app switches and saved files only.</li>
+    <li>Answer <em>What are you trying to learn?</em> That becomes your first zone.</li>
+    <li>Click <em>Who powers Dum?</em> and pick a backend and models.</li>
+    <li>Press <code>⌘⇧D</code> from anywhere to open the command bar.</li>
   </ol>
-  <p class="note">Dum lives in the menu bar and a small floating pair. There is no Dock icon.</p>
+  <p class="note">Dum lives in the menu bar. There's no Dock icon.</p>
 
-  <hr class="section-divider">
-
-  <h2>Source install</h2>
+  <h2>Build from source</h2>
 
   <h3>Prerequisites</h3>
   <ul>
+    <li>A Mac with macOS 13 or later</li>
     <li>Node 22.6 or later</li>
-    <li>Git</li>
-    <li>The <code>claude</code> CLI, logged into a Claude subscription with
-        <code>claude-opus-5-5</code> and <code>claude-fable-5-1</code></li>
   </ul>
 
-  <h3>Terminal edition</h3>
-  <pre><code>claude auth login
-npm install
-npm link
-cd your-project
-dum</code></pre>
+  <pre><code>npm install
+npm run desktop            # build a local-flavor Dum and launch it from the checkout
+npm run desktop:mac-local  # package a local-flavor Mac app, with voice and the focus helper
+npm run desktop:mac        # package the public-flavor DMG and ZIP</code></pre>
 
-  <h3>Desktop app from source</h3>
-  <pre><code>npm run desktop        # compile and launch
-npm run desktop:pack   # unpacked app for this OS
-npm run desktop:mac    # DMG and ZIP (run on a Mac)</code></pre>
+  <p>A build you make yourself is local flavor, so it can sign in with a Claude subscription as
+     well as an API key. <code>npm run desktop:mac</code> makes a public build, the kind that
+     gets released, which uses an API key only.</p>
 
-  <p class="note">Linux and Windows: the terminal edition works on any platform Node supports.
-     The packaged desktop app is macOS only.</p>
+  <p class="note"><code>npm run desktop</code> runs without Dum's two native helpers, so there's
+     no voice, no noticing app switches, and <code>Esc</code> can't hand focus back to the app you
+     were in. Packaging builds them: the focus helper on any Mac, voice only on Apple Silicon, which
+     needs Xcode, cmake, Rust with the <code>aarch64-apple-darwin</code> target, and Homebrew
+     <code>libomp</code>.</p>
 
-  <p>Newer test builds are artifacts of the
-    <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>.
-    Signed-in GitHub accounts can download them directly.</p>
+  <p class="note">The checkout also starts on Linux. That's for development and testing only; Dum
+     is a Mac app.</p>
 
   <section class="terminal-setup" id="ai-install" aria-labelledby="terminal-setup-title">
     <h2 id="terminal-setup-title">Let a terminal LLM set it up</h2>
-    <p>Prefer to paste one instruction into the terminal agent you already use? This walks it through the source install, checks each step, and stops when it needs you.</p>
+    <p>Prefer to paste one instruction into the terminal agent you already use? This walks it through building Dum from source and launching it, checks each step, and stops when it needs you.</p>
     <div class="setup-prompt-head">
       <span class="dl-meta">paste into your terminal LLM</span>
       <button class="copy-button" type="button" data-copy-target="setup-prompt">copy</button>
     </div>
-    <pre><code id="setup-prompt">Set up Dum from https://github.com/hub-ry/dum-intern for me.
+    <pre><code id="setup-prompt">Set up Dum from https://github.com/hub-ry/dum-intern for me: build the Mac app from source and launch it.
 
 Work one step at a time. Check the result before continuing. Ask me before:
 - using sudo or installing anything system-wide
-- opening a browser for Claude login or completing 2FA
-- entering, copying, storing, or relaying passwords, one-time codes, recovery codes, or security keys
+- opening a browser for any sign-in or completing 2FA
+- entering, copying, storing, or relaying passwords, API keys, one-time codes, recovery codes, or security keys
 - writing outside the folder I give you
 - changing an existing project or deleting anything
 
-1. Check my OS, Node version, Git version, and whether the `claude` CLI is installed.
-2. If this is a Mac, use the source install. If it is Linux or Windows, explain that the terminal edition is the supported path.
-3. Ask where I want the repository. Clone it there if it is not already present.
-4. In the repository, run `npm install` and then `npm link`.
-5. Check Claude authentication. If I am not logged in, ask before running `claude auth login`. If Claude asks for browser login, 2FA, a passkey, an OTP, or a recovery code, stop and tell me to complete it myself. Never request, enter, store, or relay those secrets. Wait for me to confirm, then check authentication again.
-6. Ask which Git project I want to use, then run `dum` from that project.
-7. If a step fails, stop and show the exact next command. At the end, print the remaining setup steps and wait for me.</code></pre>
-    <p class="note">The prompt asks the agent to stop before auth, 2FA, system changes, or project edits. Never give an agent your password, one-time code, recovery code, or security key. Review its commands like any other shell command.</p>
+1. Check that this is a Mac on macOS 13 or later, and check my Node version (22.6 or later is needed). If it isn't a Mac, tell me Dum is a Mac app and stop. If Node is missing or too old, ask me before installing it.
+2. Ask where I want the repository. Clone it there if it is not already present.
+3. In the repository, run `npm install`.
+4. Run `npm run desktop`. It builds Dum and launches it, and keeps running until I quit Dum. Dum shows up in the menu bar, not the Dock.
+5. Tell me to finish setup in the app myself: answer the Screen Recording prompt, answer "What are you trying to learn?", then click "Who powers Dum?" and pick a backend. Never ask for, type, store, or relay my Anthropic API key or any sign-in code. I enter those in Dum myself.
+6. If a step fails, stop and show the exact error and the next command. At the end, print what's left for me to do and wait.</code></pre>
+    <p class="note">The prompt asks the agent to stop before system changes, sign-in, 2FA, or writing outside the folder you choose. Never give an agent your password, API key, one-time code, recovery code, or security key. Review its commands like any other shell command.</p>
   </section>
 </main>
-
 
 </body>
 </html>

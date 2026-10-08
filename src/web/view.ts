@@ -1,5 +1,5 @@
 // What the web page draws: every track as columns by depth, each skill with where it stands.
-// Computed on the server with the same code the terminal uses, so the page can't disagree.
+// Computed on the server with the same code the app uses, so the page can't disagree.
 
 import * as skills from "../skills.ts";
 import * as curriculum from "../curriculum.ts";

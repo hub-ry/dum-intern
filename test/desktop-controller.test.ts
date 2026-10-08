@@ -1,469 +1,391 @@
-// The desktop conversation: prompts answered only by the message meant for them, stops and
-// switches that approve nothing, one dum per project, and pictures that are looked at, not kept.
+// The utility host end to end: a real child process running the real controller, with fake agent
+// backends defined below. Forked with DUM_FAKE_HOST=1, this file serves the host instead of testing.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { hostname, tmpdir } from "node:os";
-import { DesktopController } from "../src/desktop/controller.ts";
-import { Store, Cancelled, type Entry } from "../src/store.ts";
-import { contract, prepare, toolkit } from "../src/session.ts";
-import { acquire } from "../src/session-lock.ts";
-import { decode, look } from "../src/look.ts";
-import * as memory from "../src/memory.ts";
-import * as skills from "../src/skills.ts";
-import type { Query } from "../src/oneshot.ts";
+import { fork, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { serve } from "../src/desktop/controller.ts";
+import { HostEventSchema, type HostEvent, type HostResult } from "../src/desktop/host-protocol.ts";
+import { DEFAULT_PREFERENCES } from "../src/desktop/protocol.ts";
+import * as skills from "../src/skills.ts";
+import type { AgentBackend, AgentChoice, AgentEvent, BackendId, CredentialSource } from "../src/agent/types.ts";
+import type { RequestBinding } from "../src/share-types.ts";
+import type { Zone } from "../src/zone-types.ts";
 
-const tick = () => new Promise((r) => setImmediate(r));
-const personal = { path: "", text: "", warning: "" };
-const PNG = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("a tiny picture")]).toString("base64");
-const image = { data: PNG, mimeType: "image/png" as const, label: "main.py - Editor" };
-const init = { type: "system", subtype: "init", apiKeySource: "none", tools: [], mcp_servers: [], plugins: [] };
+const NOTE = "working on a counter loop in counter.py";
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-/** Scratch skill home and Git repos, removed by `done`. */
-function scratch() {
-  const dirs: string[] = [];
-  const home = mkdtempSync(`${tmpdir()}/dum-home-`);
-  dirs.push(home);
-  process.env.DUM_HOME = home;
-  const repo = (files: Record<string, string> = {}) => {
-    const root = realpathSync(mkdtempSync(`${tmpdir()}/dum-desk-`));
-    dirs.push(root);
-    execFileSync("git", ["init", "-q"], { cwd: root });
-    for (const [path, body] of Object.entries(files)) writeFileSync(`${root}/${path}`, body);
-    return root;
+/** A backend that answers from the turn's text. Only "claude" may ever open a session here. */
+function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend {
+  const end: AgentEvent = { type: "end", error: null, interrupted: false };
+  return {
+    id,
+    label: `Fake ${id}`,
+    async models(_login, signal) {
+      const key = await credential("anthropic-key", signal);
+      return [{ id: key?.value ?? "no-key", label: "fake", efforts: [], images: true, actions: true, verified: false }];
+    },
+    capabilities: () => ({ images: true, interrupt: true, runtimeActionCheck: false }),
+    async open(o) {
+      if (id !== "claude") throw new Error(`the ${id} backend was never chosen`);
+      return {
+        async *turn(input) {
+          if (!o.actions.length) {
+            yield { type: "text", text: input.images?.length ? "a code editor showing a counter loop" : JSON.stringify({ anchor: null, say: "", note: NOTE }) };
+            yield end;
+            return;
+          }
+          if (input.text.includes("SLOW")) {
+            const { promise, resolve } = Promise.withResolvers<void>();
+            if (o.signal.aborted) resolve();
+            else o.signal.addEventListener("abort", () => resolve(), { once: true });
+            await promise;
+            yield { type: "text", text: "late words from a closed zone" };
+            yield end;
+            return;
+          }
+          const write = /WRITE ([0-9a-f-]{36}\/hello\.py)/.exec(input.text);
+          if (write) {
+            const change = o.actions.find((a) => a.name === "change")!;
+            const out = await change.call({ path: write[1], base_sha: null, content: "print('hi')\n", skills: [{ name: "variables", lang: "python" }] }, o.signal);
+            yield { type: "text", text: out.text };
+            yield end;
+            return;
+          }
+          yield { type: "text", text: `from ${id}` };
+          yield end;
+        },
+        async interrupt() {},
+        close() {},
+      };
+    },
   };
-  const done = () => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); };
-  return { repo, done };
 }
 
-async function until(what: string, ok: () => boolean) {
-  for (let i = 0; i < 500 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(ok(), what);
+type State = Extract<HostEvent, { type: "state" }>;
+type Reply = Extract<HostEvent, { type: "reply" }>;
+type Fixture = { dir: string; home: string; bin: string };
+
+const CHOICE: AgentChoice = {
+  backend: "claude", login: "anthropic-key",
+  intern: { backend: "claude", model: "fake-intern", effort: null },
+  helper: { backend: "claude", model: "fake-helper", effort: null },
+};
+const PERSONAL = { path: "", text: "", warning: "" };
+
+/** One isolated Dum home; the child's PATH is an empty folder, so no Git is reachable. */
+function fixture(): Fixture {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "dum-desktop-controller-")));
+  const bin = join(dir, "empty-bin");
+  mkdirSync(bin);
+  return { dir, home: join(dir, "home"), bin };
 }
 
-test("stopping withdraws a parked plan and self-report unanswered, and a late y is only the next request", async () => {
-  const { repo, done } = scratch();
-  try {
-    const root = repo({ "main.py": "print('hi')\n" });
-    const store = new Store("r", "understand", root, ["main.py"]);
-    const ctx = prepare({ name: "r", root, files: ["main.py"] }, "understand", store, personal);
-    const tools = Object.fromEntries(toolkit(ctx).map((t) => [t.name, t.run]));
-    skills.write(skills.unlock(skills.read(), { name: "printing", lang: "python", how: "typed", why: "test" }));
+class Host {
+  readonly epoch = randomUUID();
+  readonly events: HostEvent[] = [];
+  readonly child: ChildProcess;
+  private stderr = "";
+  private sequence = 0;
+  private readonly listeners = new Set<() => void>();
 
-    const plan = tools.propose_plan!({ summary: "x", pieces: [
-      { skill: "printing", lang: "python", what: "print", paths: ["main.py"] },
-      { skill: "change detection", lang: "python", what: "core", core: true, paths: ["core.py"] },
-    ] });
-    await until("the plan shows", () => store.getSnapshot().prompt?.type === "plan");
-    store.cancel();
-    await assert.rejects(plan, (err) => err instanceof Cancelled && !err.final);
-    assert.equal(ctx.plan, null);
-    const entry = () => store.getSnapshot().transcript.find((e) => e.kind === "plan");
-    assert.equal(entry()?.kind === "plan" && entry()!.approved, false, "withdrawn means not approved");
-
-    const next = store.askNext();
-    store.submit("y");
-    assert.equal(await next, "y", "the y answered what was showing: the next request");
-    assert.equal(ctx.plan, null);
-    assert.equal(store.getSnapshot().prompt, null, "the withdrawn plan never comes back");
-
-    const attest = tools.review_submission!({ skill: "conditionals", lang: "python", paths: ["main.py"], passed: true, feedback: "works" });
-    await until("the self-report shows", () => store.getSnapshot().prompt?.type === "question");
-    const asked = store.getSnapshot().prompt;
-    assert.ok(asked?.type === "question" && asked.purpose === "attest", "a self-report is marked for explicit yes/no controls");
-    store.cancel();
-    await assert.rejects(attest, Cancelled);
-    assert.equal(skills.levelIn(skills.read(), "conditionals", "python"), null, "a withdrawn self-report builds nothing");
-  } finally { done(); }
-});
-
-test("closing while a permission is parked answers nothing, and nothing after it is heard", async () => {
-  const store = new Store("r", "understand");
-  const asked = store.askQuestion("share /x/notes.txt with dum? (y/n)", "", false, "share");
-  store.close();
-  await assert.rejects(asked, (err) => err instanceof Cancelled && err.final);
-  const after = store.getSnapshot();
-  assert.equal(after.prompt, null);
-  store.submit("y");
-  store.note("late");
-  assert.equal(store.getSnapshot(), after, "a closed store changes for nobody");
-  await assert.rejects(store.askNext(), (err) => err instanceof Cancelled && err.final);
-  const question = after.transcript.find((e) => e.kind === "question");
-  assert.equal(question?.kind === "question" && question.answer, null);
-});
-
-test("a picture is refused at a permission prompt, and stopping denies that permission", async () => {
-  const { repo, done } = scratch();
-  const outside = mkdtempSync(`${tmpdir()}/dum-outside-`);
-  const c = new DesktopController(() => {});
-  try {
-    const root = repo({ "main.py": "x = 1\n" });
-    writeFileSync(`${outside}/notes.txt`, "outside notes\n");
-    await c.choose(root, personal);
-    assert.equal(c.state?.prompt?.type, "next");
-    assert.ok(c.canAttach && c.inputToken);
-
-    await c.send(`:inspect ${outside}/notes.txt`, c.inputToken);
-    await until("the share permission shows", () => c.state?.prompt?.type === "question");
-    const prompt = c.state!.prompt;
-    assert.ok(prompt?.type === "question" && prompt.purpose === "share");
-    assert.ok(!c.canAttach);
-    await assert.rejects(c.send("y", c.inputToken, image), /picture only goes/);
-    assert.equal(c.state?.prompt, prompt, "the refused message answered nothing");
-
-    c.interrupt();
-    await until("back at what next", () => c.canAttach);
-    const t = c.state!.transcript;
-    assert.ok(!t.some((e) => e.kind === "excerpt"), "nothing outside was read");
-    assert.ok(t.some((e) => e.kind === "note" && /:inspect stopped/.test(e.text)));
-    await assert.rejects(c.send("hello", "a-stale-token"), /closed before/);
-    await assert.rejects(c.send(":web", c.inputToken), /terminal edition/);
-    await assert.rejects(c.send("x".repeat(40 * 1024), c.inputToken), /over/);
-    assert.throws(() => c.command("skill", "recursion"), /isn't a desktop command/);
-  } finally {
-    await c.close();
-    rmSync(outside, { recursive: true, force: true });
-    done();
+  constructor(f: Fixture) {
+    this.child = fork(fileURLToPath(import.meta.url), [], {
+      execArgv: ["--import", "tsx"],
+      env: { ...process.env, PATH: f.bin, DUM_FAKE_HOST: "1", DUM_HOST_EPOCH: this.epoch, DUM_HOME: f.home, DUM_CONTEXT: "off", DUM_TEST_CREDENTIAL_MS: "400" },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    this.child.stderr!.on("data", (chunk) => { this.stderr += chunk; });
+    this.child.on("message", (message) => {
+      const parsed = HostEventSchema.safeParse(message);
+      assert.ok(parsed.success, `the host sent an invalid event: ${JSON.stringify(message).slice(0, 300)}`);
+      this.events.push(parsed.data);
+      for (const l of this.listeners) l();
+    });
   }
-});
 
-test("switching projects closes the old one first, and nothing meant for it reaches the new one", async () => {
-  const { repo, done } = scratch();
-  const c = new DesktopController(() => {});
-  try {
-    const a = repo({ "a.py": "x = 1\n" });
-    const b = repo({ "b.py": "y = 2\n" });
-    c.panel("tree");
-    assert.ok(c.tree && c.tree.tracks.length, "the tree reads before any project opens");
-    await c.choose(a, personal);
-    const tokenA = c.inputToken;
-    assert.ok(existsSync(`${a}/.dum/session.lock`));
-    assert.throws(() => acquire(a, "terminal"), /already open/, "a terminal dum can't open it beside the desktop");
-
-    await c.choose(b, personal);
-    assert.equal(c.state?.root, b);
-    assert.ok(!existsSync(`${a}/.dum/session.lock`) && existsSync(`${b}/.dum/session.lock`));
-    await assert.rejects(c.send(":remember meant for a", tokenA), /closed before/);
-    await c.send(":remember meant for b", c.inputToken);
-    assert.match(readFileSync(`${b}/.dum/memory.md`, "utf8"), /meant for b/);
-    assert.ok(!existsSync(`${a}/.dum/memory.md`), "the old project heard nothing");
-
-    const other = acquire(a, "terminal");
-    await assert.rejects(c.choose(a, personal), /already open/);
-    assert.equal(c.state?.root, b, "a refused switch leaves the open project as it was");
-    assert.ok(c.inputToken);
-    other();
-
-    await c.close();
-    assert.equal(c.state, null);
-    assert.equal(c.inputToken, "");
-    assert.ok(!existsSync(`${b}/.dum/session.lock`));
-  } finally {
-    await c.close();
-    done();
+  /** The first event (kept or still to come) that matches, removed from the log. */
+  take<T extends HostEvent>(predicate: (e: HostEvent) => e is T, ms = 15_000): Promise<T> {
+    const { promise, resolve, reject } = Promise.withResolvers<T>();
+    const look = () => {
+      const i = this.events.findIndex(predicate);
+      if (i < 0) return;
+      this.listeners.delete(look);
+      clearTimeout(timer);
+      resolve(this.events.splice(i, 1)[0] as T);
+    };
+    const timer = setTimeout(() => {
+      this.listeners.delete(look);
+      reject(new Error(`timed out waiting for the host\n${this.stderr}`));
+    }, ms);
+    this.listeners.add(look);
+    look();
+    return promise;
   }
-});
 
-test("a restored conversation is history: its plan and self-report wait for nothing", async () => {
-  const { repo, done } = scratch();
-  const c = new DesktopController(() => {});
-  try {
-    const root = repo({ "main.py": "x = 1\n" });
-    const entries: Entry[] = [
-      { kind: "plan", id: 1, plan: "add printing", approved: null },
-      { kind: "question", id: 2, question: "did you write main.py yourself, without AI or copied code? (y/n)", why: "", answer: null },
-      { kind: "shot", id: 3, label: "Terminal", observation: "a failing test", sha: "a".repeat(64) },
-    ];
-    memory.save(root, entries);
-    assert.deepEqual(memory.load(root).entries, entries, "a shared picture's description round-trips; it holds no picture");
-
-    await c.choose(root, personal);
-    assert.equal(c.state?.prompt?.type, "next");
-    assert.deepEqual(c.state?.transcript.slice(0, 3), entries);
-
-    const store = new Store("r", "understand");
-    store.restoreTranscript(entries);
-    store.submit("y");
-    const t = store.getSnapshot().transcript;
-    assert.equal(t[0]?.kind === "plan" && t[0].approved, null, "a y after restoring approves no old plan");
-    assert.equal(t[1]?.kind === "question" && t[1].answer, null);
-    assert.equal(store.getSnapshot().prompt, null);
-  } finally {
-    await c.close();
-    done();
+  /** The newest state that satisfies `predicate`, waiting for one if none came yet. */
+  async until(predicate: (s: State) => boolean): Promise<State> {
+    const seen = this.events.findLast((e): e is State => e.type === "state" && predicate(e));
+    return seen ?? this.take((e): e is State => e.type === "state" && predicate(e));
   }
-});
 
-test("a project lock is only taken from a process that's gone, and only its holder removes it", async () => {
-  const { repo, done } = scratch();
+  send(fields: object, id = `r${++this.sequence}`): string {
+    this.child.send({ epoch: this.epoch, id, ...fields });
+    return id;
+  }
+
+  reply(id: string): Promise<Reply> {
+    return this.take((e): e is Reply => e.type === "reply" && e.id === id, 30_000);
+  }
+
+  call(fields: object): Promise<Reply> {
+    return this.reply(this.send(fields));
+  }
+
+  async ok(fields: object): Promise<HostResult> {
+    const reply = await this.call(fields);
+    assert.equal(reply.ok, true, `${JSON.stringify(fields).slice(0, 200)} failed: ${reply.error}`);
+    return reply.result ?? {};
+  }
+
+  async start(f: Fixture, agent: AgentChoice | null = CHOICE): Promise<void> {
+    await this.take((e): e is Extract<HostEvent, { type: "ready" }> => e.type === "ready");
+    await this.ok({ op: "initialize", home: f.home, flavor: "local", claudeExecutable: null, personal: PERSONAL, settings: { ...DEFAULT_PREFERENCES, agent } });
+  }
+
+  async zone(name: string, parentId: string | null, enter = true): Promise<Zone> {
+    const result = await this.ok({ op: "zone-create", zone: { name, goal: `learn ${name}`, parentId, language: "python", focusSkills: [] }, enter });
+    return result.zone!;
+  }
+
+  /** The zone is open and waiting at "what next". */
+  ready(zoneId: string): Promise<State> {
+    return this.until((s) => s.activeZone?.id === zoneId && s.state?.prompt?.type === "next" && s.zoneEpoch !== null);
+  }
+}
+
+function binding(s: State, requestId: string = randomUUID()): RequestBinding {
+  return { zoneId: s.activeZone!.id, zoneEpoch: s.zoneEpoch!, inputToken: s.inputToken, requestId };
+}
+
+async function withHosts(run: (f: Fixture, launch: () => Host) => Promise<void>): Promise<void> {
+  const f = fixture();
+  const hosts: Host[] = [];
   try {
-    const root = repo();
-    mkdirSync(`${root}/.dum`, { recursive: true });
-    const lock = `${root}/.dum/session.lock`;
-    const gone = spawnSync(process.execPath, ["-e", ""]).pid;
-    writeFileSync(lock, JSON.stringify({ pid: gone, host: hostname(), who: "terminal", token: "old" }));
-    const release = acquire(root, "desktop");
-    assert.equal(JSON.parse(readFileSync(lock, "utf8")).pid, process.pid);
-    release();
-    release();
-    assert.ok(!existsSync(lock));
-
-    for (const body of [JSON.stringify({ pid: gone, host: "elsewhere", who: "terminal", token: "t" }), "not a lock"]) {
-      writeFileSync(lock, body);
-      assert.throws(() => acquire(root, "desktop"), /already open|can't read/);
-      assert.equal(readFileSync(lock, "utf8"), body, "a lock it can't prove abandoned is left alone");
+    await run(f, () => {
+      const host = new Host(f);
+      hosts.push(host);
+      return host;
+    });
+  } finally {
+    for (const { child } of hosts) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      child.kill();
+      await once(child, "exit");
     }
-    rmSync(lock);
-
-    const mine = acquire(root, "desktop");
-    const theirs = JSON.stringify({ pid: process.pid, host: hostname(), who: "terminal", token: "theirs" });
-    writeFileSync(lock, theirs);
-    mine();
-    assert.equal(readFileSync(lock, "utf8"), theirs, "releasing never removes someone else's lock");
-    rmSync(lock);
-
-    // The guard that serializes every change to the lock is never taken from anyone.
-    const guard = `${root}/.dum/session.lock.guard`;
-    const abandoned = JSON.stringify({ pid: gone, host: hostname(), who: "desktop", token: "g" });
-    writeFileSync(guard, abandoned);
-    assert.throws(() => acquire(root, "terminal"), /session\.lock\.guard was left by desktop \(pid \d+, no longer running\)\. If no dum is open in this project, delete \.dum\/session\.lock\.guard/);
-    assert.equal(readFileSync(guard, "utf8"), abandoned, "an abandoned guard waits for a person");
-    assert.ok(!existsSync(lock));
-    writeFileSync(guard, JSON.stringify({ pid: process.pid, host: hostname(), who: "desktop", token: "busy" }));
-    assert.throws(() => acquire(root, "terminal"), /opening or closing this project/);
-    rmSync(guard);
-
-    const held = acquire(root, "desktop");
-    writeFileSync(guard, JSON.stringify({ pid: process.pid, host: hostname(), who: "desktop", token: "busy" }));
-    held();
-    assert.ok(existsSync(lock), "letting go while the guard is busy leaves the lock for takeover, untouched");
-    assert.ok(existsSync(guard));
-  } finally { done(); }
-});
-
-const loader = fileURLToPath(import.meta.resolve("tsx"));
-/** A dum taking and letting go of one project over and over; with CRASH, it dies holding it once. */
-const CONTENDER = `
-import { acquire } from ${JSON.stringify(new URL("../src/session-lock.ts", import.meta.url).href)};
-import { appendFileSync, closeSync, openSync, unlinkSync } from "node:fs";
-const { ROOT, LOG, CRASH } = process.env;
-const pause = new Int32Array(new SharedArrayBuffer(4));
-for (let i = 0; i < 30; i++) {
-  let release;
-  try {
-    release = acquire(ROOT, "terminal");
-  } catch (err) {
-    if (!/already open|opening or closing/.test(err.message)) appendFileSync(LOG, "error " + err.message + "\\n");
-    continue;
-  }
-  try { closeSync(openSync(ROOT + "/holding", "wx")); } catch { appendFileSync(LOG, "overlap\\n"); }
-  appendFileSync(LOG, "held\\n");
-  Atomics.wait(pause, 0, 0, 2);
-  try { unlinkSync(ROOT + "/holding"); } catch {}
-  if (CRASH) process.exit(0);
-  release();
-}
-`;
-
-test("dums contending for one project never hold it at once, and a crashed holder's lock is taken over", async () => {
-  const { repo, done } = scratch();
-  try {
-    const root = repo();
-    const log = `${root}/contention.log`;
-    writeFileSync(log, "");
-    const contend = (crash: boolean) => new Promise<number | null>((settle) => {
-      const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", CONTENDER], {
-        env: { ...process.env, ROOT: root, LOG: log, CRASH: crash ? "1" : "" },
-        stdio: ["ignore", "ignore", "inherit"],
-      });
-      child.on("close", settle);
-    });
-    assert.deepEqual(await Promise.all([false, false, false, false, true, true].map(contend)), [0, 0, 0, 0, 0, 0]);
-    const lines = readFileSync(log, "utf8").trim().split("\n");
-    assert.ok(!lines.includes("overlap"), "two dums held the project at once");
-    assert.deepEqual(lines.filter((l) => l.startsWith("error")), []);
-    assert.ok(lines.includes("held"));
-    assert.ok(!existsSync(`${root}/.dum/session.lock.guard`), "no guard is left behind");
-    const release = acquire(root, "desktop");
-    release();
-    assert.ok(!existsSync(`${root}/.dum/session.lock`));
-  } finally { done(); }
-});
-
-test("a shared picture is looked at once, as a PNG image block, with nothing saved", async () => {
-  const { repo, done } = scratch();
-  try {
-    const root = repo();
-    assert.throws(() => decode({ ...image, data: Buffer.from("GIF89a....").toString("base64") }), /isn't a PNG/);
-    assert.throws(() => decode({ ...image, data: "not base64!" }), /base64/);
-
-    let options: Record<string, unknown> = {};
-    const sent: { message: { content: Record<string, unknown>[] } }[] = [];
-    const answering = ((args: { prompt: AsyncIterable<never>; options: Record<string, unknown> }) => {
-      options = args.options;
-      async function* go() {
-        for await (const m of args.prompt) sent.push(m);
-        yield init;
-        yield { type: "result", subtype: "success", is_error: false, result: "x".repeat(7000) };
-      }
-      return Object.assign(go(), { close() {}, accountInfo: async () => ({ apiProvider: "firstParty", apiKeySource: "none" }) });
-    }) as unknown as Query;
-    const seen = await look(image, "why is this red?", { cwd: root }, answering);
-    assert.equal(seen.observation.length, 6001, "bounded");
-    assert.equal(seen.sha, createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"));
-    assert.equal(options.persistSession, false, "Claude keeps no session with the picture in it");
-    assert.equal(options.resume, undefined);
-    assert.deepEqual(options.tools, []);
-    const [picture, words] = sent[0]!.message.content;
-    assert.deepEqual(picture, { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } });
-
-    const stop = new AbortController();
-    const hanging = ((args: { options: { abortController: AbortController } }) => {
-      async function* go() {
-        yield init;
-        await new Promise((_, reject) => args.options.abortController.signal.addEventListener("abort", () => reject(new Error("aborted"))));
-      }
-      return Object.assign(go(), { close() {}, accountInfo: async () => ({ apiProvider: "firstParty", apiKeySource: "none" }) });
-    }) as unknown as Query;
-    const stopped = look(image, "", { cwd: root, signal: stop.signal }, hanging);
-    setTimeout(() => stop.abort(), 20);
-    await assert.rejects(stopped, /stopped/);
-  } finally { done(); }
-});
-
-/** A `claude` that starts and never answers, recording every process it becomes. */
-function silentClaude(dir: string) {
-  const bin = `${dir}/claude`;
-  writeFileSync(bin, `#!/bin/sh\necho $$ >> "${dir}/pids"\nexec sleep 600\n`);
-  chmodSync(bin, 0o755);
-  const pids = () => (existsSync(`${dir}/pids`) ? readFileSync(`${dir}/pids`, "utf8").trim().split("\n").map(Number) : []);
-  const gone = (pid: number) => { try { process.kill(pid, 0); return false; } catch { return true; } };
-  return { bin, pids, running: () => pids().filter((p) => !gone(p)) };
-}
-
-async function withSilentClaude<T>(run: (fake: ReturnType<typeof silentClaude>) => Promise<T>): Promise<T> {
-  const dir = realpathSync(mkdtempSync(`${tmpdir()}/dum-fake-claude-`));
-  const before = process.env.DUM_CLAUDE_BIN;
-  const fake = silentClaude(dir);
-  process.env.DUM_CLAUDE_BIN = fake.bin;
-  try {
-    return await run(fake);
-  } finally {
-    for (const p of fake.running()) process.kill(p, "SIGKILL");
-    if (before === undefined) delete process.env.DUM_CLAUDE_BIN;
-    else process.env.DUM_CLAUDE_BIN = before;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(f.dir, { recursive: true, force: true });
   }
 }
 
-const practiceFiles = (root: string) => existsSync(`${root}/.dum/practice.json`) || existsSync(`${root}/.dum/evidence.json`);
+if (process.env.DUM_FAKE_HOST === "1") {
+  serve({
+    epoch: process.env.DUM_HOST_EPOCH!,
+    credentialMs: Number(process.env.DUM_TEST_CREDENTIAL_MS),
+    frameMs: 500,
+    backends: ({ credential }) => [fakeBackend("claude", credential), fakeBackend("local", credential)],
+  });
+} else {
+  test("the tree and settings work before any backend, and nested zones open with no Git on PATH", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const host = launch();
+    await host.start(f, null);
+    await host.ok({ op: "panel", panel: "tree" });
+    const tree = await host.until((s) => s.tree !== null);
+    assert.equal(tree.activeZone, null);
+    assert.equal(tree.zoneEpoch, null);
+    await host.ok({ op: "settings", settings: { ...DEFAULT_PREFERENCES, mode: "anti-vibe" } });
 
-test("Stop ends a slow :practice: its Claude process dies, nothing is saved, and the next command runs", async () => {
-  const { repo, done } = scratch();
-  const c = new DesktopController(() => {});
-  try {
-    await withSilentClaude(async (fake) => {
-      const root = repo({ "main.py": "x = 1\n" });
-      await c.choose(root, personal);
-      await c.send(":practice recursion in python", c.inputToken);
-      await until("practice's helper process started", () => fake.pids().length > 0);
-      assert.ok(fake.running().length > 0);
-      assert.ok(!c.canAttach, "a slow command is running");
+    const root = await host.zone("Programming", null);
+    const child = await host.zone("Data Structures", root.id);
+    const opened = await host.ready(child.id);
+    assert.deepEqual(opened.activeZone!.breadcrumb.map((b) => b.name), ["Programming", "Data Structures"]);
+    assert.deepEqual(opened.activeZone!.ancestorGoals.map((a) => a.goal), ["learn Programming"]);
+    assert.equal(opened.state!.mode, "anti-vibe");
+    assert.equal(opened.registry.activeZoneId, child.id);
 
-      c.interrupt();
-      await until("practice stopped", () => c.state!.transcript.some((e) => e.kind === "note" && /:practice stopped/.test(e.text)));
-      await until("the helper process is gone", () => fake.running().length === 0);
-      assert.equal(c.state?.status, "");
-      assert.ok(!practiceFiles(root), "nothing was saved for a stopped practice");
-      assert.ok(!c.state!.transcript.some((e) => e.kind === "say"), "no late result was shown");
-      await until("back at what next", () => c.canAttach);
+    const refused = await host.call({ op: "send", binding: binding(opened), text: "hello", shares: [] });
+    assert.equal(refused.ok, false);
+    assert.match(refused.error!, /Choose who powers Dum/);
 
-      await c.send(":remember still works", c.inputToken);
-      assert.match(readFileSync(`${root}/.dum/memory.md`, "utf8"), /still works/);
-    });
-  } finally {
-    await c.close();
-    done();
-  }
-});
+    // Typed commands that call no model work unpowered too; the ones that do are refused.
+    const help = await host.call({ op: "send", binding: binding(opened), text: ":help", shares: [] });
+    assert.equal(help.ok, true, help.error);
+    const shown = await host.until((s) => s.state?.stage.kind === "info" && /:projects/.test(s.state.stage.body) && s.canAttach);
+    const projects = await host.call({ op: "send", binding: binding(shown), text: ":projects recursion", shares: [] });
+    assert.equal(projects.ok, false);
+    assert.match(projects.error!, /Choose who powers Dum/);
+  }));
 
-test("switching or closing during a slow :submit ends its helper before the project is let go", async () => {
-  const { repo, done } = scratch();
-  const c = new DesktopController(() => {});
-  try {
-    await withSilentClaude(async (fake) => {
-      const a = repo({ "walk.py": "def walk(n):\n    return 0 if n == 0 else 1 + walk(n - 1)\n" });
-      const b = repo({ "b.py": "y = 2\n" });
-      skills.write(skills.unlock(skills.read(), { name: "printing", lang: "python", how: "added", level: "build", why: "test" }));
-      await c.choose(a, personal);
-      await c.send(":submit variables in python walk.py --unaided", c.inputToken);
-      await until("the review's helper process started", () => fake.pids().length > 0);
+  test("only the selected backend runs, a shared picture is looked at once by the helper, and stale bindings are refused", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const host = launch();
+    await host.start(f, null);
+    await host.zone("Python", null);
+    await host.ok({ op: "agent-select", choice: CHOICE });
+    let s = await host.until((e) => e.state?.models.intern?.model === "fake-intern" && e.state.prompt?.type === "next");
+    await host.ok({ op: "send", binding: binding(s), text: "hello", shares: [] });
+    s = await host.until((e) => !!e.state?.transcript.some((x) => x.kind === "say" && x.text === "from claude") && e.state.prompt?.type === "next");
+    assert.equal(s.state!.transcript.some((x) => x.kind === "note" && /never chosen/.test(x.text)), false);
 
-      await c.choose(b, personal);
-      assert.ok(!existsSync(`${a}/.dum/session.lock`), "its lock was let go");
-      await until("the old project's helper process is gone", () => fake.running().length === 0);
-      await new Promise((r) => setTimeout(r, 150));
-      assert.ok(!practiceFiles(a), "the old project recorded nothing late");
-      assert.equal(skills.levelIn(skills.read(), "variables", "python"), null, "the abandoned review built nothing");
+    const stale = await host.call({ op: "send", binding: { ...binding(s), zoneEpoch: randomUUID() }, text: "again", shares: [] });
+    assert.equal(stale.ok, false);
+    const oldToken = await host.call({ op: "send", binding: { ...binding(s), inputToken: "not-the-prompt" }, text: "again", shares: [] });
+    assert.equal(oldToken.ok, false);
+    assert.match(oldToken.error!, /prompt closed/);
 
-      await c.send(":submit variables in python b.py --unaided", c.inputToken);
-      await until("a second helper started", () => fake.pids().length > 1);
-      await c.close();
-      await until("closing leaves no helper process behind", () => fake.running().length === 0);
-      assert.ok(!practiceFiles(b));
-    });
-  } finally {
-    await c.close();
-    done();
-  }
-});
+    await host.ok({ op: "send", binding: binding(s), text: "what is this?", shares: [], image: { data: PNG, mimeType: "image/png", label: "Editor" } });
+    s = await host.until((e) => !!e.state?.transcript.some((x) => x.kind === "shot") && e.state.prompt?.type === "next");
+    const shot = s.state!.transcript.find((x) => x.kind === "shot");
+    assert.equal(shot?.kind === "shot" && shot.observation, "a code editor showing a counter loop");
+    assert.equal(JSON.stringify(s.state!.transcript).includes(PNG), false);
+  }));
 
-test("Stop while a course is being designed ends the helper and leaves no course behind", async () => {
-  const { repo, done } = scratch();
-  const c = new DesktopController(() => {});
-  try {
-    await withSilentClaude(async (fake) => {
-      const root = repo({ "main.py": "x = 1\n" });
-      skills.write(skills.unlock(skills.read(), { name: "printing", lang: "python", how: "added", level: "build", why: "test" }));
-      await c.choose(root, personal);
-      await c.send("course variables in python", c.inputToken);
-      await until("the course designer's process started", () => fake.pids().length > 0);
+  test("switching zones drops the old zone's late events and answers; a crashed host's epoch is dead", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const host = launch();
+    await host.start(f);
+    const a = await host.zone("Alpha", null);
+    const b = await host.zone("Beta", null, false);
+    let s = await host.ready(a.id);
+    const old = binding(s);
+    await host.ok({ op: "send", binding: old, text: "SLOW please", shares: [] });
+    s = await host.until((e) => e.activeZone?.id === a.id && !!e.state?.busy);
+    await host.ok({ op: "zone-enter", zoneId: b.id, expectedRevision: s.registry.revision });
+    // Everything the host posted after it replied to the switch.
+    const mark = host.events.length;
+    const switched = await host.ready(b.id);
+    assert.notEqual(switched.zoneEpoch, old.zoneEpoch);
+    // A round trip after the switch: everything the old run did late has been processed by now.
+    await host.ok({ op: "panel", panel: "tree" });
+    const after = host.events.slice(mark);
+    assert.equal(after.some((e) => e.type === "state" && e.state?.zoneId === a.id), false);
+    assert.equal(host.events.some((e) => e.type === "state" && JSON.stringify(e.state).includes("late words")), false);
+    const late = await host.call({ op: "send", binding: old, text: "an answer for Alpha", shares: [] });
+    assert.equal(late.ok, false);
 
-      c.interrupt();
-      await until("the course stopped and dum is asking what next", () => c.canAttach && c.state!.transcript.some((e) => e.kind === "note" && /course stopped/.test(e.text)));
-      await until("the designer's process is gone", () => fake.running().length === 0);
-      assert.ok(!existsSync(`${root}/.dum/active-course.json`), "no half-made course is saved");
-      assert.ok(!existsSync(`${root}/.dum/courses`) || readdirSync(`${root}/.dum/courses`).length === 0, "no scratch file was created");
-      assert.ok(!c.state!.transcript.some((e) => e.kind === "course"), "no course card was shown for the stopped design");
-    });
-  } finally {
-    await c.close();
-    done();
-  }
-});
+    host.child.kill("SIGKILL");
+    await once(host.child, "exit");
+    const next = launch();
+    await next.start(f);
+    next.send({ op: "panel", panel: "tree" }, "own-epoch");
+    next.child.send({ epoch: host.epoch, id: "dead-epoch", op: "panel", panel: "tree" });
+    await next.reply("own-epoch");
+    const reopened = await next.ready(b.id);
+    assert.notEqual(reopened.zoneEpoch, switched.zoneEpoch);
+    assert.equal(next.events.some((e) => e.type === "reply" && e.id === "dead-epoch"), false);
+    const alpha = readFileSync(join(f.home, "zones", a.id, "transcript.json"), "utf8");
+    assert.equal(alpha.includes("late words"), false);
+  }));
 
-test("every command the desktop prompt offers is one the desktop accepts, and the terminal's own stay terminal-only", async () => {
-  const { repo, done } = scratch();
-  const c = new DesktopController(() => {});
-  const offered = (surface: "terminal" | "desktop") => [...new Set([...contract(surface).matchAll(/(?<![\w:])(:[a-z]+)\b/g)].map((m) => m[1]!))];
-  try {
-    await c.choose(repo({ "main.py": "x = 1\n" }), personal);
-    const desktop = offered("desktop");
-    assert.ok(desktop.length > 3);
-    for (const command of desktop) {
-      await until(`${command}: ready for a message`, () => !!c.inputToken);
-      await c.send(command, c.inputToken).catch((err: Error) => assert.doesNotMatch(err.message, /terminal edition only/, `the desktop prompt offers ${command}`));
+  test("credential requests round-trip to main by request ID and time out when main doesn't answer", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const host = launch();
+    await host.start(f);
+    const asked = host.send({ op: "agent-models", backend: "claude", login: "anthropic-key" });
+    const ask = await host.take((e): e is Extract<HostEvent, { type: "credential-request" }> => e.type === "credential-request");
+    assert.equal(ask.need, "anthropic-key");
+    await host.ok({ op: "credential", requestId: ask.requestId, value: { value: "sk-test-model", expiresAt: null } });
+    const reply = await host.reply(asked);
+    assert.equal(reply.ok, true);
+    assert.equal(reply.result?.models?.[0]?.id, "sk-test-model");
+
+    const silent = host.send({ op: "agent-models", backend: "claude", login: "anthropic-key" });
+    const unanswered = await host.take((e): e is Extract<HostEvent, { type: "credential-request" }> => e.type === "credential-request");
+    assert.notEqual(unanswered.requestId, ask.requestId);
+    const timedOut = await host.reply(silent);
+    assert.equal(timedOut.ok, false);
+    assert.match(timedOut.error!, /didn't answer the credential request/);
+    const tooLate = await host.call({ op: "credential", requestId: unanswered.requestId, value: { value: "sk-late", expiresAt: null } });
+    assert.equal(tooLate.ok, false);
+  }));
+
+  test("an ambient tick on followed code reaches the helper and lands as a zone memory note", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const work = join(f.dir, "work");
+    mkdirSync(work);
+    writeFileSync(join(work, "counter.py"), "count = 0\n");
+    const host = launch();
+    await host.start(f);
+    const z = await host.zone("Loops", null);
+    await host.ready(z.id);
+    const follow = (await host.ok({ op: "follow-add", path: work })).follow!;
+    assert.equal(follow.files, 1);
+    writeFileSync(join(work, "counter.py"), "count = 0\nfor i in range(3):\n    count += i\n");
+    const s = await host.until((e) => e.follows.length === 1);
+    for (let i = 0; i < 4; i++) {
+      await host.ok({ op: "observe-tick", tick: { zoneId: z.id, epoch: s.zoneEpoch, at: Date.now(), app: null, screen: null } });
     }
-    await until("ready", () => !!c.inputToken);
-    assert.ok(offered("terminal").includes(":help"));
-    await assert.rejects(c.send(":help", c.inputToken), /terminal edition only/, "the terminal prompt's :help isn't a desktop command");
-    assert.ok(!desktop.includes(":help"));
-  } finally {
-    await c.close();
-    done();
-  }
-});
+    // The note is written by the host after its helper call; no event names that write, so poll the file.
+    const memory = join(f.home, "zones", z.id, "memory.md");
+    for (let i = 0; i < 200 && !(existsSync(memory) && readFileSync(memory, "utf8").includes(NOTE)); i++) await sleep(25);
+    assert.ok(readFileSync(memory, "utf8").includes(NOTE));
+
+    // A tick from another epoch is blocked: the look says it's paused and asks nothing.
+    await host.ok({ op: "observe-tick", tick: { zoneId: z.id, epoch: randomUUID(), at: Date.now(), app: null, screen: null } });
+    await host.until((e) => /paused/.test(e.look.status));
+  }));
+
+  test("with no backend the look still notices followed-file changes, says advice needs a backend, and calls nothing", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    const work = join(f.dir, "work");
+    mkdirSync(work);
+    writeFileSync(join(work, "counter.py"), "count = 0\n");
+    const host = launch();
+    await host.start(f, null);
+    const z = await host.zone("Loops", null);
+    await host.ready(z.id);
+    await host.ok({ op: "follow-add", path: work });
+    writeFileSync(join(work, "counter.py"), "count = 0\nfor i in range(3):\n    count += i\n");
+    const s = await host.until((e) => e.follows.length === 1);
+    for (let i = 0; i < 4; i++) {
+      await host.ok({ op: "observe-tick", tick: { zoneId: z.id, epoch: s.zoneEpoch, at: Date.now(), app: null, screen: null } });
+    }
+    const seen = await host.until((e) => /1 changed file noticed/.test(e.look.status));
+    assert.match(seen.look.status, /^watching \(1 followed folder, 1 changed file noticed\) - advice needs a backend/);
+    assert.equal(host.events.some((e) => e.type === "frame-request"), false, "no frame was asked for");
+    const memory = join(f.home, "zones", z.id, "memory.md");
+    assert.ok(!existsSync(memory) || !readFileSync(memory, "utf8").includes(NOTE), "no helper call wrote a note");
+  }));
+
+  test("a permitted change is written directly with its diff, and revert puts the file back", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
+    let tree: skills.Tree = { skills: [] };
+    for (const name of ["printing", "variables"]) tree = skills.unlock(tree, { name, lang: "python", how: "typed", level: "build", why: "fixture" });
+    skills.write(tree, f.home);
+    const work = join(f.dir, "work");
+    mkdirSync(work);
+    const host = launch();
+    await host.start(f);
+    const z = await host.zone("Python", null);
+    let s = await host.ready(z.id);
+    const request = binding(s);
+    const share = (await host.ok({ op: "share-add", path: work, kind: "folder", binding: request })).share!;
+    s = await host.until((e) => e.shares.length === 1);
+    assert.equal(s.shares[0]!.id, share.id);
+    await host.ok({ op: "send", binding: request, text: `WRITE ${share.id}/hello.py`, shares: [share] });
+    s = await host.until((e) => e.changes.length === 1 && e.state?.prompt?.type === "next");
+    assert.equal(readFileSync(join(work, "hello.py"), "utf8"), "print('hi')\n");
+    const made = s.changes[0]!;
+    assert.equal(made.revertible, true);
+    assert.equal(s.shares.length, 0);
+    assert.ok(s.state!.transcript.some((e) => e.kind === "diff" && e.outcome === "applied" && e.changeId === made.id));
+
+    const reverted = (await host.ok({ op: "change-revert", changeId: made.id, binding: binding(s) })).change!;
+    assert.equal(reverted.revertible, false);
+    assert.equal(existsSync(join(work, "hello.py")), false);
+    s = await host.until((e) => e.changes[0]?.revertible === false);
+    assert.ok(s.state!.transcript.some((e) => e.kind === "diff" && e.outcome === "reverted"));
+    const again = await host.call({ op: "change-revert", changeId: made.id, binding: binding(s) });
+    assert.equal(again.ok, false);
+  }));
+}

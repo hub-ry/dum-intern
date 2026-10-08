@@ -1,165 +1,191 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { Store } from "../src/store.ts";
+import { join } from "node:path";
 import * as memory from "../src/memory.ts";
-import { Workspace } from "../src/workspace.ts";
+import type { Entry } from "../src/store-types.ts";
+import { ZONE_LIMITS } from "../src/zone-types.ts";
 
-test("answers and course results survive an interrupted process and a fresh store", async () => {
-  const root = mkdtempSync(`${tmpdir()}/dum-memory-`);
+function scratch() {
+  const root = mkdtempSync(join(tmpdir(), "dum-memory-"));
+  const home = join(root, "home");
+  const zone = randomUUID();
+  return { root, home, zone, dir: join(home, "zones", zone), done: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** Just enough conversation store for `attach`. */
+class FakeStore implements memory.Transcribed {
+  transcript: Entry[] = [];
+  notes: string[] = [];
+  private listeners: (() => void)[] = [];
+  getSnapshot() { return { transcript: this.transcript }; }
+  subscribe(listener: () => void) {
+    this.listeners.push(listener);
+    return () => { this.listeners = this.listeners.filter((l) => l !== listener); };
+  }
+  note(text: string) { this.notes.push(text); }
+  push(entry: Entry) {
+    this.transcript = [...this.transcript, entry];
+    for (const l of this.listeners) l();
+  }
+}
+
+test("a zone's conversation and notes live in its own directory and survive a restart", () => {
+  const { home, zone, dir, done } = scratch();
   try {
-    const store = new Store("practice", "understand", root);
-    const detach = memory.attach(root, store);
-    const answer = store.askQuestion("what are you building?", "");
-    store.submit("a guessing game");
-    await answer;
-    const card = { skill: "functions", lang: "c++", lesson: "Split the steps.", example: "void guess() {}", wizard: "", task: "write a function", path: ".dum/courses/functions.cc", run: "g++ functions.cc" };
-    store.course(card);
-    store.endCourse(card, true);
-    memory.remember(root, "Next: split input and guessing into functions.");
+    const store = new FakeStore();
+    const detach = memory.attach(home, zone, store);
+    store.push({ kind: "question", id: 1, question: "what are you building?", why: "", answer: "a guessing game" });
+    store.push({ kind: "diff", id: 2, path: "src/guess.py", diff: "+x", outcome: "applied", changeId: randomUUID() });
     detach();
-    const loaded = memory.load(root);
+    store.push({ kind: "say", id: 3, text: "after detach" });
+    memory.remember(home, zone, "Next: split input and guessing into functions.");
+    assert.deepEqual(readdirSync(dir).sort(), ["memory.md", "transcript.json"]);
+    const loaded = memory.load(home, zone);
     assert.equal(loaded.warning, "");
-    const restored = new Store("practice", "understand", root);
-    restored.restoreTranscript(loaded.entries);
-    assert.equal(restored.getSnapshot().prompt, null, "history doesn't re-approve old plans");
-    assert.ok(restored.getSnapshot().transcript.some((e) => e.kind === "question" && e.answer === "a guessing game"));
-    assert.ok(restored.getSnapshot().transcript.some((e) => e.kind === "course" && e.passed));
-    restored.note("back again");
-    const ids = restored.getSnapshot().transcript.map((e) => e.id);
-    assert.equal(new Set(ids).size, ids.length);
-    const prompt = memory.prompt(root, loaded.entries);
+    assert.deepEqual(loaded.entries.map((e) => e.id), [1, 2], "nothing saved after detaching");
+    const prompt = memory.prompt(home, zone, loaded.entries);
     assert.match(prompt, /guessing game/);
-    assert.match(prompt, /"passed":true/);
-    memory.fresh(root);
-    assert.deepEqual(memory.load(root).entries, []);
-    assert.equal(memory.notes(root), "");
-    assert.ok(readdirSync(`${root}/.dum`).some((f) => f.startsWith("memory.md.old-")));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    assert.match(prompt, /"outcome":"applied"/);
+    assert.match(prompt, /split input and guessing/);
+    assert.match(memory.describe(home, zone), new RegExp(`zones/${zone}/memory\\.md`));
+  } finally { done(); }
 });
 
-test("dum --new after a proposal starts an empty conversation and keeps every saved proposal", () => {
-  const root = mkdtempSync(`${tmpdir()}/dum-memory-`);
+test("zones don't share memory: another zone starts empty", () => {
+  const { home, zone, done } = scratch();
   try {
-    const store = new Store("practice", "understand", root);
-    const detach = memory.attach(root, store);
-    writeFileSync(`${root}/main.py`, "print(1)\n");
-    const ws = new Workspace(root, store);
-    const { artifact } = ws.propose("main.py", ws.file("main.py").sha, "print(2)\n");
-    const patch = readFileSync(`${root}/${artifact}`, "utf8");
-    detach();
-    assert.ok(memory.load(root).entries.length > 0);
-    memory.fresh(root);
-    assert.deepEqual(memory.load(root).entries, []);
-    assert.equal(readFileSync(`${root}/${artifact}`, "utf8"), patch, "the proposal stays where it was saved");
-    assert.ok(readdirSync(`${root}/.dum`).some((f) => f.startsWith("transcript.json.old-")));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    memory.save(home, zone, [{ kind: "say", id: 1, text: "only here" }]);
+    memory.remember(home, zone, "only here too");
+    const other = randomUUID();
+    assert.deepEqual(memory.load(home, other), { entries: [], warning: "" });
+    assert.equal(memory.notes(home, other), "");
+    assert.equal(memory.prompt(home, other, []), "");
+  } finally { done(); }
 });
 
-test("shared excerpts, proposals, results and old-session entries all come back, and feed dum's memory", () => {
-  const root = mkdtempSync(`${tmpdir()}/dum-memory-`);
+test("a zone ID that isn't app-issued never becomes a path", () => {
+  const { home, done } = scratch();
   try {
-    const store = new Store("practice", "understand", root);
-    const detach = memory.attach(root, store);
-    store.excerpt("guess.py", 3, "if guess > secret:\n    print('lower')", "you");
-    store.diff("util.py", "--- a/util.py\n+++ b/util.py\n+x = 1", "proposed", ".dum/proposals/1-util.py.diff");
-    store.result("git status", " M guess.py", 0);
-    void store.askNext();
-    store.submit("use a dict for the scores, I explained why last time");
-    detach();
-    // An older session's fill and an empty-question answer are still valid history.
-    const saved = JSON.parse(readFileSync(`${root}/.dum/transcript.json`, "utf8"));
-    saved.unshift({ id: 900, kind: "fill", path: "a.py", concept: "loops", code: "for x in y: pass" }, { id: 901, kind: "question", question: "", why: "", answer: "done" });
-    writeFileSync(`${root}/.dum/transcript.json`, JSON.stringify(saved));
-    const loaded = memory.load(root);
-    assert.equal(loaded.warning, "");
-    assert.deepEqual(loaded.entries.map((e) => e.kind), ["fill", "question", "excerpt", "diff", "result", "user"]);
-    const prompt = memory.prompt(root, loaded.entries);
-    assert.match(prompt, /use a dict for the scores/);
-    assert.match(prompt, /guess\.py:3/);
-    assert.match(prompt, /proposed/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    for (const bad of ["../escape", "a/b", "", "ABCDEF00-0000-4000-8000-000000000000"]) {
+      assert.throws(() => memory.save(home, bad, []), /isn't an app-issued zone ID/, bad);
+      assert.throws(() => memory.remember(home, bad, "note"), /isn't an app-issued zone ID/, bad);
+    }
+    assert.equal(existsSync(home), false);
+  } finally { done(); }
 });
 
 test("a note is appended to the file as their editor left it, never rewritten from an old copy", () => {
-  const root = mkdtempSync(`${tmpdir()}/dum-memory-`);
+  const { home, zone, dir, done } = scratch();
   try {
-    memory.remember(root, "Use a music example.");
-    // Their editor saves between dum's read and its next note.
-    writeFileSync(`${root}/.dum/memory.md`, "# Session memory\n\n- Use a cooking example instead.\n");
-    memory.remember(root, "Next: split input from scoring.");
-    const notes = memory.notes(root);
+    memory.remember(home, zone, "Use a music example.");
+    writeFileSync(join(dir, "memory.md"), "# Zone memory\n\n- Use a cooking example instead.\n");
+    memory.remember(home, zone, "Next: split input from scoring.");
+    const notes = memory.notes(home, zone);
     assert.match(notes, /cooking example instead/);
     assert.match(notes, /split input from scoring/);
     assert.doesNotMatch(notes, /music/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { done(); }
+});
+
+test("notes are bounded: a note that would overflow is refused and the file is unchanged", () => {
+  const { home, zone, dir, done } = scratch();
+  try {
+    mkdirSync(dir, { recursive: true });
+    const full = `# Zone memory\n\n${"x".repeat(ZONE_LIMITS.memoryBytes - 30)}\n`;
+    writeFileSync(join(dir, "memory.md"), full);
+    assert.throws(() => memory.remember(home, zone, "one more note that will not fit"), /full/);
+    assert.equal(readFileSync(join(dir, "memory.md"), "utf8"), full);
+    writeFileSync(join(dir, "memory.md"), "x".repeat(ZONE_LIMITS.memoryBytes + 1));
+    assert.throws(() => memory.notes(home, zone), /KiB/);
+  } finally { done(); }
+});
+
+test("the transcript keeps the newest entries within the count and byte limits", () => {
+  const { home, zone, dir, done } = scratch();
+  try {
+    const entries: Entry[] = Array.from({ length: 700 }, (_, i) => ({ id: i + 1, kind: "say", text: `reply ${i}` }));
+    memory.save(home, zone, entries);
+    const loaded = memory.load(home, zone).entries;
+    assert.equal(loaded.length, memory.MAX_ENTRIES);
+    assert.equal(loaded.at(-1)?.id, 700);
+    const big = "y".repeat(200 * 1024);
+    memory.save(home, zone, Array.from({ length: 30 }, (_, i) => ({ id: i + 1, kind: "say", text: big })));
+    assert.ok(readFileSync(join(dir, "transcript.json")).length <= ZONE_LIMITS.transcriptBytes);
+    assert.equal(memory.load(home, zone).entries.at(-1)?.id, 30);
+  } finally { done(); }
+});
+
+test("a corrupt transcript is preserved aside, not reset in place; an oversized one is left exactly where it is", () => {
+  const { home, zone, dir, done } = scratch();
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "transcript.json"), '[{"id":1,"kind":"question","answer":{}}]');
+    const loaded = memory.load(home, zone);
+    assert.deepEqual(loaded.entries, []);
+    assert.match(loaded.warning, /kept the original/);
+    const aside = readdirSync(dir).find((f) => f.startsWith("transcript.invalid-"));
+    assert.ok(aside);
+    assert.equal(readFileSync(join(dir, aside), "utf8"), '[{"id":1,"kind":"question","answer":{}}]');
+
+    writeFileSync(join(dir, "transcript.json"), "x".repeat(ZONE_LIMITS.transcriptBytes + 1));
+    assert.match(memory.load(home, zone).warning, /couldn't restore/);
+    assert.equal(readFileSync(join(dir, "transcript.json")).length, ZONE_LIMITS.transcriptBytes + 1);
+  } finally { done(); }
 });
 
 test("a symlinked memory or transcript is refused visibly and never followed or moved", () => {
-  const root = mkdtempSync(`${tmpdir()}/dum-memory-`);
-  const outside = mkdtempSync(`${tmpdir()}/dum-outside-`);
+  const { root, home, zone, dir, done } = scratch();
   try {
-    writeFileSync(`${outside}/secret.txt`, "token=abc");
-    mkdirSync(`${root}/.dum`);
-    symlinkSync(`${outside}/secret.txt`, `${root}/.dum/memory.md`);
-    symlinkSync(`${outside}/secret.txt`, `${root}/.dum/transcript.json`);
-    assert.throws(() => memory.notes(root));
-    assert.throws(() => memory.remember(root, "a note"));
-    assert.doesNotMatch(memory.prompt(root, []), /token=abc/);
-    const loaded = memory.load(root);
+    const secret = join(root, "secret.txt");
+    writeFileSync(secret, "token=abc");
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(secret, join(dir, "memory.md"));
+    symlinkSync(secret, join(dir, "transcript.json"));
+    assert.throws(() => memory.notes(home, zone), /symlink/);
+    assert.throws(() => memory.remember(home, zone, "a note"));
+    assert.doesNotMatch(memory.prompt(home, zone, []), /token=abc/);
+    const loaded = memory.load(home, zone);
     assert.deepEqual(loaded.entries, []);
-    assert.ok(loaded.warning, "the refusal is shown");
-    assert.equal(readFileSync(`${outside}/secret.txt`, "utf8"), "token=abc");
-    assert.ok(existsSync(`${root}/.dum/transcript.json`), "not renamed away as a corrupt backup");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(outside, { recursive: true, force: true });
-  }
+    assert.match(loaded.warning, /symlink/);
+    assert.equal(readFileSync(secret, "utf8"), "token=abc");
+    assert.ok(existsSync(join(dir, "transcript.json")), "not renamed away as a corrupt backup");
+  } finally { done(); }
 });
 
-test("memory stays bounded, rejects malformed history, and reflects edited notes", () => {
-  const root = mkdtempSync(`${tmpdir()}/dum-memory-`);
+test("old history stays readable and recalled as history, not as permission", () => {
+  const { home, zone, dir, done } = scratch();
   try {
-    const entries = Array.from({ length: 700 }, (_, i) => ({ id: i + 1, kind: "say" as const, text: `reply ${i}` }));
-    memory.save(root, entries);
-    assert.equal(memory.load(root).entries.length, memory.MAX_ENTRIES);
-    memory.remember(root, "I want to practice functions.");
-    writeFileSync(`${root}/.dum/memory.md`, "# Session memory\nUse a music example instead.\n");
-    assert.match(memory.prompt(root, entries), /music example/);
-    writeFileSync(`${root}/.dum/transcript.json`, '[{"id":1,"kind":"question","answer":{}}]');
-    assert.ok(memory.load(root).warning);
-    assert.ok(readdirSync(`${root}/.dum`).some((f) => f.startsWith("transcript.invalid-")), "keep corrupt history for recovery");
-    assert.equal(memory.load(root).entries.length, 0);
-    assert.match(readFileSync(`${root}/.dum/memory.md`, "utf8"), /music/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    mkdirSync(dir, { recursive: true });
+    const card = { skill: "functions", lang: "c++", lesson: "", example: "", wizard: "", task: "", path: "", run: "" };
+    writeFileSync(join(dir, "transcript.json"), JSON.stringify([
+      { id: 1, kind: "plan", plan: "rewrite main.py", approved: true },
+      { id: 2, kind: "course", card, passed: true },
+      { id: 3, kind: "fill", path: "a.py", concept: "loops", code: "for x in y: pass" },
+      { id: 4, kind: "diff", path: "util.py", diff: "+x", outcome: "proposed", artifact: ".dum/proposals/1.diff" },
+      { id: 5, kind: "result", label: "git status", output: " M a.py", code: 0 },
+    ]));
+    const loaded = memory.load(home, zone);
+    assert.equal(loaded.warning, "");
+    const prompt = memory.prompt(home, zone, loaded.entries);
+    assert.match(prompt, /"old_plan":"rewrite main.py"/);
+    assert.match(prompt, /"old_course":"functions"/);
+    assert.match(prompt, /not permission for new work/);
+  } finally { done(); }
 });
 
-test("self maintenance at a course prompt preserves the pending answer and queues input", async () => {
-  const store = new Store("practice", "understand");
-  let finish!: (reply: string) => void;
-  let started!: () => void;
-  const starting = new Promise<void>((resolve) => { started = resolve; });
-  store.onSelfChange = async () => { started(); return new Promise((resolve) => { finish = resolve; }); };
-  const card = { skill: "functions", lang: "c++", lesson: "", example: "", wizard: "", task: "", path: "functions.cc", run: "" };
-  store.course(card);
-  const answer = store.askCourse(card);
-  store.submit(":self fix the scroll position");
-  await starting;
-  assert.equal(store.getSnapshot().prompt, null);
-  assert.equal(store.getSnapshot().busy, true);
-  store.submit("done");
-  finish("fixed the scroll position");
-  assert.equal(await answer, "done");
-  assert.ok(store.getSnapshot().transcript.some((e) => e.kind === "say" && /scroll position/.test(e.text)));
-});
-
-test("a failed self change leaves the learning question answerable", async () => {
-  const store = new Store("practice", "understand");
-  store.onSelfChange = async () => { throw new Error("connection lost"); };
-  const question = store.askQuestion("what next?", "");
-  assert.match(await store.changeSelf("fix dum"), /connection lost/);
-  assert.equal(store.getSnapshot().prompt?.type, "question");
-  store.submit("practice functions");
-  assert.equal(await question, "practice functions");
+test("a failed save warns once through the store instead of throwing into it", () => {
+  const { home, zone, dir, done } = scratch();
+  try {
+    mkdirSync(join(dir, "transcript.json"), { recursive: true });
+    const store = new FakeStore();
+    const detach = memory.attach(home, zone, store);
+    store.push({ kind: "say", id: 1, text: "a" });
+    store.push({ kind: "say", id: 2, text: "b" });
+    detach();
+    assert.equal(store.notes.length, 1);
+    assert.match(store.notes[0]!, /couldn't save/);
+  } finally { done(); }
 });
