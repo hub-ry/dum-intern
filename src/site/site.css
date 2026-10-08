@@ -46,6 +46,9 @@ nav {
 .nav-links { display: flex; align-items: center; gap: 25px; margin: 0; padding: 0; list-style: none; }
 .nav-links a { color: var(--muted); font-size: 12px; text-decoration: none; white-space: nowrap; }
 .nav-links a:hover, .nav-links a[aria-current="page"] { color: var(--text); }
+.nav-github { display: inline-flex; align-items: center; gap: 3px; }
+.nav-github svg { width: 15px; height: 15px; fill: currentColor; }
+.nav-github span { font-size: 10px; }
 .nav-cta { color: var(--text); font-size: 12px; text-decoration: none; }
 .nav-cta:hover { color: var(--pine); }
 a { color: var(--pine); text-underline-offset: 3px; }
