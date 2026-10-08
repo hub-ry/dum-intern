@@ -143,6 +143,8 @@ async function buildVoice() {
   run('/usr/bin/install_name_tool', ['-id', '@rpath/libautocorrect_swift.dylib', autocorrect], work);
   run('/usr/bin/codesign', ['--force', '--sign', '-', autocorrect], work);
 
+  // Bridge mode (DUM_BRIDGE, Dum's bundle ID, Info.plist and entitlements) is set on the app target
+  // in the vendored project. Settings given here apply to every target, Swift packages included.
   console.log('prepare-dictation: building OpenSuperWhisper in Dum bridge mode …');
   run('/usr/bin/xcodebuild', [
     '-project', 'OpenSuperWhisper.xcodeproj',
@@ -157,11 +159,7 @@ async function buildVoice() {
     'CODE_SIGNING_ALLOWED=NO',
     'CODE_SIGNING_REQUIRED=NO',
     'CODE_SIGN_IDENTITY=',
-    `PRODUCT_BUNDLE_IDENTIFIER=${manifest.bundleId}`,
-    'INFOPLIST_FILE=DumBridge-Info.plist',
     'INFOPLIST_OUTPUT_FORMAT=xml',
-    'CODE_SIGN_ENTITLEMENTS=DumBridge.entitlements',
-    'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) DUM_BRIDGE',
     'build',
   ], work);
 
