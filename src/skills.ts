@@ -1,10 +1,13 @@
-// What you've unlocked, as a tree that follows you across repos.
+// What you've unlocked, as a tree that follows you across every zone.
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, existsSync, unlinkSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileName, fromNote, toNote } from "./notes.ts";
 
-/** How a skill got unlocked. Every way is something they did, never something dum assumed. */
+/**
+ * How a skill got unlocked. Every way is something they did, never something dum assumed.
+ * "course" is history only: guided courses are gone, but notes they left still read.
+ */
 export type How = "typed" | "explained" | "course" | "added" | "reasoned";
 
 /**
@@ -130,26 +133,30 @@ export function noteName(s: { name: string; lang: string }): string {
   return fileName(s.lang ? `${s.name} (${s.lang})` : s.name);
 }
 
-/** Write every skill whose note changed, each through a temp file and a rename. */
+/**
+ * Write every skill whose note changed, each through a temp file and a rename. Throws on any IO
+ * failure: a caller must not report credit that isn't on disk.
+ */
 export function write(t: Tree, dir = home()) {
-  try {
-    mkdirSync(folder(dir), { recursive: true });
-    for (const s of t.skills) {
-      const path = `${folder(dir)}/${notesFor(dir, s.name, s.lang)[0] ?? noteName(s)}`;
-      const text = toNote(s);
-      let was: string | null = null;
-      try {
-        was = readFileSync(path, "utf8");
-      } catch {
-        /* new note */
-      }
-      if (was === text) continue;
-      const tmp = `${path}.${process.pid}.tmp`;
+  mkdirSync(folder(dir), { recursive: true });
+  for (const s of t.skills) {
+    const path = `${folder(dir)}/${notesFor(dir, s.name, s.lang)[0] ?? noteName(s)}`;
+    const text = toNote(s);
+    let was: string | null = null;
+    try {
+      was = readFileSync(path, "utf8");
+    } catch {
+      /* new note */
+    }
+    if (was === text) continue;
+    const tmp = `${path}.${process.pid}.tmp`;
+    try {
       writeFileSync(tmp, text);
       renameSync(tmp, path);
+    } catch (err) {
+      rmSync(tmp, { force: true });
+      throw err;
     }
-  } catch {
-    /* losing the record is bad, crashing over it is worse */
   }
 }
 
@@ -295,12 +302,6 @@ const EXT_LANG: Record<string, string> = {
 export function langOf(path: string): string {
   const ext = path.split("/").pop()!.split(".").slice(1).pop()?.toLowerCase() ?? "";
   return EXT_LANG[ext] ?? "";
-}
-
-/** A file extension for a language, for the scratch files a course writes. */
-export function extFor(lang: string): string {
-  const l = langName(lang);
-  return Object.entries(EXT_LANG).find(([, v]) => v === l)?.[0] ?? "txt";
 }
 
 /** "recursion (python)", or just the name for an idea that isn't one language's. */

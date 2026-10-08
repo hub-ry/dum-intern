@@ -1,0 +1,29 @@
+{
+  "upstream": "https://github.com/Starmel/OpenSuperWhisper",
+  "release": "0.1.0",
+  "commit": "e406fee45c281fe358b27698bbfca3826e8e4a28",
+  "license": "MIT, see LICENSE",
+  "bundleId": "com.dumintern.opensuperwhisper",
+  "bridgeVersion": "1",
+  "submodules": [
+    { "path": "libwhisper/whisper.cpp", "url": "https://github.com/ggerganov/whisper.cpp", "commit": "f3ff80ea8da044e5b8833e7ba54ee174504c518d" },
+    { "path": "asian-autocorrect", "url": "https://github.com/huacnlee/autocorrect", "commit": "203fd5f00f1bbfd7c19178837aba342353e5925d" }
+  ],
+  "omitted": [
+    { "path": "ggml-tiny.en.bin", "bytes": 77704715, "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f", "reason": "speech model; not referenced by the Xcode project, models download in setup" },
+    { "path": "jfk.wav", "bytes": 352078, "sha256": "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e", "reason": "sample audio" },
+    { "path": "docs/image.png", "bytes": 462166, "sha256": "46776f71fa8940a11c0998176c879f36fc0531f529ff6f0fcd7c4db3aac564f0", "reason": "readme screenshot" },
+    { "path": "docs/image_indicator.png", "bytes": 78199, "sha256": "c6e133ed06891849564d28b3a6c49d1754098b14ed137a878e96ff4e4f35baa4", "reason": "readme screenshot" }
+  ],
+  "dumFiles": [
+    "DUM-VENDOR.json",
+    "DumBridge-Info.plist",
+    "DumBridge.entitlements",
+    "OpenSuperWhisper/DumBridge/DumBridge.swift",
+    "OpenSuperWhisper/DumBridge/DumBridgeApp.swift"
+  ],
+  "patchedFiles": [
+    "OpenSuperWhisper/OpenSuperWhisperApp.swift",
+    "OpenSuperWhisper/AudioRecorder.swift"
+  ]
+}

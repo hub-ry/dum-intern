@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as context from "../src/context.ts";
 
@@ -49,19 +49,27 @@ test("named local sources load together and relative paths are resolved beside t
   assert.match(context.readConfigured(config).warning, /missing.md/);
 });
 
-test("course examples receive the background while prerequisite constraints remain in the prompt", async () => {
-  const { designPrompt } = await import("../src/course.ts");
-  const file = `${root}/course-context.md`;
-  writeFileSync(file, "I like music and C++.");
-  const previous = process.env.DUM_CONTEXT;
-  process.env.DUM_CONTEXT = file;
+test("without DUM_CONTEXT, personal context comes from the Dum home, which DUM_HOME redirects", () => {
+  const home = `${root}/home`;
+  const saved = { home: process.env.DUM_HOME, context: process.env.DUM_CONTEXT };
+  process.env.DUM_HOME = home;
+  delete process.env.DUM_CONTEXT;
   try {
-    const prompt = designPrompt("printing", "c++", { skills: [] }, ".dum/courses/printing.cc");
-    assert.ok(prompt.includes("I like music and C++."));
-    assert.ok(prompt.includes("WHAT THEY HAVE IN C++: nothing yet"));
-    assert.ok(prompt.includes("Never use anything they"));
+    assert.equal(context.read().text, "", "nothing linked yet is not an error");
+    assert.equal(context.read().warning, "");
+    assert.match(context.describe(context.read()), new RegExp(`${home}/context\\.md`));
+    mkdirSync(home, { recursive: true });
+    writeFileSync(`${home}/context.md`, "I like trains.\n");
+    assert.equal(context.read().text, "I like trains.");
+    writeFileSync(`${home}/notes.md`, "Weekend projects only.");
+    writeFileSync(`${home}/context.json`, JSON.stringify({ files: ["notes.md"] }));
+    assert.match(context.read().text, /Weekend projects only/, "context.json wins over context.md");
+    process.env.DUM_CONTEXT = "off";
+    assert.equal(context.read().text, "", "off disables it even when the home has one");
   } finally {
-    if (previous === undefined) delete process.env.DUM_CONTEXT;
-    else process.env.DUM_CONTEXT = previous;
+    for (const [key, value] of [["DUM_HOME", saved.home], ["DUM_CONTEXT", saved.context]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
