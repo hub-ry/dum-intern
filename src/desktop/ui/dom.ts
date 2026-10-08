@@ -1,10 +1,14 @@
-// DOM building for the renderer. Every piece of model or user text lands as a text node.
+// DOM building for the renderer, and its one request client. Every piece of model or user text lands as a text node.
 
-import type { DesktopAPI } from "../protocol.ts";
+import type { BubbleAPI, DesktopAPI, Reply, Request, Snapshot } from "../protocol.ts";
+import type { RequestBinding } from "../../share-types.ts";
 
 declare global {
   interface Window {
+    /** Panel and command bar only. */
     dum: DesktopAPI;
+    /** The bubble only. */
+    dumBubble: BubbleAPI;
   }
 }
 
@@ -50,6 +54,14 @@ const ICONS = {
   external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   key: "M7 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM10 12h11M17 12v3M20 12v2",
   window: "M3 5h18v14H3zM3 9h18M6 7h.01M8.5 7h.01",
+  mic: "M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3",
+  undo: "M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
+  pencil: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
+  trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
+  file: "M6 3h8l4 4v14H6zM14 3v4h4",
+  pause: "M8 5v14M16 5v14",
+  play: "M7 5l12 7-12 7z",
+  zones: "M3 6h7M3 12h7M3 18h7M14 6h7M14 12h4M14 18h4",
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;
@@ -77,4 +89,50 @@ export const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 /** Terminal colour codes some panel text still carries. */
 export function plain(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+}
+
+/** The one way the panel and the command bar talk to main: every reply's snapshot is applied, every refusal is shown. */
+export class Client {
+  snap: Snapshot | null = null;
+  readonly errors = h("div", { class: "errors", role: "alert" });
+  private listeners: ((s: Snapshot) => void)[] = [];
+
+  constructor() {
+    window.dum.subscribe((s) => this.apply(s));
+  }
+
+  /** Called with every snapshot, in registration order. */
+  on(listener: (s: Snapshot) => void) {
+    this.listeners.push(listener);
+    if (this.snap) listener(this.snap);
+  }
+
+  async call(request: Request, quiet = false): Promise<Reply> {
+    let reply: Reply;
+    try {
+      reply = await window.dum.invoke(request);
+    } catch (err) {
+      reply = { ok: false, error: (err as Error).message || "dum didn't answer" };
+    }
+    if (!reply.ok && !quiet) this.showError(reply.error);
+    if (reply.ok && reply.snapshot) this.apply(reply.snapshot);
+    return reply;
+  }
+
+  showError(message: string) {
+    const item = h("div", { class: "error" }, icon("warning"), h("span", {}, message), iconButton("close", "Dismiss", () => item.remove(), "", "icon-btn tiny"));
+    this.errors.append(item);
+    while (this.errors.childElementCount > 3) this.errors.firstElementChild!.remove();
+  }
+
+  /** The binding for a request that needs a live zone, or null before one is open. */
+  requestBinding(): RequestBinding | null {
+    const b = this.snap?.binding;
+    return b && b.zoneId !== null ? { ...b, zoneId: b.zoneId } : null;
+  }
+
+  private apply(s: Snapshot) {
+    this.snap = s;
+    for (const l of this.listeners) l(s);
+  }
 }

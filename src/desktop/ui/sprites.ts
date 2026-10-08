@@ -3,9 +3,36 @@
 import internArt from "../../art/intern.txt";
 import wizardArt from "../../art/wizard.txt";
 import { bounds, framesFor, parse, type Frame, type Sprite } from "../../art-parser.ts";
-import { reducedMotion } from "./dom.ts";
+import { h, reducedMotion } from "./dom.ts";
 
 export const SPRITES = { dum: parse(internArt), wizard: parse(wizardArt) };
+
+/** A still portrait of the idle frame, drawn once and reused as a data URL. */
+const portraits = new Map<"dum" | "wizard", string>();
+export function portrait(who: "dum" | "wizard"): HTMLImageElement {
+  let url = portraits.get(who);
+  if (!url) {
+    const sprite = SPRITES[who];
+    const frame = framesFor(sprite, "idle")[0]!;
+    const cols = Math.max(...frame.rows.map((r) => r.length));
+    const canvas = document.createElement("canvas");
+    const px = 4;
+    canvas.width = cols * px;
+    canvas.height = frame.rows.length * px;
+    const ctx = canvas.getContext("2d")!;
+    frame.rows.forEach((row, y) => {
+      for (let x = 0; x < row.length; x++) {
+        const hex = sprite.palette.get(row[x]!);
+        if (!hex) continue;
+        ctx.fillStyle = `#${hex}`;
+        ctx.fillRect(x * px, y * px, px, px);
+      }
+    });
+    url = canvas.toDataURL("image/png");
+    portraits.set(who, url);
+  }
+  return h("img", { class: `portrait portrait-${who}`, src: url, alt: "" });
+}
 
 export type DumState = "idle" | "asking" | "thinking" | "building" | "blocked";
 export type WizardState = "idle" | "talking" | "pondering";

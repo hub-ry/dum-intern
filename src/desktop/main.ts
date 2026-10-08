@@ -1,6 +1,8 @@
-// dum's desktop app: a small floating companion, a conversation panel beside it, a tray menu and
-// a global hotkey. Main owns every operating-system capability; the sandboxed pages only send the
-// finite requests in protocol.ts, which ipc.ts validates and routes.
+// Dum's desktop app. Dum lives in the menu bar (Dum's face) and near the mouse: a hotkey command bar,
+// a push-to-talk bubble at the cursor while it listens or answers, and a full panel. Main owns every
+// operating-system capability, settings and credentials; the sandboxed pages only send the finite
+// requests in protocol.ts, which ipc.ts validates and routes. Main makes no model call: the
+// supervised utility host does all model work.
 
 import {
   app,
@@ -11,46 +13,66 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  powerMonitor,
+  safeStorage,
   screen,
   session,
   shell,
   systemPreferences,
   Tray,
   type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
   type NativeImage,
   type WebPreferences,
 } from "electron";
-import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { framesFor, parse, type Sprite } from "../art-parser.ts";
 import * as context from "../context.ts";
-import * as sprite from "../sprite.ts";
-import { HostController } from "./host-client.ts";
+import { home } from "../skills.ts";
+import { LOOK } from "../observe-types.ts";
+import { bundledExecutable, claudeSetup } from "../agent/claude-setup.ts";
+import { localSetup } from "../agent/local.ts";
+import { RELEASED } from "../agent/registry.ts";
+import { accessToken, chatgptSetup } from "../agent/siwc.ts";
+import { AgentSetup, credentialSource } from "./agent-setup.ts";
+import { readFlavor } from "./build-info.ts";
 import { Captures, MAX_PNG_BYTES, type Capturer } from "./capture.ts";
-import { companionSize } from "./companion-layout.ts";
+import { Credentials, safeStorageCipher } from "./credentials.ts";
 import { DictationHelper } from "./dictation.ts";
-import { Router, ownedPage, type Controller, type Native } from "./ipc.ts";
-import { RuntimeSetup, runtimeExecutable } from "./runtime-setup.ts";
-import { DesktopSettings, placeOnScreen, type Rect } from "./settings.ts";
-import type { Settings } from "./protocol.ts";
+import { Drafts } from "./draft.ts";
+import { Focus } from "./focus.ts";
+import { HostController } from "./host-client.ts";
+import { Router, ownedPage, type Native, type Role } from "./ipc.ts";
+import { Observer, type Bitmap } from "./observer.ts";
+import { DesktopSettings } from "./settings.ts";
+import { BUBBLE_MAX, BUBBLE_TTL, Bubble, COMMAND_SIZE, FocusReturn, PANEL_SIZE, placeBubble, placeCentered, reclamp } from "./surfaces.ts";
+import type { BackendId } from "../agent/types.ts";
+import type { BubbleView, DesktopPreferences, Panel } from "./protocol.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const INDEX = join(here, "ui", "index.html");
 const INDEX_URL = pathToFileURL(INDEX).href;
 const PRELOAD = join(here, "preload.cjs");
+const BUBBLE_PRELOAD = join(here, "bubble-preload.cjs");
 const MAC = process.platform === "darwin";
-const PANEL = { width: 380, height: 560 };
 /** Apple's own Privacy & Security › Screen Recording pane. */
 const SCREEN_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
-const SCREEN_DENIED = "Screen Recording is off for dum. Turn it on in System Settings › Privacy & Security › Screen Recording, then reopen dum.";
-/** Long edge of a capture: enough to read code, small enough to send. */
+const SCREEN_DENIED = "Screen Recording is off for Dum. Turn it on in System Settings › Privacy & Security › Screen Recording, then reopen Dum.";
+/** Long edge of a capture the person chose to share: enough to read code, small enough to send. */
 const CAPTURE_EDGE = 1568;
+/** A host that keeps failing is started again after a growing pause, up to this. */
+const RESTART_MAX_MS = 30_000;
+/** A host that has run this long has recovered; the next failure starts the pause over. */
+const RESTART_HEALTHY_MS = 60_000;
 
 // A private profile the person or a test chose, such as a clean smoke-test profile. Absolute only.
 const profile = process.env.DUM_DESKTOP_DATA;
 app.enableSandbox();
 if (profile !== undefined && !isAbsolute(profile)) {
-  dialog.showErrorBox("dum can't start", "DUM_DESKTOP_DATA must be an absolute directory path.");
+  dialog.showErrorBox("Dum can't start", "DUM_DESKTOP_DATA must be an absolute directory path.");
   app.exit(2);
 } else {
   if (profile !== undefined) app.setPath("userData", profile);
@@ -66,9 +88,9 @@ app.on("web-contents-created", (_event, contents) => {
   contents.on("will-attach-webview", (event) => event.preventDefault());
 });
 
-function preferences(): WebPreferences {
+function preferences(preload: string): WebPreferences {
   return {
-    preload: PRELOAD,
+    preload,
     sandbox: true,
     contextIsolation: true,
     nodeIntegration: false,
@@ -82,9 +104,9 @@ function preferences(): WebPreferences {
   };
 }
 
-/** Dum's idle portrait at two device pixels per art pixel, for the menu bar. */
-function trayIcon(dum: sprite.Sprite): NativeImage {
-  const frame = sprite.framesFor(dum, "idle")[0]!;
+/** Dum's idle face for the menu bar: four device pixels per art pixel, drawn at 2x. */
+function trayIcon(dum: Sprite): NativeImage {
+  const frame = framesFor(dum, "idle")[0]!;
   const unit = 4;
   const cols = Math.max(...frame.rows.map((r) => r.length));
   const width = cols * unit;
@@ -109,131 +131,231 @@ async function start(): Promise<void> {
   session.defaultSession.setPermissionRequestHandler(deny);
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setDevicePermissionHandler(() => false);
+  // A menu bar app: no Dock icon, no app switcher entry.
+  if (MAC) app.dock?.hide();
 
-  const settings = DesktopSettings.load(app.getPath("userData"));
-  const dum = sprite.load(join(here, "..", "art", "intern.txt"));
-  const size = companionSize(dum, sprite.load(join(here, "..", "art", "wizard.txt")));
-  const workAreas = (): Rect[] => screen.getAllDisplays().map((d) => d.workArea);
-  const placeCompanion = (at: { x: number; y: number } | null) => placeOnScreen(at, size, workAreas(), screen.getPrimaryDisplay().workArea);
+  const flavor = readFlavor();
+  const userData = app.getPath("userData");
+  const settings = DesktopSettings.load(userData, flavor);
+  const credentials = new Credentials(join(userData, "credentials.json"), safeStorageCipher(safeStorage));
+  const claudeExecutable = bundledExecutable();
+  const released = new Set((Object.keys(RELEASED) as BackendId[]).filter((id) => RELEASED[id]));
+  const agent = new AgentSetup([claudeSetup({ flavor, executable: claudeExecutable, credentials }), chatgptSetup({ credentials }), localSetup()], flavor, released);
+  const dum = parse(readFileSync(join(here, "..", "art", "intern.txt"), "utf8"));
 
-  const spot = placeCompanion(settings.companion);
-  const companion = new BrowserWindow({
-    ...size,
-    ...spot,
-    title: "dum",
+  // -- windows ----------------------------------------------------------------
+
+  const panel = new BrowserWindow({
+    ...PANEL_SIZE,
+    minWidth: 360,
+    minHeight: 480,
+    title: "Dum",
+    show: false,
+    fullscreenable: false,
+    minimizable: false,
+    backgroundColor: "#16141f",
+    webPreferences: preferences(PRELOAD),
+  });
+  const command = new BrowserWindow({
+    ...COMMAND_SIZE,
+    title: "Ask Dum",
+    show: false,
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    backgroundColor: "#16141f",
+    // A floating panel over whatever app or full-screen Space they're in.
+    ...(MAC ? { type: "panel" } : {}),
+    webPreferences: preferences(PRELOAD),
+  });
+  command.setAlwaysOnTop(true, "floating");
+  command.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  const bubbleWindow = new BrowserWindow({
+    ...BUBBLE_MAX,
     show: false,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
     hasShadow: false,
     resizable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
+    movable: false,
+    focusable: false,
     skipTaskbar: true,
-    // A non-activating panel on macOS: clicking Dum doesn't pull focus from the IDE.
-    ...(MAC ? { type: "panel" } : {}),
-    webPreferences: preferences(),
-  });
-  const panel = new BrowserWindow({
-    ...PANEL,
-    minWidth: 320,
-    minHeight: 420,
-    title: "dum",
-    show: false,
     fullscreenable: false,
-    minimizable: false,
-    backgroundColor: "#16141f",
-    webPreferences: preferences(),
+    ...(MAC ? { type: "panel" } : {}),
+    webPreferences: preferences(BUBBLE_PRELOAD),
   });
-  const windows = [companion, panel];
+  // Click-through pixels: no buttons, no hit regions, nothing to type into.
+  bubbleWindow.setIgnoreMouseEvents(true);
+  bubbleWindow.setAlwaysOnTop(true, "screen-saver");
+  bubbleWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  const roles = new Map<number, Role>([[panel.webContents.id, "panel"], [command.webContents.id, "command"], [bubbleWindow.webContents.id, "bubble"]]);
+  const windows = [panel, command, bubbleWindow];
 
   let quitting = false;
-  panel.on("close", (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    panel.hide();
-  });
-  companion.on("close", (event) => {
-    if (!quitting) event.preventDefault();
-  });
+  for (const w of windows) {
+    w.on("close", (event) => {
+      if (quitting) return;
+      event.preventDefault();
+      w.hide();
+    });
+  }
 
-  const applyWindows = (next: Settings) => {
-    for (const w of windows) {
-      w.setAlwaysOnTop(next.alwaysOnTop, "floating");
-      w.setVisibleOnAllWorkspaces(next.allWorkspaces, { visibleOnFullScreen: next.allWorkspaces });
-    }
-  };
-  applyWindows(settings.settings);
-
-  // Beside the companion, on whichever side has room, fully on its display.
-  const besideCompanion = () => {
-    const c = companion.getBounds();
-    const area = screen.getDisplayMatching(c).workArea;
-    const { width, height } = panel.getBounds();
-    const left = c.x - width - 12;
-    const x = left >= area.x ? left : c.x + c.width + 12;
-    return placeOnScreen({ x, y: c.y + c.height - height }, { width, height }, [area], area);
-  };
+  const cursorArea = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  let panelPlaced = false;
   const showPanel = () => {
-    const at = besideCompanion();
-    panel.setPosition(at.x, at.y);
+    if (!panelPlaced) {
+      panel.setBounds(placeCentered(cursorArea(), PANEL_SIZE));
+      panelPlaced = true;
+    }
     panel.show();
     panel.focus();
   };
-  const togglePanel = () => (panel.isVisible() ? panel.hide() : showPanel());
 
-  let saveTimer: NodeJS.Timeout | null = null;
-  const moveTo = (target: { x: number; y: number }) => {
-    const at = placeCompanion(target);
-    companion.setPosition(at.x, at.y);
-    if (panel.isVisible()) {
-      const p = besideCompanion();
-      panel.setPosition(p.x, p.y);
-    }
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      try {
-        settings.move(at);
-      } catch {
-        // Position is a convenience; a read-only profile keeps working with the default spot.
-      }
-    }, 400);
+  const focus = new Focus({ platform: process.platform, resourcesPath: process.resourcesPath });
+  const focusReturn = new FocusReturn(focus);
+  const showCommand = async () => {
+    await focusReturn.summon(panel.isVisible() && panel.isFocused());
+    command.setBounds(placeCentered(cursorArea(), COMMAND_SIZE));
+    command.show();
+    command.focus();
   };
-  const keepOnScreen = () => moveTo(companion.getBounds());
+  const dismissCommand = async () => {
+    if (!command.isVisible()) return;
+    command.hide();
+    const back = await focusReturn.dismiss();
+    if (back === "panel") panel.focus();
+    // No captured app to go back to: stepping out of the way hands focus to whatever was before.
+    else if (!back && MAC && !panel.isVisible()) app.hide();
+  };
+  // Summon activates the command bar; summoning it while it has focus dismisses it.
+  const summon = () => void (command.isVisible() && command.isFocused() ? dismissCommand() : showCommand());
+
+  const keepOnScreen = () => {
+    const areas = screen.getAllDisplays().map((d) => d.workArea);
+    for (const w of windows) if (w.isVisible()) w.setBounds(reclamp(w.getBounds(), areas));
+  };
   screen.on("display-removed", keepOnScreen);
   screen.on("display-metrics-changed", keepOnScreen);
 
+  const bubble = new Bubble({
+    publish(view: BubbleView | null, fresh: boolean) {
+      if (bubbleWindow.isDestroyed()) return;
+      if (!view) {
+        bubbleWindow.webContents.send("dum:bubble", { kind: "voice", lines: [], expiresAt: 0 } satisfies BubbleView);
+        bubbleWindow.hide();
+        return;
+      }
+      // The anchor is sampled once per interaction; the bubble never follows the mouse.
+      if (fresh || !bubbleWindow.isVisible()) {
+        const at = screen.getCursorScreenPoint();
+        bubbleWindow.setBounds(placeBubble(at, screen.getDisplayNearestPoint(at).workArea));
+      }
+      bubbleWindow.webContents.send("dum:bubble", view);
+      if (!bubbleWindow.isVisible()) bubbleWindow.showInactive();
+    },
+  });
+
+  // -- host, capture, voice, look -----------------------------------------------
+
+  let router: Router | null = null;
   let tray: Tray | null = null;
-  const refreshTray = () => {
-    tray?.setContextMenu(Menu.buildFromTemplate([
-      { label: companion.isVisible() ? "Hide dum" : "Show dum", click: () => { if (companion.isVisible()) { companion.hide(); panel.hide(); } else companion.showInactive(); refreshTray(); } },
-      { label: "Conversation", click: () => { if (!companion.isVisible()) companion.showInactive(); togglePanel(); refreshTray(); } },
-      { type: "separator" },
-      { label: "Quit dum", click: () => app.quit() },
-    ]));
+  let pending = false;
+  const broadcast = () => {
+    if (pending) return;
+    pending = true;
+    setImmediate(() => {
+      pending = false;
+      if (!router) return;
+      const snapshot = router.snapshot();
+      for (const w of [panel, command]) if (!w.isDestroyed()) w.webContents.send("dum:snapshot", snapshot);
+      refreshTray();
+    });
   };
 
-  // The hotkey summons: a hidden dum comes back with the panel; an open panel goes away.
-  const summon = () => {
-    if (panel.isVisible() && panel.isFocused()) panel.hide();
-    else {
-      if (!companion.isVisible()) companion.showInactive();
-      showPanel();
-    }
-    refreshTray();
-  };
-  let hotkey = "";
-  let hotkeyError = "";
-  const register = (accelerator: string): boolean => {
+  let restartTimer: NodeJS.Timeout | null = null;
+  let restartDelay = 1_000;
+  let startedAt = 0;
+  let hostProblem = "";
+  const personal = () => context.read(settings.get().personalContext ? undefined : "off");
+  const startHost = async () => {
     try {
-      return globalShortcut.register(accelerator, summon);
-    } catch {
-      return false;
+      await host.start(personal(), settings.get());
+      startedAt = Date.now();
+      hostProblem = "";
+      if (host.view?.registry.activeZoneId === null) showPanel();
+    } catch (err) {
+      hostProblem = `Dum's teaching host didn't start: ${(err as Error).message}`;
+      scheduleRestart();
     }
+    broadcast();
   };
-  if (register(settings.settings.hotkey)) hotkey = settings.settings.hotkey;
-  else hotkeyError = `${settings.settings.hotkey} is already used by another app or the system. Choose another shortcut in Settings.`;
+  /** After a crash HostController doesn't restart itself; main starts it over into fresh history. */
+  const scheduleRestart = () => {
+    if (quitting || restartTimer) return;
+    if (startedAt && Date.now() - startedAt > RESTART_HEALTHY_MS) restartDelay = 1_000;
+    const delay = restartDelay;
+    restartDelay = Math.min(RESTART_MAX_MS, restartDelay * 2);
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      void startHost();
+    }, delay);
+  };
+
+  const host: HostController = new HostController(() => {
+    router?.changed();
+    if (!host.running && host.failure) {
+      hostProblem = host.failure;
+      scheduleRestart();
+    }
+    broadcast();
+  }, {
+    home: home(),
+    flavor,
+    claudeExecutable,
+    credential: credentialSource(credentials, accessToken),
+    frame: (checkId) => observer.frame(checkId),
+  });
+
+  const screenGranted = () => !MAC || systemPreferences.getMediaAccessStatus("screen") === "granted";
+  /** The display under the cursor, as a desktopCapturer screen source, `width` wide. */
+  const cursorScreen = async (width: number) => {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const height = Math.max(1, Math.round((width * display.size.height) / Math.max(1, display.size.width)));
+    const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width, height }, fetchWindowIcons: false });
+    const hit = sources.find((s) => s.display_id === String(display.id)) ?? (sources.length === 1 ? sources[0] : undefined);
+    return hit && !hit.thumbnail.isEmpty() ? hit.thumbnail : null;
+  };
+
+  let asleep = false;
+  const observer = new Observer({
+    zone: () => {
+      const view = host.view;
+      return view?.zoneEpoch && view.activeZone ? { zoneId: view.activeZone.id, epoch: view.zoneEpoch } : null;
+    },
+    blocked: () => (asleep ? "asleep or locked" : router?.recording ? "listening" : host.running ? null : "the host isn't running"),
+    frontmost: () => focus.frontmost(),
+    async thumbnail(): Promise<Bitmap | null> {
+      if (!screenGranted()) return null;
+      const image = await cursorScreen(LOOK.thumbWidth);
+      if (!image) return null;
+      const { width, height } = image.getSize();
+      return { width, height, data: image.toBitmap() };
+    },
+    async capture() {
+      if (!screenGranted()) return null;
+      return (await cursorScreen(LOOK.thumbWidth))?.toPNG() ?? null;
+    },
+    send(tick) {
+      // A tick for an epoch that's over is dropped here, never sent.
+      const view = host.view;
+      if (view?.zoneEpoch === tick.epoch && view.activeZone?.id === tick.zoneId) host.observeTick(tick);
+    },
+    look: settings.get().look,
+  });
 
   const capturer: Capturer = {
     async list() {
@@ -249,16 +371,16 @@ async function start(): Promise<void> {
         });
     },
     async grab(source) {
-      // A whole screen shouldn't include dum itself; hide both windows for the one frame.
+      // A whole screen shouldn't include Dum; hide its windows for the one frame, then bring them back without taking focus.
       const shown = source.kind === "screen" ? windows.filter((w) => w.isVisible()) : [];
       for (const w of shown) w.hide();
       try {
-        if (shown.length) await new Promise((resolve) => setTimeout(resolve, 250));
+        if (shown.length) await sleep(250);
         const sources = await desktopCapturer.getSources({ types: [source.kind], thumbnailSize: { width: CAPTURE_EDGE, height: CAPTURE_EDGE }, fetchWindowIcons: false });
         const hit = sources.find((s) => s.id === source.id);
         if (!hit) return null;
         if (hit.thumbnail.isEmpty()) {
-          throw new Error(MAC && systemPreferences.getMediaAccessStatus("screen") !== "granted" ? SCREEN_DENIED : "The system returned an empty image for that source - nothing was captured.");
+          throw new Error(screenGranted() ? "The system returned an empty image for that source - nothing was captured." : SCREEN_DENIED);
         }
         let image = hit.thumbnail;
         let png = image.toPNG();
@@ -268,159 +390,234 @@ async function start(): Promise<void> {
         }
         return png;
       } finally {
-        for (const w of shown) {
-          if (w === panel) {
-            panel.show();
-            panel.focus();
-          } else w.showInactive();
-        }
+        for (const w of shown) w.showInactive();
       }
     },
   };
 
-  let executable: { path: string } | { error: string };
-  try {
-    executable = { path: runtimeExecutable() };
-  } catch (err) {
-    executable = { error: (err as Error).message };
-  }
-  // Allow wizard.screenDecision() calls from main by exposing the bundled claude executable
-  if ('path' in executable) process.env.DUM_CLAUDE_BIN = executable.path;
-
-  let pending = false;
-  let router: Router | null = null;
-  const broadcast = () => {
-    if (pending) return;
-    pending = true;
-    setImmediate(() => {
-      pending = false;
-      if (!router) return;
-      const snapshot = router.snapshot();
-      for (const w of windows) if (!w.isDestroyed()) w.webContents.send("dum:snapshot", snapshot);
-    });
-  };
-  const changed = () => {
-    router?.changed();
-    broadcast();
-  };
-
-  // Without the bundled runtime there is nothing to run projects with, and no PATH lookup instead.
-  const missing = "error" in executable ? executable.error : "";
-  const refuse = (): never => {
-    throw new Error(`${missing}. Download a complete build of dum.`);
-  };
-  const controller: Controller = "path" in executable
-    ? new HostController(changed, { executable: executable.path, capturer })
-    : {
-        state: null, inputToken: "", canAttach: false, tree: null, wizardStatus: "wizard is unavailable without the bundled runtime",
-        setWizardAdvice: async () => {},
-        choose: async () => refuse(), send: async () => refuse(),
-        command: refuse, panel: refuse, interrupt: refuse,
-        close: async () => {},
-      };
-  const runtime = new RuntimeSetup(executable, broadcast);
-  const captures = new Captures(capturer);
   const dictation = new DictationHelper({
     platform: process.platform,
     arch: process.arch,
     systemVersion: process.getSystemVersion(),
-    resourcesPath: () => process.resourcesPath,
-    spawnOpen: (path) => new Promise<void>((resolve, reject) => {
-      execFile("/usr/bin/open", [path], { timeout: 10_000 }, (error) => error ? reject(error) : resolve());
-    }),
+    resourcesPath: process.resourcesPath,
   });
 
+  // -- shortcuts ----------------------------------------------------------------
+
+  const sendDraft = () => {
+    void router?.sendDraft().catch((err: unknown) => bubble.timed("reply", [(err as Error).message.slice(0, 300)], BUBBLE_TTL.error));
+  };
+  const registered: Record<"hotkey" | "sendDraftHotkey", string> = { hotkey: "", sendDraftHotkey: "" };
+  const actions: Record<"hotkey" | "sendDraftHotkey", () => void> = { hotkey: summon, sendDraftHotkey: sendDraft };
+  let hotkeyError = "";
+  const register = (accelerator: string, run: () => void): boolean => {
+    try {
+      return globalShortcut.register(accelerator, run);
+    } catch {
+      return false;
+    }
+  };
+  for (const key of ["hotkey", "sendDraftHotkey"] as const) {
+    const wanted = settings.get()[key];
+    if (register(wanted, actions[key])) registered[key] = wanted;
+    else hotkeyError = `${hotkeyError}${hotkeyError ? " " : ""}${wanted} is already used by another app or the system. Choose another shortcut in Settings.`;
+  }
+
   const native: Native = {
-    async chooseDirectory() {
-      const options = { title: "Choose a project folder", buttonLabel: "Open project", properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[] };
-      const picked = panel.isVisible() ? await dialog.showOpenDialog(panel, options) : await dialog.showOpenDialog(options);
+    async choosePath(kind, purpose) {
+      const options = {
+        title: purpose === "follow" ? "Choose a folder for Dum to follow in this zone" : kind === "folder" ? "Share a folder with this request" : "Share a file with this request",
+        buttonLabel: purpose === "follow" ? "Follow" : "Share",
+        properties: [kind === "folder" ? "openDirectory" : "openFile"] as ("openDirectory" | "openFile")[],
+      };
+      const parent = BrowserWindow.getFocusedWindow();
+      const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
       return picked.canceled ? null : picked.filePaths[0] ?? null;
+    },
+    async confirm(message, detail, yes) {
+      const options = { type: "question" as const, message, detail, buttons: [yes, "Cancel"], defaultId: 1, cancelId: 1, noLink: true };
+      const parent = BrowserWindow.getFocusedWindow();
+      const answer = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+      return answer.response === 0;
     },
     async openPath(path) {
       const failed = await shell.openPath(path);
       if (failed) throw new Error(`Couldn't open it: ${failed}`);
     },
-    openExternal: (url) => shell.openExternal(url),
+    async openExternal(url) {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("Dum only opens web pages");
+      await shell.openExternal(parsed.href);
+    },
     async openScreenSettings() {
       if (!MAC) throw new Error("Screen sharing permission is managed by your desktop on this system.");
       await shell.openExternal(SCREEN_SETTINGS);
     },
     screenPermission: () => (MAC ? systemPreferences.getMediaAccessStatus("screen") : "not-required"),
-    applySettings(next, previous) {
+    apply(next: DesktopPreferences, previous: DesktopPreferences) {
       if (next.launchAtLogin !== previous.launchAtLogin && !MAC && process.platform !== "win32") {
         throw new Error("Open at login isn't available on this system.");
       }
-      if (next.hotkey !== hotkey) {
-        if (hotkey) globalShortcut.unregister(hotkey);
-        if (!register(next.hotkey)) {
-          if (hotkey) register(hotkey);
-          throw new Error(`${next.hotkey} is already used by another app or the system - choose a different shortcut`);
+      const changed = (["hotkey", "sendDraftHotkey"] as const).filter((key) => next[key] !== registered[key]);
+      for (const key of changed) if (registered[key]) globalShortcut.unregister(registered[key]);
+      const done: typeof changed = [];
+      for (const key of changed) {
+        if (!register(next[key], actions[key])) {
+          // Roll every changed shortcut back to what was registered before.
+          for (const k of done) globalShortcut.unregister(next[k]);
+          for (const k of changed) if (registered[k]) register(registered[k], actions[k]);
+          throw new Error(`${next[key]} is already used by another app or the system - choose a different shortcut`);
         }
-        hotkey = next.hotkey;
-        hotkeyError = "";
+        done.push(key);
       }
-      applyWindows(next);
+      for (const key of changed) registered[key] = next[key];
+      if (changed.length) hotkeyError = "";
       if (next.launchAtLogin !== previous.launchAtLogin) app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
     },
     hotkeyError: () => hotkeyError,
-    togglePanel: () => { togglePanel(); refreshTray(); },
-    hidePanel: () => { panel.hide(); refreshTray(); },
-    moveCompanion(dx, dy) {
-      const b = companion.getBounds();
-      moveTo({ x: b.x + dx, y: b.y + dy });
+    async showSurface(surface) {
+      if (surface === "panel") showPanel();
+      else await showCommand();
+    },
+    openPane(pane) {
+      showPanel();
+      void panel.webContents.loadFile(INDEX, { query: { view: "panel" }, hash: pane });
+    },
+    async dismissSurface(surface) {
+      if (surface === "command") await dismissCommand();
+      else panel.hide();
     },
     quit: () => setImmediate(() => app.quit()),
   };
 
+  const captures = new Captures(capturer);
   router = new Router({
-    controller,
+    host,
     captures,
+    drafts: new Drafts(),
     settings,
-    runtime,
+    agent,
     native,
     dictation,
-    personal: (enabled) => context.read(enabled ? undefined : "off"),
+    observer,
+    bubble,
+    restart: startHost,
+    changed: broadcast,
     platform: process.platform,
     version: app.getVersion(),
   });
+  dictation.onEvent((event) => router!.voiceEvent(event));
 
-  // Requests are honored only from the top frame of dum's own two windows, showing dum's own page.
-  const owners = new Set(windows.map((w) => w.webContents.id));
-  const trusted = (event: IpcMainInvokeEvent): boolean => {
+  // Requests are honored only from the top frame of Dum's own panel and command bar, showing Dum's own page.
+  const trusted = (event: IpcMainInvokeEvent): Role | null => {
     const frame = event.senderFrame;
     const top = event.sender.mainFrame;
-    return !!frame && owners.has(event.sender.id) && frame.processId === top.processId && frame.routingId === top.routingId && ownedPage(frame.url, INDEX_URL);
+    const role = roles.get(event.sender.id);
+    if (!role || !frame || frame.processId !== top.processId || frame.routingId !== top.routingId || !ownedPage(frame.url, INDEX_URL)) return null;
+    return role;
   };
-  ipcMain.handle("dum:request", (event, raw: unknown) => (trusted(event) ? router!.handle(raw) : { ok: false, error: "request refused" }));
+  ipcMain.handle("dum:request", (event, raw: unknown) => {
+    const role = trusted(event);
+    return role ? router!.handle(raw, role) : { ok: false, error: "request refused" };
+  });
+
+  // -- tray -----------------------------------------------------------------------
+
+  /** Tray items go through the same router as the windows' requests. */
+  const fromTray = (raw: unknown) => void router!.handle(raw, "tray");
+  function refreshTray(): void {
+    if (!tray || !router) return;
+    const snapshot = router.snapshot();
+    const zone = snapshot.activeZone;
+    const where = zone ? zone.breadcrumb.map((b) => b.name).join(" › ") : snapshot.zones.activeZoneId === null ? "No zone yet" : "Opening a zone…";
+    tray.setToolTip(`Dum · ${where}`);
+    const zones = snapshot.zones.zones.filter((z) => z.deletedAt === null).slice(0, 40);
+    const listening = snapshot.voice.phase === "recording" || snapshot.voice.phase === "transcribing";
+    const template: MenuItemConstructorOptions[] = [
+      { label: where, enabled: false },
+      ...(hostProblem ? [{ label: hostProblem.slice(0, 120), enabled: false }] : []),
+      { type: "separator" },
+      { label: "Ask Dum…", accelerator: registered.hotkey || undefined, click: () => void showCommand() },
+      {
+        label: "Open Panel",
+        submenu: [
+          { label: "Panel", click: showPanel },
+          { type: "separator" },
+          ...([["zones", "Zones"], ["history", "History"], ["tree", "Skills"], ["settings", "Settings"]] as [Panel, string][])
+            .map(([pane, label]) => ({ label, click: () => fromTray({ type: "panel", panel: pane }) })),
+        ],
+      },
+      {
+        label: "Switch Zone",
+        enabled: zones.length > 0,
+        submenu: zones.map((z) => ({
+          label: z.name,
+          type: "radio" as const,
+          checked: z.id === snapshot.zones.activeZoneId,
+          click: () => fromTray({ type: "zone-enter", id: z.id, expectedRevision: snapshot.zones.revision }),
+        })),
+      },
+      { type: "separator" },
+      listening && snapshot.voice.recordingId
+        ? { label: "Stop Voice", click: () => fromTray({ type: "voice-stop", recordingId: snapshot.voice.recordingId }) }
+        : { label: "Start Voice", enabled: dictation.status().available && snapshot.binding !== null, click: () => fromTray({ type: "voice-start", binding: snapshot.binding }) },
+      { label: "Send Draft", enabled: snapshot.binding?.zoneId != null && snapshot.draft.text.trim() !== "", click: sendDraft },
+      { label: snapshot.look.paused ? "Resume the Look" : "Pause the Look", click: () => fromTray({ type: "look-pause", paused: !snapshot.look.paused }) },
+      { type: "separator" },
+      { label: "Quit Dum", click: () => app.quit() },
+    ];
+    tray.setContextMenu(Menu.buildFromTemplate(template));
+  }
 
   Menu.setApplicationMenu(MAC ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }]) : null);
   tray = new Tray(trayIcon(dum));
-  tray.setToolTip("dum");
-  if (!MAC) tray.on("click", () => { togglePanel(); refreshTray(); });
-  refreshTray();
+  tray.setToolTip("Dum");
+  if (!MAC) tray.on("click", showPanel);
 
-  companion.once("ready-to-show", () => companion.showInactive());
+  // -- sleep and lock -------------------------------------------------------------
+
+  const away = () => {
+    asleep = true;
+    router?.stopVoice();
+    bubble.dismiss();
+  };
+  const back = () => { asleep = false; };
+  powerMonitor.on("suspend", away);
+  powerMonitor.on("lock-screen", away);
+  powerMonitor.on("resume", back);
+  powerMonitor.on("unlock-screen", back);
+
   await Promise.all([
-    companion.loadFile(INDEX, { query: { view: "companion" } }),
     panel.loadFile(INDEX, { query: { view: "panel" } }),
+    command.loadFile(INDEX, { query: { view: "command" } }),
+    bubbleWindow.loadFile(INDEX, { query: { view: "bubble" } }),
   ]);
-  if (settings.warning) void dialog.showMessageBox({ type: "warning", message: "dum's settings were reset", detail: settings.warning });
-  void runtime.check();
-  broadcast();
+  if (settings.warning) void dialog.showMessageBox({ type: "warning", message: "Dum's settings were reset", detail: settings.warning });
+  void agent.check().finally(broadcast);
+  if (dictation.status().available) void dictation.configure(settings.get().voiceHotkey).catch(() => undefined).finally(broadcast);
+  // First run asks for Screen Recording once, so the look can see the screen (it's on by default).
+  if (MAC && settings.get().look.screen && systemPreferences.getMediaAccessStatus("screen") === "not-determined") {
+    void desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } }).catch(() => undefined);
+  }
+  await startHost();
 
-  app.on("second-instance", summon);
-  app.on("activate", summon);
+  app.on("second-instance", showPanel);
+  app.on("activate", showPanel);
 
   let closing: Promise<void> | null = null;
   app.on("before-quit", (event) => {
     if (closing === null) {
       quitting = true;
       event.preventDefault();
+      clearTimeout(restartTimer ?? undefined);
+      observer.close();
       captures.discard();
-      runtime.cancel();
+      agent.cancel();
+      bubble.dismiss();
       globalShortcut.unregisterAll();
-      const timeout = new Promise<void>((resolve) => setTimeout(resolve, 7_000).unref());
-      closing = Promise.race([controller.close().catch(() => {}), timeout]).then(() => app.quit());
+      const timeout = sleep(7_000, undefined, { ref: false });
+      const shutdown = Promise.allSettled([host.close(), dictation.close(), focus.close()]).then(() => undefined);
+      closing = Promise.race([shutdown, timeout]).then(() => app.quit());
     }
   });
 }

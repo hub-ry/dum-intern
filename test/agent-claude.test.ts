@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { z } from "zod";
 import { setImmediate } from "node:timers/promises";
 import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { CLAUDE_DEFAULTS } from "../src/agent/schema.ts";
 import {
-  CLAUDE_DEFAULTS,
   assertInit,
   assertProvider,
   catalog,

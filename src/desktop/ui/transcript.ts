@@ -1,36 +1,10 @@
-// The conversation, one element per Store entry. Old entries stay readable whatever kind they are.
+// The conversation, one element per Store entry. Old entries (plans, courses, proposals) stay readable as history, without controls.
 
-import type { Entry, Prompt } from "../../store.ts";
-import { h, icon, plain } from "./dom.ts";
-import { SPRITES } from "./sprites.ts";
-import { framesFor } from "../../art-parser.ts";
-
-/** A still portrait of the idle frame, drawn once and reused as a data URL. */
-const portraits = new Map<string, string>();
-function portrait(who: "dum" | "wizard"): HTMLImageElement {
-  let url = portraits.get(who);
-  if (!url) {
-    const sprite = SPRITES[who];
-    const frame = framesFor(sprite, "idle")[0]!;
-    const cols = Math.max(...frame.rows.map((r) => r.length));
-    const canvas = document.createElement("canvas");
-    const px = 4;
-    canvas.width = cols * px;
-    canvas.height = frame.rows.length * px;
-    const ctx = canvas.getContext("2d")!;
-    frame.rows.forEach((row, y) => {
-      for (let x = 0; x < row.length; x++) {
-        const hex = sprite.palette.get(row[x]!);
-        if (!hex) continue;
-        ctx.fillStyle = `#${hex}`;
-        ctx.fillRect(x * px, y * px, px, px);
-      }
-    });
-    url = canvas.toDataURL("image/png");
-    portraits.set(who, url);
-  }
-  return h("img", { class: `portrait portrait-${who}`, src: url, alt: "" });
-}
+import type { Entry, Prompt } from "../../store-types.ts";
+import type { ChangeReceipt } from "../../zone-types.ts";
+import { h, icon, plain, type Client } from "./dom.ts";
+import { portrait } from "./sprites.ts";
+import { diffBody, revertButton } from "./change-view.ts";
 
 /** `code` and **bold**, as elements. Nothing in the text is ever parsed as HTML. */
 function inline(text: string): Node[] {
@@ -122,30 +96,22 @@ function numbered(text: string, from: number): HTMLElement {
   return pre;
 }
 
-function diffBody(diff: string): HTMLElement {
-  const pre = h("pre", { class: "code diff" });
-  for (const line of diff.split("\n")) {
-    const cls = line.startsWith("@@") ? "hunk" : line.startsWith("+++") || line.startsWith("---") ? "file" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "ctx";
-    pre.append(h("span", { class: `dl ${cls}` }, line), "\n");
-  }
-  return pre;
-}
-
-/** Opens a file dum reported, in the app the system picks for it. Main checks the path against its records. */
-export type Opener = (record: "proposal" | "course", path: string) => void;
-
 const lineCount = (t: string) => t.split("\n").length;
 
-function openButton(label: string, onClick: () => void): HTMLButtonElement {
-  return h("button", { type: "button", class: "link-btn", onclick: onClick }, icon("external"), h("span", {}, label));
-}
+const DIFF_LABEL: Record<Extract<Entry, { kind: "diff" }>["outcome"], { label: string; tone: "ok" | "info" | "bad" | "muted" }> = {
+  applied: { label: "changed ", tone: "ok" },
+  reverted: { label: "reverted change to ", tone: "muted" },
+  proposed: { label: "proposed change to ", tone: "info" },
+  created: { label: "created ", tone: "ok" },
+  refused: { label: "refused change to ", tone: "bad" },
+};
 
-function render(e: Entry, prompt: Prompt, open: Opener): HTMLLIElement {
+function render(e: Entry, prompt: Prompt, client: Client, changes: readonly ChangeReceipt[]): HTMLLIElement {
   switch (e.kind) {
     case "say":
-      return speech(`say${e.lead ? " lead" : ""}`, "dum", "dum", prose(e.text));
+      return speech(`say${e.lead ? " lead" : ""}`, "dum", "Dum", prose(e.text));
     case "quip":
-      return speech("quip", "wizard", "wizard", prose(e.text));
+      return speech("quip", "wizard", "Wizard", prose(e.text));
     case "user":
       return speech("user", "you", "you", h("div", { class: "user-text" }, e.text));
     case "note":
@@ -158,7 +124,7 @@ function render(e: Entry, prompt: Prompt, open: Opener): HTMLLIElement {
           speech(
             "ask",
             "dum",
-            "dum asks",
+            "Dum asks",
             prose(e.question),
             e.why ? h("div", { class: "why" }, e.why) : null,
             waiting ? chip("waiting for you", "warn") : e.answer === null ? chip("not answered", "muted") : null,
@@ -169,35 +135,20 @@ function render(e: Entry, prompt: Prompt, open: Opener): HTMLLIElement {
       return li;
     }
     case "plan": {
-      const live = prompt?.type === "plan" && prompt.plan === e.plan;
-      const status = e.paused
-        ? chip("paused for a course", "info")
-        : e.approved === null
-          ? chip(live ? "waiting for you" : "no answer", live ? "warn" : "muted")
-          : e.approved
-            ? chip("approved", "ok")
-            : chip("not approved", "bad");
-      return h("li", { class: `entry card plan${live ? " live" : ""}` }, h("div", { class: "card-head" }, icon("boundary"), h("span", {}, "plan"), status), prose(e.plan));
+      const status = e.approved === null ? chip("no answer", "muted") : e.approved ? chip("approved", "ok") : chip("not approved", "bad");
+      return h("li", { class: "entry card plan" }, h("div", { class: "card-head" }, icon("boundary"), h("span", {}, "plan, from an older session"), status), prose(e.plan));
     }
     case "course": {
       const c = e.card;
-      const live = e.passed === null && prompt?.type === "course" && prompt.card.skill === c.skill && prompt.card.path === c.path;
-      const status = e.passed === null ? chip(live ? "in progress" : "unfinished", live ? "info" : "muted") : e.passed ? chip("passed", "ok") : chip("left", "muted");
+      const status = e.passed === null ? chip("unfinished", "muted") : e.passed ? chip("passed", "ok") : chip("left", "muted");
       return h(
         "li",
-        { class: `entry card course${live ? " live" : ""}` },
-        h("div", { class: "card-head" }, icon("tree"), h("span", {}, `course · ${c.skill}${c.lang ? ` in ${c.lang}` : ""}`), status),
+        { class: "entry card course" },
+        h("div", { class: "card-head" }, icon("tree"), h("span", {}, `course · ${c.skill}${c.lang ? ` in ${c.lang}` : ""}, from an older session`), status),
         h("div", { class: "course-part" }, h("div", { class: "label" }, "lesson"), prose(c.lesson)),
         c.example ? h("div", { class: "course-part" }, h("div", { class: "label" }, "example"), h("pre", { class: "code" }, h("code", {}, c.example))) : null,
-        c.wizard ? speech("quip inset", "wizard", "wizard", prose(c.wizard)) : null,
-        h("div", { class: "course-part" }, h("div", { class: "label" }, "your turn"), prose(c.task)),
-        h(
-          "div",
-          { class: "course-meta" },
-          h("span", {}, "the gap is in ", h("code", {}, c.path)),
-          c.run ? h("span", {}, "run it with ", h("code", {}, c.run)) : null,
-          live ? openButton("open the file", () => open("course", c.path)) : null,
-        ),
+        c.wizard ? speech("quip inset", "wizard", "Wizard", prose(c.wizard)) : null,
+        h("div", { class: "course-part" }, h("div", { class: "label" }, "task"), prose(c.task)),
       );
     }
     case "tool": {
@@ -215,25 +166,24 @@ function render(e: Entry, prompt: Prompt, open: Opener): HTMLLIElement {
     case "fill":
       return fold("fill", [h("span", {}, `filled ${e.concept} in `), h("code", {}, e.path)], [h("pre", { class: "code" }, h("code", {}, e.code))], false);
     case "excerpt": {
-      const summary: Node[] = [h("span", {}, e.by === "you" ? "you shared " : "dum read "), h("code", {}, `${e.path}:${e.from}`)];
+      const summary: Node[] = [h("span", {}, e.by === "you" ? "you shared " : "Dum read "), h("code", {}, `${e.path}:${e.from}`)];
       if (e.note) summary.push(h("span", { class: "fold-note" }, e.note));
       return fold("excerpt", summary, [numbered(e.text, e.from)], lineCount(e.text) <= 16);
     }
     case "diff": {
-      const label = e.outcome === "proposed" ? "proposed change to " : e.outcome === "created" ? "created " : "refused change to ";
-      const tone = e.outcome === "proposed" ? "info" : e.outcome === "created" ? "ok" : "bad";
+      const { label, tone } = DIFF_LABEL[e.outcome];
       const body: Node[] = [];
-      if (e.artifact && e.outcome === "proposed") {
+      if (e.outcome === "applied" && e.changeId) {
+        const changeId = e.changeId;
         body.push(
           h(
             "div",
             { class: "artifact" },
-            h("span", {}, "saved as ", h("code", {}, e.artifact), ". dum doesn't apply it - your file is untouched."),
-            openButton("open proposal", () => open("proposal", e.artifact!)),
+            h("span", {}, "Dum wrote this to your file. Revert puts it back, unless you've edited it since."),
+            revertButton(client, changes.find((c) => c.id === changeId), changeId),
           ),
         );
-      } else if (e.outcome === "proposed") body.push(h("div", { class: "artifact" }, "a proposal only - your file is untouched."));
-      else if (e.outcome === "created") body.push(h("div", { class: "artifact" }, "a new file - nothing of yours was overwritten."));
+      } else if (e.outcome === "reverted") body.push(h("div", { class: "artifact" }, "put back the way it was."));
       body.push(diffBody(e.diff));
       return fold(`diff diff-${e.outcome}`, [h("span", {}, label), h("code", {}, e.path), chip(e.outcome, tone)], body, e.outcome !== "refused" && lineCount(e.diff) <= 30);
     }
@@ -259,20 +209,22 @@ export class Transcript {
   readonly el = h("ol", { class: "transcript", role: "log", "aria-label": "Conversation" });
   private shown = new Map<number, { key: string; el: HTMLLIElement }>();
 
-  constructor(private open: Opener) {}
+  constructor(private client: Client) {}
 
-  update(entries: Entry[], prompt: Prompt) {
+  update(entries: Entry[], prompt: Prompt, changes: readonly ChangeReceipt[]) {
     const first = entries[0]?.id;
     const firstShown = this.shown.keys().next().value;
     if (entries.length < this.shown.size || (first !== undefined && firstShown !== undefined && first !== firstShown)) this.clear();
     const live = new Set<number>();
+    const bound = String(!!this.client.snap?.binding);
     for (const e of entries) {
       live.add(e.id);
-      // Waiting markers depend on the prompt, so it is part of what decides a redraw.
-      const key = JSON.stringify(e) + (e.kind === "question" || e.kind === "plan" || e.kind === "course" ? JSON.stringify(prompt) : "");
+      // Waiting markers depend on the prompt, and Revert on the change's receipt, so both decide a redraw.
+      const extra = e.kind === "question" ? JSON.stringify(prompt) : e.kind === "diff" && e.changeId ? JSON.stringify(changes.find((c) => c.id === e.changeId) ?? null) + bound : "";
+      const key = JSON.stringify(e) + extra;
       const was = this.shown.get(e.id);
       if (was?.key === key) continue;
-      const el = render(e, prompt, this.open);
+      const el = render(e, prompt, this.client, changes);
       el.dataset.id = String(e.id);
       if (was) {
         const opens = [...was.el.querySelectorAll("details")].map((d) => d.open);

@@ -11,10 +11,8 @@ const STATE_TEXT: Record<NodeView["state"], string> = {
 };
 
 export type TreeActions = {
-  /** `:practice <skill> [in <lang>]`: practice tasks you do yourself. */
-  practice(arg: string): void;
-  /** Puts `course <skill>` in the message box. Starting it is still your send. */
-  draftCourse(text: string): void;
+  /** `:projects <skill> [in <lang>]`: suggested projects sized to that skill, built by you. */
+  projects(arg: string): void;
 };
 
 export class SkillTree {
@@ -127,16 +125,11 @@ export class SkillTree {
     if (n.requires.length) out.push(h("p", {}, h("span", { class: "muted" }, "rests on "), n.requires.join(", ")));
     if (n.needs.length) out.push(h("p", {}, h("span", { class: "muted" }, "still needs "), n.needs.join(", ")));
     const row = h("div", { class: "node-actions" });
-    if (n.state === "locked" && n.next) {
-      row.append(h("button", { type: "button", class: "btn small", onclick: () => this.actions.practice(`${n.next}${where}`) }, `practice ${n.next} first`));
-    } else if (n.state === "open" || n.state === "recognized") {
-      row.append(h("button", { type: "button", class: "btn small", onclick: () => this.actions.practice(`${n.name}${where}`) }, "practice it"));
-      if (n.state === "open") row.append(h("button", { type: "button", class: "btn small ghost", onclick: () => this.actions.draftCourse(`course ${n.name}${where}`) }, "short course"));
-    } else if (n.state === "built") {
-      row.append(h("button", { type: "button", class: "btn small ghost", onclick: () => this.actions.practice(`${n.name}${where}`) }, "practice more"));
-    }
+    const target = n.state === "locked" && n.next ? n.next : n.name;
+    const label = n.state === "locked" && n.next ? `projects for ${n.next} first` : n.state === "built" ? "more projects" : "suggest projects";
+    if (n.state !== "locked" || n.next) row.append(h("button", { type: "button", class: "btn small", onclick: () => this.actions.projects(`${target}${where}`) }, label));
     if (row.childElementCount) out.push(row);
-    if (n.state === "open") out.push(h("p", { class: "muted small" }, "a short course counts as recognizing it. building it means writing it yourself and handing it in."));
+    if (n.state === "open") out.push(h("p", { class: "muted small" }, "building it means writing it yourself and handing it in for review."));
     return out;
   }
 }

@@ -6,6 +6,12 @@ import type { AgentChoice, BackendId, BackendStatus, Flavor, LoginMethod, ModelO
 export const BACKEND_IDS = ["claude", "chatgpt", "local", "copilot"] as const satisfies readonly BackendId[];
 export const LOGIN_METHODS = ["anthropic-key", "claude-subscription", "chatgpt", "github", "none"] as const satisfies readonly LoginMethod[];
 
+/** Claude's selectors before anything else is picked: the intern and the helper. Pure data, so the renderer can preselect them. */
+export const CLAUDE_DEFAULTS = {
+  intern: { backend: "claude", model: "claude-opus-5-5", effort: "high" },
+  helper: { backend: "claude", model: "claude-fable-5-1", effort: "high" },
+} as const satisfies { intern: Selector; helper: Selector };
+
 /** The sign-in methods each backend has in a local build. Public builds never offer "claude-subscription". */
 export const BACKEND_LOGINS: Readonly<Record<BackendId, readonly LoginMethod[]>> = {
   claude: ["anthropic-key", "claude-subscription"],

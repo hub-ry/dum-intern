@@ -1,23 +1,24 @@
-// The desktop main process without Electron: what a page may ask for, what a capture may become,
-// what settings survive, and how the bundled Claude runtime is found, checked and signed in.
+// Main's router, captures and the native seams, without Electron: Router role checks, strict
+// requests, typed-path consent, stale draft/voice/capture rejection and the read-only bubble.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
-import type { Query } from "@anthropic-ai/claude-agent-sdk";
-import type { Context } from "../src/context.ts";
-import type { Mode } from "../src/gate.ts";
-import type { State } from "../src/store.ts";
-import type { SharedImage } from "../src/desktop/controller.ts";
-import type { CaptureSource, Settings } from "../src/desktop/protocol.ts";
+import { join } from "node:path";
+import { AgentSetup } from "../src/desktop/agent-setup.ts";
 import { Captures, type Capturer } from "../src/desktop/capture.ts";
-import { DictationHelper } from "../src/desktop/dictation.ts";
-import { Router, ownedPage, type Controller, type Native } from "../src/desktop/ipc.ts";
-import { DesktopSettings, placeOnScreen } from "../src/desktop/settings.ts";
-import { RuntimeSetup, bundledCandidates, resolveBundled, type Probe } from "../src/desktop/runtime-setup.ts";
-import { MODELS, claudeExecutable, closed, login, start } from "../src/runtime.ts";
+import { Drafts } from "../src/desktop/draft.ts";
+import { Router, ownedPage, type Host, type Native } from "../src/desktop/ipc.ts";
+import { DesktopSettings } from "../src/desktop/settings.ts";
+import { Bubble } from "../src/desktop/surfaces.ts";
+import type { HostView } from "../src/desktop/host-client.ts";
+import type { BubbleView, CaptureSource, DesktopPreferences, Reply } from "../src/desktop/protocol.ts";
+import type { VoiceEvent } from "../src/desktop/native-protocol.ts";
+import type { InputBinding, RequestBinding, ShareGrant } from "../src/share-types.ts";
+import type { SharedImage, State } from "../src/store-types.ts";
+import type { Zone, ZoneContext } from "../src/zone-types.ts";
 
 const temp = () => mkdtempSync(join(tmpdir(), "dum-native-"));
 const PNG = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("IHDR-pretend-frame")]);
@@ -25,13 +26,10 @@ const SOURCES: CaptureSource[] = [
   { id: "screen:1:0", name: "Built-in display", kind: "screen" },
   { id: "window:42:0", name: "Editor - app.ts", kind: "window" },
 ];
-
-function script(dir: string, name: string, body: string): string {
-  const path = join(dir, name);
-  writeFileSync(path, `#!/bin/sh\n${body}\n`);
-  chmodSync(path, 0o755);
-  return path;
-}
+const settle = () => new Promise((r) => setImmediate(r));
+const zoneA = randomUUID();
+const zoneB = randomUUID();
+const bind = (patch: Partial<RequestBinding> = {}): RequestBinding => ({ zoneId: zoneA, zoneEpoch: "e1", inputToken: "t1", requestId: "r1", ...patch });
 
 /** A capturer whose grabs finish only when the test says so. */
 function capturer() {
@@ -47,13 +45,13 @@ function capturer() {
   return { c, grabs };
 }
 
-const settle = () => new Promise((r) => setImmediate(r));
+// -- captures ---------------------------------------------------------------------------------
 
-test("a capture is shown locally, then sent at most once, only for the prompt and project it was taken for", async () => {
+test("a capture is shown locally, then sent at most once, only for the binding it was taken for", async () => {
   let now = 1_000;
   const { c, grabs } = capturer();
   const captures = new Captures(c, 60_000, () => now);
-  const here = { root: "/p", inputToken: "t1" };
+  const here = bind();
 
   await assert.rejects(captures.preview("screen:1:0", here), /current list/, "only a listed source can be captured");
   await captures.sources();
@@ -66,12 +64,10 @@ test("a capture is shown locally, then sent at most once, only for the prompt an
   const preview = await first;
   assert.equal(preview.name, "Editor - app.ts");
   assert.ok(preview.dataUrl.startsWith("data:image/png;base64,"));
-  assert.equal(Buffer.from(preview.dataUrl.split(",")[1]!, "base64").subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   assert.ok(!preview.dataUrl.includes(preview.token));
 
-  assert.throws(() => captures.take(preview.token, { root: "/p", inputToken: "t2" }), /different prompt/);
+  assert.throws(() => captures.take(preview.token, bind({ requestId: "r2" })), /different prompt/, "another request can't take it");
   assert.equal(captures.holding, false, "a stale send releases the bytes");
-  assert.throws(() => captures.take(preview.token, here), /no longer held/);
 
   const again = captures.preview("window:42:0", here);
   grabs[1]!.finish(Buffer.from(PNG));
@@ -88,154 +84,170 @@ test("a capture is shown locally, then sent at most once, only for the prompt an
   assert.equal(captures.holding, false);
 });
 
-test("discard, cancel and project switch release a capture, including one still being taken", async () => {
+test("discard and a binding change release a capture, including one still being taken", async () => {
   const { c, grabs } = capturer();
   const captures = new Captures(c);
-  const here = { root: "/p", inputToken: "t1" };
   await captures.sources();
 
-  const held = captures.preview("screen:1:0", here);
+  const held = captures.preview("screen:1:0", bind());
   grabs[0]!.finish(Buffer.from(PNG));
-  const preview = await held;
-  captures.invalidate({ root: "/p", inputToken: "t1" });
-  assert.equal(captures.holding, true, "the same prompt keeps it");
-  captures.invalidate({ root: "/other", inputToken: "t1" });
-  assert.equal(captures.holding, false, "another project drops it");
-  assert.throws(() => captures.take(preview.token, here), /no longer held/);
+  await held;
+  captures.invalidate(bind());
+  assert.equal(captures.holding, true, "the same binding keeps it");
+  captures.invalidate(bind({ zoneEpoch: "e2" }));
+  assert.equal(captures.holding, false, "a reopened zone drops it");
 
-  const racing = captures.preview("window:42:0", here);
+  const racing = captures.preview("window:42:0", bind());
   await settle();
-  captures.discard();
+  captures.invalidate(bind({ inputToken: "t2" }));
   const bytes = Buffer.from(PNG);
   grabs[1]!.finish(bytes);
   await assert.rejects(racing, /cancelled/);
-  assert.equal(captures.holding, false, "a grab finishing after discard is thrown away");
-  assert.ok(bytes.every((b) => b === 0), "and its bytes are wiped");
+  assert.ok(bytes.every((b) => b === 0), "a frame for the old prompt is wiped, never kept");
 
-  const gone = captures.preview("window:42:0", here);
-  grabs[2]!.finish(null);
-  await assert.rejects(gone, /isn't available any more/, "a closed window is reported, never a blank capture");
-  const junk = captures.preview("window:42:0", here);
-  grabs[3]!.finish(Buffer.from("GIF89a not a png"));
+  const discarded = captures.preview("window:42:0", bind());
+  await settle();
+  captures.discard();
+  grabs[2]!.finish(Buffer.from(PNG));
+  await assert.rejects(discarded, /cancelled/);
+
+  const gone = captures.preview("window:42:0", bind());
+  grabs[3]!.finish(null);
+  await assert.rejects(gone, /isn't available any more/);
+  const junk = captures.preview("window:42:0", bind());
+  grabs[4]!.finish(Buffer.from("GIF89a not a png"));
   await assert.rejects(junk, /isn't a PNG/);
-
-  const denied = new Captures({ list: async () => { throw new Error("Screen Recording is off for dum."); }, grab: async () => null });
-  await assert.rejects(denied.sources(), /Screen Recording is off/);
   const empty = new Captures({ list: async () => [], grab: async () => null });
   await assert.rejects(empty.sources(), /No screens or windows/);
 });
 
-test("a prompt that changes while a capture is being taken cancels that capture instead of holding it", async () => {
-  const { c, grabs } = capturer();
-  const captures = new Captures(c);
-  await captures.sources();
+// -- the router -------------------------------------------------------------------------------
 
-  const racing = captures.preview("window:42:0", { root: "/p", inputToken: "t1" });
-  await settle();
-  captures.invalidate({ root: "/p", inputToken: "t2" });
-  const bytes = Buffer.from(PNG);
-  grabs[0]!.finish(bytes);
-  await assert.rejects(racing, /cancelled|changed/);
-  assert.equal(captures.holding, false, "the frame for the old prompt is never kept");
-  assert.ok(bytes.every((b) => b === 0), "and its bytes are wiped");
+function zone(id: string, parentId: string | null, name: string): Zone {
+  const at = "2026-10-08T00:00:00.000Z";
+  return { id, parentId, name, goal: `learn ${name}`, language: null, focusSkills: [], createdAt: at, updatedAt: at, deletedAt: null };
+}
 
-  const same = captures.preview("window:42:0", { root: "/p", inputToken: "t2" });
-  await settle();
-  captures.invalidate({ root: "/p", inputToken: "t2" });
-  grabs[1]!.finish(Buffer.from(PNG));
-  assert.equal((await same).name, "Editor - app.ts", "an unchanged prompt keeps its capture");
+function context(id: string, name: string): ZoneContext {
+  return { id, revision: 1, breadcrumb: [{ id, name }], goal: `learn ${name}`, ancestorGoals: [], language: "", focusSkills: [], notes: [] };
+}
 
-  const closing = captures.preview("window:42:0", { root: "/p", inputToken: "t2" });
-  await settle();
-  captures.invalidate(null);
-  grabs[2]!.finish(Buffer.from(PNG));
-  await assert.rejects(closing, /cancelled|changed/, "no project at all cancels it too");
-  assert.equal(captures.holding, false);
-});
-
-function stateFor(root: string, mode: Mode, extra: Partial<State> = {}): State {
+function state(patch: Partial<State> = {}): State {
   return {
-    repo: root.split(sep).pop()!, root, files: [], mode, transcript: [], prompt: null, busy: false, status: "",
-    stage: { kind: "conversation" }, unlocked: 0,
-    models: { intern: { model: "m", effort: "high" }, wizard: { model: "m", effort: "high" } },
-    ...extra,
-  } as State;
+    zoneId: zoneA, zoneName: "Trees", mode: "understand", transcript: [], prompt: { type: "next" }, busy: false, status: "",
+    stage: { kind: "conversation" }, unlocked: 0, models: { intern: null, helper: null }, ...patch,
+  };
 }
 
-class FakeController implements Controller {
-  state: State | null = null;
-  inputToken = "";
-  canAttach = false;
-  tree = null;
-  wizardStatus = "wizard advice is off";
-  adviceEnabled = false;
-  async setWizardAdvice(enabled: boolean, _source?: 'screen' | 'files') {
-    this.adviceEnabled = enabled;
-    this.wizardStatus = enabled ? "wizard is watching" : "wizard advice is off";
-  }
-  sent: { text: string; inputToken: string; image?: SharedImage }[] = [];
-  chosen: { root: string; personal: Context; mode?: Mode }[] = [];
-  hold: Promise<void> | null = null;
-  commands: string[] = [];
-  async choose(root: string, personal: Context, mode?: Mode) {
-    this.chosen.push({ root, personal, mode });
-    if (this.hold) await this.hold;
-    this.state = stateFor(root, mode ?? "understand");
-    this.inputToken = `t${this.chosen.length}`;
-    this.canAttach = true;
-  }
-  async send(text: string, inputToken: string, image?: SharedImage) {
-    this.sent.push({ text, inputToken, ...(image ? { image } : {}) });
-  }
-  async command(name: string, argument?: string) {
-    this.commands.push(`${name} ${argument ?? ""}`.trim());
-  }
-  async panel(panel: string) {
-    this.commands.push(`panel ${panel}`);
-  }
-  async interrupt() {
-    this.commands.push("interrupt");
-  }
-  async close() {}
+function viewIn(patch: Partial<HostView> = {}): HostView {
+  return {
+    zoneEpoch: "e1", state: state(), tree: null,
+    registry: { version: 1, revision: 3, activeZoneId: zoneA, zones: [zone(zoneA, null, "Trees"), zone(zoneB, zoneA, "AVL")] },
+    activeZone: context(zoneA, "Trees"), inputToken: "t1", canAttach: true, shares: [], follows: [], changes: [],
+    look: { status: "looking" }, ...patch,
+  };
 }
 
-function desktop(dir = temp()) {
-  const controller = new FakeController();
+class FakeHost {
+  view: HostView | null = viewIn();
+  running = true;
+  calls: string[] = [];
+  sent: { binding: RequestBinding; text: string; shares: ShareGrant[]; image?: SharedImage }[] = [];
+  bindings: unknown[] = [];
+  async createZone(z: { name: string; goal: string }, enter: boolean) { this.calls.push(`create ${z.name} | ${z.goal} | ${enter}`); return zone(randomUUID(), null, z.name); }
+  async openZone(id: string, rev: number) { this.calls.push(`enter ${id === zoneB ? "B" : id} ${rev}`); }
+  async updateZone() { return zone(zoneA, null, "Trees"); }
+  async zoneContext() { return context(zoneA, "Trees"); }
+  async deleteZone(id: string) { this.calls.push(`delete ${id === zoneA ? "A" : "B"}`); return { activeZoneId: null, deletedIds: [zoneA, zoneB] }; }
+  async settings(p: DesktopPreferences) { this.calls.push(`settings ${p.hotkey}`); }
+  async agentSelect() {}
+  async agentModels() { return []; }
+  async send(binding: RequestBinding, text: string, shares: ShareGrant[], image?: SharedImage) { this.sent.push({ binding, text, shares, ...(image ? { image } : {}) }); }
+  async respond(binding: RequestBinding) { this.bindings.push(binding); this.calls.push("respond"); }
+  async command(name: string) { this.calls.push(`command ${name}`); }
+  async panel(panel: string) { this.calls.push(`panel ${panel}`); }
+  async shareAdd(path: string, kind: "file" | "folder", binding: RequestBinding): Promise<ShareGrant> {
+    this.calls.push(`share ${kind} ${path}`);
+    this.bindings.push(binding);
+    const grant: ShareGrant = { id: randomUUID(), kind, scope: "request", label: "x", files: [] };
+    this.view = { ...this.view!, shares: [...this.view!.shares, grant] };
+    return grant;
+  }
+  async shareRemove() {}
+  async followAdd(path: string) { this.calls.push(`follow ${path}`); return { id: randomUUID(), zoneId: zoneA, label: "x", addedAt: "", files: 0 }; }
+  async followRemove() {}
+  async changeRevert() { return {} as never; }
+  async skillEdit(op: string) { this.calls.push(`skill ${op}`); }
+  async treeSync() { return null; }
+  async openRecord() { return "/app/record.md"; }
+  async interrupt() { this.calls.push("interrupt"); }
+}
+
+function desktop(o: { flavor?: "public" | "local" } = {}) {
+  const dir = temp();
+  const host = new FakeHost();
   const { c, grabs } = capturer();
   const captures = new Captures(c);
-  const settings = DesktopSettings.load(dir);
+  const settings = DesktopSettings.load(dir, o.flavor ?? "local");
   const calls: string[] = [];
-  let picked: string | null = null;
   let conflict = "";
+  let picked: string | null = null;
+  let confirmed = true;
   const native: Native = {
-    chooseDirectory: async () => picked,
+    choosePath: async (kind, purpose) => { calls.push(`pick ${kind} ${purpose}`); return picked; },
+    confirm: async (message, detail) => { calls.push(`confirm ${message} ${detail}`); return confirmed; },
     openPath: async (path) => void calls.push(`open ${path}`),
     openExternal: async (url) => void calls.push(`external ${url}`),
     openScreenSettings: async () => void calls.push("screen settings"),
     screenPermission: () => "granted",
-    applySettings(next: Settings) {
+    apply(next) {
       if (next.hotkey === conflict) throw new Error(`${next.hotkey} is already used by another app`);
       calls.push(`apply ${next.hotkey}`);
     },
     hotkeyError: () => "",
-    togglePanel: () => void calls.push("toggle"),
-    hidePanel: () => void calls.push("hide"),
-    moveCompanion: (dx, dy) => void calls.push(`move ${dx},${dy}`),
+    showSurface: async (s) => void calls.push(`show ${s}`),
+    openPane: (p) => void calls.push(`pane ${p}`),
+    dismissSurface: async (s) => void calls.push(`dismiss ${s}`),
     quit: () => void calls.push("quit"),
   };
-  const runtime = new RuntimeSetup({ error: "no runtime in tests" }, () => {}, { version: async () => false, auth: async () => ({}), git: async () => true }, "linux");
-  const personalAsked: boolean[] = [];
+  const voice: string[] = [];
+  const dictation = {
+    status: () => ({ supported: true, available: true, version: "0.1.0", bridge: true, message: "" }),
+    configure: async (k: string) => void voice.push(`configure ${k}`),
+    setup: async () => void voice.push("setup"),
+    start: async (b: InputBinding, g: string | null) => void voice.push(`start ${b.inputToken} ${g}`),
+    stop: async (id: string) => void voice.push(`stop ${id}`),
+    cancel: async (id?: string) => void voice.push(`cancel ${id ?? ""}`.trim()),
+  };
+  const bubbles: (BubbleView | null)[] = [];
+  const bubble = new Bubble({ publish: (v) => bubbles.push(v), after: () => () => {} });
+  const look: string[] = [];
   const router = new Router({
-    controller, captures, settings, runtime, native, platform: "linux", version: "0.0.1",
-    dictation: new DictationHelper({ platform: "linux", arch: "x64", systemVersion: "6.8.0", resourcesPath: () => dir, spawnOpen: () => { throw new Error("unsupported helper must not launch"); } }),
-    personal: (enabled) => { personalAsked.push(enabled); return { path: "", text: "", warning: "" }; },
+    host: host as unknown as Host, captures, drafts: new Drafts(), settings,
+    agent: new AgentSetup([], settings.flavor, new Set()), native, dictation,
+    observer: { setLook: (p) => look.push(JSON.stringify(p)), pause: (p) => look.push(`pause ${p}`), status: "looking" },
+    bubble, restart: async () => void calls.push("restart"), changed: () => {}, platform: "linux", version: "0.0.1",
   });
+  router.changed();
   return {
-    controller, captures, grabs, settings, calls, router, personalAsked, dir,
-    pick: (root: string | null) => { picked = root; },
-    conflictOn: (hotkey: string) => { conflict = hotkey; },
+    dir, host, router, captures, grabs, settings, calls, voice, bubbles, look,
+    pick: (p: string | null) => { picked = p; },
+    answer: (yes: boolean) => { confirmed = yes; },
+    conflictOn: (k: string) => { conflict = k; },
+    live: () => router.snapshot().binding!,
+    /** Whatever the host reports next; the router follows. */
+    update(patch: Partial<HostView>) { host.view = { ...host.view!, ...patch }; router.changed(); },
   };
 }
+
+const ok = (reply: Reply) => {
+  assert.ok(reply.ok, reply.ok ? "" : reply.error);
+  return reply;
+};
+const refused = (reply: Reply, pattern: RegExp) => {
+  assert.ok(!reply.ok, "expected a refusal");
+  assert.match(reply.error, pattern);
+};
 
 test("the renderer's requests are strictly validated, and refusals change nothing", async () => {
   const d = desktop();
@@ -244,324 +256,258 @@ test("the renderer's requests are strictly validated, and refusals change nothin
     "snapshot",
     { type: "eval", code: "process.exit()" },
     { type: "snapshot", extra: true },
-    { type: "send", text: "x".repeat(33 * 1024), inputToken: "" },
-    { type: "move-companion", dx: 1.5, dy: 0 },
-    { type: "move-companion", dx: 10_000, dy: 0 },
-    { type: "command", name: "self", argument: "" },
-    { type: "open-project", root: "" },
-    { type: "settings", settings: { hotkey: "D", alwaysOnTop: true, allWorkspaces: true, launchAtLogin: false, personalContext: false } },
-    { type: "settings", settings: { hotkey: "CommandOrControl+Shift+D", alwaysOnTop: true, allWorkspaces: true, launchAtLogin: false, personalContext: false, shell: "/bin/sh" } },
-    { type: "open-record", record: "file", path: "/etc/passwd" },
+    { type: "send", binding: { ...d.live(), zoneEpoch: "bad epoch!" }, draftRevision: 0 },
+    { type: "send", text: "hi", inputToken: "t1" },
+    { type: "choose-project" },
+    { type: "open-project", root: "/tmp" },
+    { type: "runtime-login" },
+    { type: "respond", binding: d.live(), decision: { kind: "plan", value: true } },
+    { type: "command", name: "self", argument: "", binding: d.live() },
+    { type: "move-companion", dx: 1, dy: 0 },
+    { type: "open-record", record: "proposal" },
+    { type: "agent-key", backend: "claude", key: "has space" },
+    { type: "settings", settings: { ...d.settings.get(), shell: "/bin/sh" } },
   ]) {
-    const reply = await d.router.handle(bad);
-    assert.equal(reply.ok, false, JSON.stringify(bad)?.slice(0, 80));
+    assert.equal((await d.router.handle(bad, "panel")).ok, false, JSON.stringify(bad)?.slice(0, 80));
   }
   assert.deepEqual(d.calls, []);
+  assert.deepEqual(d.host.calls, []);
   assert.equal(existsSync(join(d.dir, "settings.json")), false, "nothing was saved");
-
-  const reply = await d.router.handle({ type: "move-companion", dx: -12, dy: 4 });
-  assert.ok(reply.ok && reply.snapshot);
-  assert.deepEqual(d.calls, ["move -12,4"]);
 });
 
-test("a page request counts only from dum's own UI file", () => {
-  const index = "file:///Applications/dum.app/Contents/Resources/app.asar/dist/desktop/ui/index.html";
-  assert.equal(ownedPage(`${index}?view=panel`, index), true);
+test("the bubble is read-only and a window can only dismiss itself", async () => {
+  const d = desktop();
+  refused(await d.router.handle({ type: "snapshot" }, "bubble"), /bubble can't/);
+  refused(await d.router.handle({ type: "quit" }, "bubble"), /bubble can't/);
+  refused(await d.router.handle({ type: "dismiss-surface", surface: "panel" }, "command"), /only dismiss itself/);
+  ok(await d.router.handle({ type: "dismiss-surface", surface: "command" }, "command"));
+  ok(await d.router.handle({ type: "panel", panel: "tree" }, "command"));
+  ok(await d.router.handle({ type: "panel", panel: "history" }, "panel"));
+  assert.deepEqual(d.calls, ["dismiss command", "pane tree"], "only the command bar's panel request moves the panel window");
+  assert.deepEqual(d.host.calls, ["panel tree", "panel history"]);
+});
+
+test("a page request counts only from Dum's own UI file", () => {
+  const index = "file:///Applications/Dum.app/Contents/Resources/app.asar/dist/desktop/ui/index.html";
+  assert.equal(ownedPage(`${index}?view=command`, index), true);
+  assert.equal(ownedPage(`${index}?view=panel#tree`, index), true);
   assert.equal(ownedPage("file:///tmp/evil/index.html?view=panel", index), false);
-  assert.equal(ownedPage("https://claude.com/dist/desktop/ui/index.html", index), false);
+  assert.equal(ownedPage("https://example.com/index.html", index), false);
   assert.equal(ownedPage("not a url", index), false);
 });
 
-test("projects open only from the native chooser or the recent list, never mid-turn or twice at once", async () => {
+test("Send consumes the draft under the live binding; the next request gets a fresh ID", async () => {
   const d = desktop();
-  const project = temp();
-  const unknown = await d.router.handle({ type: "open-project", root: project });
-  assert.ok(!unknown.ok && /Open project/.test(unknown.error), "a root the person never chose is refused");
-  d.pick(null);
-  assert.equal((await d.router.handle({ type: "choose-project" })).ok, true, "a cancelled chooser is no change");
-  assert.equal(d.controller.chosen.length, 0);
+  const live = d.live();
+  assert.equal(live.zoneEpoch, "e1");
+  assert.equal(live.inputToken, "t1");
+  ok(await d.router.handle({ type: "draft-set", text: "explain AVL", expectedDraftRevision: 0, binding: live }, "command"));
+  refused(await d.router.handle({ type: "send", binding: { ...live, inputToken: "old" }, draftRevision: 1 }, "command"), /nothing was sent/);
+  refused(await d.router.handle({ type: "send", binding: live, draftRevision: 0 }, "command"), /changed after you pressed Send/);
+  ok(await d.router.handle({ type: "send", binding: live, draftRevision: 1 }, "command"));
+  assert.deepEqual(d.host.sent.map((s) => [s.text, s.binding]), [["explain AVL", live]]);
+  assert.equal(d.router.snapshot().draft.text, "");
 
-  d.pick(project);
-  const opened = await d.router.handle({ type: "choose-project" });
-  assert.ok(opened.ok && opened.snapshot?.state?.root === project);
-  assert.deepEqual(opened.snapshot!.recentProjects, [{ name: project.split(sep).pop(), root: project }]);
-  assert.deepEqual(d.personalAsked, [false], "personal context stays off unless the setting is on");
-  assert.deepEqual(DesktopSettings.load(d.dir).recent, [project], "the recent list survives a restart");
-
-  assert.equal((await d.router.handle({ type: "open-project", root: project })).ok, true);
-  d.controller.state = { ...d.controller.state!, busy: true };
-  const mid = await d.router.handle({ type: "open-project", root: project });
-  assert.ok(!mid.ok && /Stop/.test(mid.error));
-  d.controller.state = { ...d.controller.state!, busy: false };
-
-  const gate = Promise.withResolvers<void>();
-  d.controller.hold = gate.promise;
-  const slow = d.router.handle({ type: "mode", mode: "anti-vibe" });
-  const second = await d.router.handle({ type: "open-project", root: project });
-  assert.ok(!second.ok && /already opening/.test(second.error));
-  gate.resolve();
-  assert.equal((await slow).ok, true);
-  assert.equal(d.controller.state?.mode, "anti-vibe");
-  assert.equal(d.controller.chosen.at(-1)?.mode, "anti-vibe");
+  // While it runs, the binding names that request: nested answers belong to it.
+  d.update({ state: state({ busy: true, prompt: null }), inputToken: "idle" });
+  assert.equal(d.live().requestId, live.requestId);
+  d.update({ state: state({ prompt: { type: "question", question: "Do you know rotations?", why: "", purpose: "attest" } }), inputToken: "q1" });
+  const nested = d.live();
+  assert.equal(nested.requestId, live.requestId);
+  ok(await d.router.handle({ type: "respond", binding: nested, decision: { kind: "attest", value: true } }, "command"));
+  d.update({ state: state(), inputToken: "t9" });
+  assert.notEqual(d.live().requestId, live.requestId, "a finished request's ID is never reused");
 });
 
-test("Send carries a capture only once, only at an attach-capable prompt, and never after the prompt moved", async () => {
+test("a prompt that moves under a draft keeps the text but refuses the stale Send once", async () => {
   const d = desktop();
-  const project = temp();
-  d.pick(project);
-  await d.router.handle({ type: "choose-project" });
-  const token = d.controller.inputToken;
-
-  assert.equal((await d.router.handle({ type: "capture-preview", sourceId: "screen:1:0", inputToken: token })).ok, false, "only a listed source");
-  const listed = await d.router.handle({ type: "capture-sources" });
-  assert.ok(listed.ok && listed.sources?.length === 2);
-  const stalePreview = await d.router.handle({ type: "capture-preview", sourceId: "screen:1:0", inputToken: "old" });
-  assert.ok(!stalePreview.ok && /prompt changed/.test(stalePreview.error));
-
-  const taking = d.router.handle({ type: "capture-preview", sourceId: "window:42:0", inputToken: token });
-  await settle();
-  d.grabs[0]!.finish(Buffer.from(PNG));
-  const shown = await taking;
-  assert.ok(shown.ok && shown.preview);
-  const captureToken = shown.preview.token;
-
-  const stale = await d.router.handle({ type: "send", text: "look", inputToken: "old", captureToken });
-  assert.ok(!stale.ok && /nothing was sent/.test(stale.error));
-  d.controller.canAttach = false;
-  const locked = await d.router.handle({ type: "send", text: "look", inputToken: token, captureToken });
-  assert.ok(!locked.ok && /can't take a screenshot/.test(locked.error));
-  assert.equal(d.captures.holding, true, "a refused send keeps the preview for the next turn");
-  d.controller.canAttach = true;
-
-  const sent = await d.router.handle({ type: "send", text: "what is this error?", inputToken: token, captureToken });
-  assert.equal(sent.ok, true);
-  assert.equal(d.controller.sent.length, 1);
-  assert.equal(Buffer.from(d.controller.sent[0]!.image!.data, "base64").equals(PNG), true, "the bytes main captured, not anything from the page");
-  const twice = await d.router.handle({ type: "send", text: "again", inputToken: token, captureToken });
-  assert.ok(!twice.ok && /no longer held/.test(twice.error));
-  assert.equal(d.controller.sent.length, 1);
-
-  const next = d.router.handle({ type: "capture-preview", sourceId: "screen:1:0", inputToken: token });
-  await settle();
-  d.grabs[1]!.finish(Buffer.from(PNG));
-  const second = await next;
-  assert.ok(second.ok && second.preview);
-  d.controller.inputToken = "t-next";
-  d.router.changed();
-  assert.equal(d.captures.holding, false, "the prompt moved on, so the capture is released");
-  const late = await d.router.handle({ type: "send", text: "x", inputToken: "t-next", captureToken: second.preview.token });
-  assert.ok(!late.ok);
-  assert.equal(d.controller.sent.length, 1);
-  assert.equal((await d.router.handle({ type: "send", text: "  ", inputToken: "t-next" })).ok, false, "an empty send is refused");
+  const live = d.live();
+  ok(await d.router.handle({ type: "draft-set", text: "my answer", expectedDraftRevision: 0, binding: live }, "panel"));
+  d.update({ inputToken: "t2" });
+  const moved = d.live();
+  const draft = d.router.snapshot().draft;
+  assert.equal(draft.text, "my answer");
+  refused(await d.router.handle({ type: "send", binding: moved, draftRevision: draft.revision }, "panel"), /moved on/);
+  assert.equal(d.host.sent.length, 0);
+  ok(await d.router.handle({ type: "send", binding: moved, draftRevision: d.router.snapshot().draft.revision }, "panel"));
+  assert.equal(d.host.sent[0]!.binding.inputToken, "t2");
 });
 
-test("settings are applied before they are saved, and a hotkey conflict leaves the saved file alone", async () => {
+test("first run: the goal draft becomes the root zone, and nothing goes to a model", async () => {
   const d = desktop();
-  const next = { ...d.settings.settings, hotkey: "Alt+Shift+K", alwaysOnTop: !d.settings.settings.alwaysOnTop };
-  assert.equal((await d.router.handle({ type: "settings", settings: next })).ok, true);
-  assert.deepEqual(DesktopSettings.load(d.dir).settings, next);
-  assert.equal(statSync(join(d.dir, "settings.json")).mode & 0o777, 0o600);
-
-  d.conflictOn("Control+Alt+P");
-  const refused = await d.router.handle({ type: "settings", settings: { ...next, hotkey: "Control+Alt+P" } });
-  assert.ok(!refused.ok && /already used/.test(refused.error));
-  assert.deepEqual(DesktopSettings.load(d.dir).settings, next, "the saved settings didn't change");
-  const raw = readFileSync(join(d.dir, "settings.json"), "utf8");
-  assert.doesNotMatch(raw, /token|transcript|data:image|email/i);
+  d.update({ zoneEpoch: null, activeZone: null, state: null, inputToken: "idle", registry: { version: 1, revision: 0, activeZoneId: null, zones: [] } });
+  const goal = d.live();
+  assert.equal(goal.zoneId, null);
+  ok(await d.router.handle({ type: "draft-set", text: "  learn   balanced trees\nproperly  ", expectedDraftRevision: 0, binding: goal }, "panel"));
+  refused(await d.router.handle({ type: "share-choose", kind: "file", binding: goal }, "panel"), /request it doesn't accept/);
+  ok(await d.router.handle({ type: "send", binding: goal, draftRevision: 1 }, "panel"));
+  assert.deepEqual(d.host.calls, ["create learn balanced trees properly | learn   balanced trees\nproperly | true"]);
+  assert.equal(d.host.sent.length, 0);
+  assert.equal(d.router.snapshot().draft.text, "", "the goal draft is gone once it became a zone");
 });
 
-test("legacy settings keep their preferences and advice remains opt-in", () => {
-  const dir = temp();
-  const old = { hotkey: "Alt+Shift+K", alwaysOnTop: false, allWorkspaces: false, launchAtLogin: false, personalContext: true };
-  writeFileSync(join(dir, "settings.json"), JSON.stringify({ version: 1, settings: old, recent: [], companion: { x: 12, y: 34 } }));
-  const migrated = DesktopSettings.load(dir);
-  assert.equal(migrated.warning, "");
-  assert.deepEqual(migrated.settings, { ...old, wizardAdvice: false, wizardSource: 'screen' });
-  assert.deepEqual(migrated.companion, { x: 12, y: 34 });
-  const fresh = DesktopSettings.load(temp());
-  assert.equal(fresh.settings.wizardAdvice, true, "fresh install defaults to wizard enabled");
-  assert.equal(fresh.settings.wizardSource, 'screen', "fresh install defaults to screen source");
-});
-
-test("the advice toggle reaches the project controller and survives reopening", async () => {
-  const d = desktop();
-  assert.equal(d.router.snapshot().settings.wizardAdvice, true);
-  const next = { ...d.settings.settings, wizardAdvice: false };
-  assert.equal((await d.router.handle({ type: "settings", settings: next })).ok, true);
-  assert.equal(d.controller.adviceEnabled, false);
-  assert.equal(DesktopSettings.load(d.dir).settings.wizardAdvice, false);
-  assert.equal(d.router.snapshot().wizardStatus, d.controller.wizardStatus);
-  d.pick(d.dir);
-  assert.equal((await d.router.handle({ type: "choose-project" })).ok, true);
-  assert.equal(d.controller.adviceEnabled, false);
-  assert.equal((await d.router.handle({ type: "settings", settings: { ...next, wizardAdvice: true } })).ok, true);
-  assert.equal(d.controller.adviceEnabled, true);
-});
-
-test("a corrupt settings file is set aside rather than overwritten, and the companion stays on a screen", () => {
-  const dir = temp();
-  writeFileSync(join(dir, "settings.json"), "{ not json");
-  const loaded = DesktopSettings.load(dir);
-  assert.match(loaded.warning, /couldn't be read/);
-  const aside = readdirSync(dir).find((f) => f.startsWith("settings.json.invalid-"));
-  assert.ok(aside);
-  assert.equal(readFileSync(join(dir, aside), "utf8"), "{ not json");
-
-  const dir2 = temp();
-  writeFileSync(join(dir2, "settings.json"), JSON.stringify({ version: 1, settings: loaded.settings, recent: ["relative/path"], companion: null }));
-  assert.match(DesktopSettings.load(dir2).warning, /couldn't be read/, "a relative recent root isn't accepted");
-
-  const main = { x: 0, y: 0, width: 1440, height: 875 };
-  const side = { x: 1440, y: 0, width: 1920, height: 1055 };
-  const size = { width: 118, height: 128 };
-  assert.deepEqual(placeOnScreen({ x: 1500, y: 100 }, size, [main, side], main), { x: 1500, y: 100 });
-  assert.deepEqual(placeOnScreen({ x: 1400, y: 900 }, size, [main, side], main), { x: 1440, y: 900 }, "straddling: onto the display it mostly covers");
-  assert.deepEqual(placeOnScreen({ x: 5000, y: 3000 }, size, [main], main), { x: 1322, y: 747 }, "an unplugged display's spot comes back on screen");
-});
-
-test("open-record opens only reported proposals, current course scratch or memory, never through symlinks", async () => {
+test("a typed path is shared only after it resolves to the right kind and they confirm it natively", async () => {
   const d = desktop();
   const root = temp();
-  d.pick(root);
-  await d.router.handle({ type: "choose-project" });
-  mkdirSync(join(root, ".dum", "proposals"), { recursive: true });
-  mkdirSync(join(root, ".dum", "courses"), { recursive: true });
-  writeFileSync(join(root, ".dum", "proposals", "a.patch"), "patch");
-  writeFileSync(join(root, ".dum", "proposals", "unreported.patch"), "patch");
-  writeFileSync(join(root, ".dum", "memory.md"), "notes");
-  writeFileSync(join(root, "secret.txt"), "x");
-  symlinkSync(join(root, "secret.txt"), join(root, ".dum", "courses", "loops.py"));
-  d.controller.state = stateFor(root, "understand", {
-    transcript: [
-      { kind: "diff", id: 1, path: "a.py", diff: "", outcome: "proposed", artifact: ".dum/proposals/a.patch" },
-      { kind: "course", id: 2, card: { skill: "loops", lang: "python", lesson: "", example: "", wizard: "", task: "", path: ".dum/courses/loops.py", run: "" }, passed: null },
-    ],
-  });
+  const file = join(root, "app.ts");
+  writeFileSync(file, "x");
+  mkdirSync(join(root, "src"));
+  symlinkSync(file, join(root, "link.ts"));
+  const share = (path: string, kind: "file" | "folder") => d.router.handle({ type: "share-path", path, kind, binding: d.live() }, "panel");
 
-  assert.equal((await d.router.handle({ type: "open-record", record: "proposal", path: ".dum/proposals/a.patch" })).ok, true);
-  assert.equal((await d.router.handle({ type: "open-record", record: "memory" })).ok, true);
-  for (const bad of [
-    { record: "proposal", path: ".dum/proposals/unreported.patch" },
-    { record: "proposal", path: "../../etc/passwd" },
-    { record: "memory", path: "secret.txt" },
-    { record: "course", path: ".dum/courses/loops.py" },
-  ]) {
-    const reply = await d.router.handle({ type: "open-record", ...bad });
-    assert.equal(reply.ok, false, JSON.stringify(bad));
-  }
-  assert.deepEqual(d.calls, [`open ${join(root, ".dum", "proposals", "a.patch")}`, `open ${join(root, ".dum", "memory.md")}`]);
+  refused(await share("relative/app.ts", "file"), /full path/);
+  refused(await share(join(root, "missing.ts"), "file"), /Nothing exists/);
+  refused(await share(join(root, "src"), "file"), /isn't a file/);
+  refused(await share(file, "folder"), /isn't a folder/);
+  d.answer(false);
+  ok(await share(file, "file"));
+  assert.deepEqual(d.host.calls, [], "declining grants nothing");
+  d.answer(true);
+  ok(await share(join(root, "link.ts"), "file"));
+  assert.deepEqual(d.host.calls, [`share file ${realpathSync(file)}`], "the confirmed, resolved path is what the host gets");
+  assert.ok(d.calls.at(-1)!.includes(realpathSync(file)), "they confirmed the resolved path, not the typed one");
+  assert.equal(d.router.snapshot().draft.shareIds.length, 1, "the share is part of this draft's request");
+
+  refused(await d.router.handle({ type: "share-path", path: file, kind: "file", binding: { ...d.live(), requestId: "other" } }, "panel"), /prompt that's over/);
 });
 
-test("the Claude executable is the bundled binary by absolute path, or plain claude for the terminal", () => {
-  const dir = temp();
-  const bin = script(dir, "claude", "exit 0");
-  writeFileSync(join(dir, "plain"), "x");
-  assert.equal(claudeExecutable({}), "claude");
-  assert.equal(claudeExecutable({ DUM_CLAUDE_BIN: bin }), bin);
-  for (const bad of ["claude", "./claude", join(dir, "missing"), join(dir, "plain"), dir]) {
-    assert.throws(() => claudeExecutable({ DUM_CLAUDE_BIN: bad }), /absolute path to the claude executable/, bad);
-  }
-  const before = process.env.DUM_CLAUDE_BIN;
-  process.env.DUM_CLAUDE_BIN = bin;
-  try {
-    assert.equal(closed({ cwd: "/tmp", systemPrompt: "", ...MODELS.helper }).pathToClaudeCodeExecutable, bin);
-  } finally {
-    if (before === undefined) delete process.env.DUM_CLAUDE_BIN;
-    else process.env.DUM_CLAUDE_BIN = before;
-  }
+test("shares go with the request they were made for; a new epoch voids them", async () => {
+  const d = desktop();
+  d.pick("/picked/notes.md");
+  ok(await d.router.handle({ type: "share-choose", kind: "file", binding: d.live() }, "command"));
+  const shareId = d.router.snapshot().draft.shareIds[0]!;
+  ok(await d.router.handle({ type: "draft-set", text: "look", expectedDraftRevision: d.router.snapshot().draft.revision, binding: d.live() }, "command"));
+  ok(await d.router.handle({ type: "send", binding: d.live(), draftRevision: d.router.snapshot().draft.revision }, "command"));
+  assert.deepEqual(d.host.sent[0]!.shares.map((s) => s.id), [shareId]);
+  assert.deepEqual(d.host.bindings[0], d.host.sent[0]!.binding, "shared and sent under one binding");
 
-  assert.deepEqual(bundledCandidates("darwin", "arm64", false), ["@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"]);
-  assert.deepEqual(bundledCandidates("linux", "x64", true), ["@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude", "@anthropic-ai/claude-agent-sdk-linux-x64/claude"]);
-  const app = join(dir, "dum.app", "Contents", "Resources");
-  const unpacked = join(app, "app.asar.unpacked", "node_modules", "@anthropic-ai", "claude-agent-sdk-darwin-arm64");
-  mkdirSync(unpacked, { recursive: true });
-  script(unpacked, "claude", "exit 0");
-  const packed = join(app, "app.asar", "node_modules", "@anthropic-ai", "claude-agent-sdk-darwin-arm64", "claude");
-  assert.equal(resolveBundled(() => packed, "darwin", "arm64", false), join(unpacked, "claude"), "a packaged app runs the unpacked copy");
-  assert.throws(() => resolveBundled(() => { throw new Error("not installed"); }, "darwin", "x64", false), /doesn't include Claude's runtime for darwin-x64/);
+  d.pick("/picked/other.md");
+  d.update({ state: state(), inputToken: "t5" });
+  ok(await d.router.handle({ type: "share-choose", kind: "file", binding: d.live() }, "command"));
+  d.update({ zoneEpoch: "e2" });
+  assert.deepEqual(d.router.snapshot().draft.shareIds, [], "a reopened zone drops the draft's shares");
 });
 
-test("auth status yields login provenance only, through the isolated CLI flags", async () => {
-  const dir = temp();
-  const bin = script(dir, "claude", `[ "$1" = "--safe-mode" ] && [ "$3" = "" ] || exit 3
-echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"private@example.com","orgName":"Private Org"}'`);
-  assert.deepEqual(await login(bin), { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" });
-  await assert.rejects(login(script(dir, "broken", "exit 1")), /couldn't verify/);
-});
-
-test("startup that is stopped during the login handshake closes Claude at once", async () => {
-  const abortController = new AbortController();
-  let wasClosed = false;
-  const info = Promise.withResolvers<never>();
-  info.promise.catch(() => {});
-  const run = (() => Object.assign((async function* () {})(), {
-    close() { wasClosed = true; info.reject(new Error("closed")); },
-    accountInfo: () => info.promise,
-  })) as unknown as Query;
-  const opening = start("private", { ...closed({ cwd: "/tmp", systemPrompt: "", ...MODELS.helper }), abortController }, run, async () => ({ effective: {}, provenance: {}, sources: [] }));
+test("captures need the live binding and an attach-capable prompt, and die with the epoch", async () => {
+  const d = desktop();
+  ok(await d.router.handle({ type: "capture-sources" }, "command"));
+  refused(await d.router.handle({ type: "capture-preview", sourceId: "window:42:0", binding: { ...d.live(), inputToken: "old" } }, "command"), /prompt that's over/);
+  d.update({ canAttach: false });
+  refused(await d.router.handle({ type: "capture-preview", sourceId: "window:42:0", binding: d.live() }, "command"), /next request/);
+  d.update({ canAttach: true });
+  const pending = d.router.handle({ type: "capture-preview", sourceId: "window:42:0", binding: d.live() }, "command");
   await settle();
+  d.grabs[0]!.finish(Buffer.from(PNG));
+  ok(await pending);
+  assert.ok(d.router.snapshot().draft.captureToken);
+  ok(await d.router.handle({ type: "draft-set", text: "what's wrong here?", expectedDraftRevision: d.router.snapshot().draft.revision, binding: d.live() }, "command"));
+  ok(await d.router.handle({ type: "send", binding: d.live(), draftRevision: d.router.snapshot().draft.revision }, "command"));
+  assert.equal(d.host.sent[0]!.image?.label, "Editor - app.ts");
+  assert.equal(d.captures.holding, false);
+
+  d.update({ state: state(), inputToken: "t3" });
+  const again = d.router.handle({ type: "capture-preview", sourceId: "window:42:0", binding: d.live() }, "command");
   await settle();
-  abortController.abort();
-  await assert.rejects(opening, /stopped before Claude finished starting/);
-  assert.equal(wasClosed, true);
+  d.grabs[1]!.finish(Buffer.from(PNG));
+  ok(await again);
+  d.update({ zoneEpoch: "e2" });
+  assert.equal(d.captures.holding, false, "a zone reopen drops the held capture");
+  assert.equal(d.router.snapshot().draft.captureToken, undefined);
 });
 
-/** The CLI is a real process, so its output arrives in its own time; wait for it, but not forever. */
-async function until(pred: () => boolean, ms = 10_000) {
-  for (const end = Date.now() + ms; !pred(); ) {
-    if (Date.now() > end) throw new Error("timed out waiting for the sign-in process");
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
+test("push-to-talk fills an empty draft for the live binding; stale or late voice is discarded", async () => {
+  const d = desktop();
+  const live = d.live();
+  d.router.voiceEvent({ op: "pressed", gestureId: "g1" });
+  await settle();
+  assert.deepEqual(d.voice, [`start t1 g1`], "the press starts a recording for the live binding");
+  d.router.voiceEvent({ op: "recording", recordingId: "rec1", binding: live });
+  assert.equal(d.router.snapshot().voice.phase, "recording");
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Listening…"]);
+  d.router.voiceEvent({ op: "transcribing", recordingId: "rec1", binding: live });
+  d.router.voiceEvent({ op: "transcript", recordingId: "rec1", binding: live, text: "how do rotations work" });
+  const snap = d.router.snapshot();
+  assert.equal(snap.draft.text, "how do rotations work");
+  assert.equal(snap.draft.source, "voice");
+  assert.equal(snap.voice.phase, "ready");
+  assert.equal(d.host.sent.length, 0, "voice never sends");
 
-test("first-launch sign-in runs the bundled CLI's own flow, exposes only its official page, and can be cancelled", async () => {
-  const dir = temp();
-  const bin = script(dir, "claude", `echo "Opening browser to sign in..."
-echo "visit: https://evil.example/cai/oauth/authorize?x=1"
-echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=s"
-printf "Paste code here if prompted > "
-read code
-[ "$code" = "abcDEF123#xyz789" ] && exit 0
-exit 4`);
-  let checks = 0;
-  const probe: Probe = {
-    version: async () => true,
-    auth: async () => { checks++; return checks > 1 ? { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" } : { loggedIn: false }; },
-    git: async () => true,
-  };
-  const setup = new RuntimeSetup({ path: bin }, () => {}, probe, "darwin");
-  await setup.check();
-  assert.equal(setup.status.available, true);
-  assert.equal(setup.status.authenticated, false);
-  assert.match(setup.status.message, /Sign in/);
+  // A full draft refuses a new press and a mouse start.
+  d.router.voiceEvent({ op: "pressed", gestureId: "g2" });
+  await settle();
+  assert.equal(d.voice.length, 1);
+  refused(await d.router.handle({ type: "voice-start", binding: d.live() }, "panel"), /isn't empty/);
 
-  assert.throws(() => setup.loginPage(), /isn't running/);
-  setup.login();
-  assert.throws(() => setup.login(), /already running/);
-  await until(() => setup.status.loginNeedsCode);
-  assert.equal(setup.loginPage(), "https://claude.com/cai/oauth/authorize?code=true&state=s");
-  assert.throws(() => setup.code("rm -rf /"), /doesn't look like a sign-in code/);
-  setup.code("abcDEF123#xyz789");
-  await until(() => setup.status.authenticated);
-  assert.equal(setup.status.loginRunning, false);
-  assert.doesNotMatch(JSON.stringify(setup.status), /abcDEF123|state=s/, "neither the code nor the page address is kept in status");
-
-  const ended = new RuntimeSetup({ path: script(dir, "slow", `echo "visit: https://claude.ai/oauth"\nexec sleep 30`) }, () => {}, probe, "darwin");
-  ended.login();
-  await until(() => { try { return ended.loginPage() === "https://claude.ai/oauth"; } catch { return false; } });
-  ended.cancel();
-  await until(() => !ended.status.loginRunning);
-  assert.match(ended.status.message, /cancelled/);
-  assert.throws(() => ended.code("abcDEF123#xyz789"), /isn't waiting/);
+  // Late text for an old epoch is dropped with a visible status, never written anywhere.
+  const fresh = desktop();
+  const old = fresh.live();
+  fresh.update({ zoneEpoch: "e2" });
+  assert.ok(fresh.voice.includes("cancel"), "a new epoch cancels the recording");
+  fresh.router.voiceEvent({ op: "transcript", recordingId: "rec9", binding: old, text: "too late" } satisfies VoiceEvent);
+  assert.equal(fresh.router.snapshot().draft.text, "");
+  assert.equal(fresh.router.snapshot().voice.phase, "error");
+  refused(await fresh.router.handle({ type: "voice-start", binding: old }, "panel"), /changed/);
+  refused(await fresh.router.handle({ type: "voice-stop", recordingId: "rec9" }, "panel"), /no longer active/);
 });
 
-test("a build without its runtime says so instead of falling back to another claude", async () => {
-  const setup = new RuntimeSetup({ error: "this build of dum doesn't include Claude's runtime for darwin-arm64" }, () => {}, { version: async () => true, auth: async () => ({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }), git: async () => false }, "darwin");
-  await setup.check();
-  assert.equal(setup.status.available, false);
-  assert.equal(setup.status.authenticated, false);
-  assert.equal(setup.status.gitAvailable, false);
-  assert.match(setup.status.message, /doesn't include Claude's runtime/);
-  assert.throws(() => setup.login(), /doesn't include/);
-  await assert.rejects(new RuntimeSetup({ path: "/x" }, () => {}, undefined, "linux").gitSetup(), /package manager/);
+test("a voice request's reply shows in the bubble: Dum's words, then the Wizard's line", async () => {
+  const d = desktop();
+  const live = d.live();
+  d.router.voiceEvent({ op: "transcript", recordingId: "r", binding: live, text: "explain" });
+  ok(await d.router.handle({ type: "send", binding: live, draftRevision: d.router.snapshot().draft.revision }, "command"));
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
+  d.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }), inputToken: "idle" });
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["A rotation keeps order."]);
+  d.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }, { kind: "quip", id: 2, text: "Knuth vol. 3 §6.2.3" }] }), inputToken: "t7" });
+  assert.equal(d.bubbles.at(-1)?.kind, "reply");
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["A rotation keeps order.", "Wizard: Knuth vol. 3 §6.2.3"]);
+});
+
+test("settings: distinct shortcuts, applied before saved, rolled back on conflict; the agent isn't set here", async () => {
+  const d = desktop();
+  const prefs = d.settings.get();
+  refused(await d.router.handle({ type: "settings", settings: { ...prefs, sendDraftHotkey: prefs.hotkey } }, "panel"), /must all be different/);
+  d.conflictOn("Alt+K");
+  refused(await d.router.handle({ type: "settings", settings: { ...prefs, hotkey: "Alt+K" } }, "panel"), /already used/);
+  assert.equal(existsSync(join(d.dir, "settings.json")), false, "a refused shortcut saves nothing");
+  const agent = { backend: "local", login: "none", intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "m", effort: null } } as const;
+  refused(await d.router.handle({ type: "settings", settings: { ...prefs, agent } }, "panel"), /Who powers Dum|Agent/);
+
+  ok(await d.router.handle({ type: "settings", settings: { ...prefs, hotkey: "Alt+J", voiceHotkey: "Control+Alt+V", look: { apps: true, screen: false } } }, "panel"));
+  assert.equal(DesktopSettings.load(d.dir, "local").get().hotkey, "Alt+J");
+  assert.deepEqual(d.voice, ["configure Control+Alt+V"]);
+  assert.deepEqual(d.look, [JSON.stringify({ apps: true, screen: false })]);
+  assert.deepEqual(d.host.calls, ["settings Alt+J"], "the host gets main's saved copy");
+
+  ok(await d.router.handle({ type: "settings", settings: { ...d.settings.get(), personalContext: true } }, "panel"));
+  assert.ok(d.calls.includes("restart"), "personal context goes to a freshly started host");
+});
+
+test("zone delete and skill add need a native confirmation; deleting drops those zones' drafts", async () => {
+  const d = desktop();
+  d.answer(false);
+  ok(await d.router.handle({ type: "zone-delete", id: zoneA, expectedRevision: 3 }, "panel"));
+  assert.ok(d.calls.at(-1)!.includes("1 zone inside it"));
+  ok(await d.router.handle({ type: "skill-edit", op: "add", skill: { name: "recursion", lang: "" } }, "panel"));
+  assert.deepEqual(d.host.calls, [], "declined: nothing reaches the host");
+  d.answer(true);
+  ok(await d.router.handle({ type: "draft-set", text: "keep?", expectedDraftRevision: 0, binding: d.live() }, "panel"));
+  ok(await d.router.handle({ type: "zone-delete", id: zoneA, expectedRevision: 3 }, "panel"));
+  ok(await d.router.handle({ type: "skill-edit", op: "add", skill: { name: "recursion", lang: "" } }, "panel"));
+  assert.deepEqual(d.host.calls, ["delete A", "skill add"]);
+  assert.equal(d.router.snapshot().draft.text, "");
+  refused(await d.router.handle({ type: "zone-delete", id: randomUUID(), expectedRevision: 3 }, "panel"), /doesn't exist/);
+});
+
+test("look pause, records and the tray share the router", async () => {
+  const d = desktop();
+  ok(await d.router.handle({ type: "look-pause", paused: true }, "tray"));
+  assert.equal(d.router.snapshot().look.paused, true);
+  assert.deepEqual(d.look, ["pause true"]);
+  ok(await d.router.handle({ type: "open-record", record: "memory" }, "panel"));
+  assert.ok(d.calls.includes("open /app/record.md"), "main opens only the path the host validated");
+  ok(await d.router.handle({ type: "zone-enter", id: zoneB, expectedRevision: 3 }, "tray"));
+  assert.deepEqual(d.host.calls, ["enter B 3"]);
+  refused(await d.router.handle({ type: "interrupt", binding: { ...d.live(), zoneEpoch: "e0" } }, "command"), /isn't open/);
+  ok(await d.router.handle({ type: "interrupt", binding: d.live() }, "command"));
 });

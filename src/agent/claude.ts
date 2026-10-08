@@ -15,7 +15,7 @@ import type {
   SDKSystemMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { offeredLogins } from "./schema.ts";
+import { CLAUDE_DEFAULTS, offeredLogins } from "./schema.ts";
 import { AUTO_MEMORY_OFF, FLAGS, authStatus, providerFreeEnv, type AuthStatus } from "./claude-cli.ts";
 import type {
   AgentBackend,
@@ -31,12 +31,6 @@ import type {
   Selector,
   UserTurn,
 } from "./types.ts";
-
-/** The selectors used before anything else is picked: the intern and the helper. */
-export const CLAUDE_DEFAULTS = {
-  intern: { backend: "claude", model: "claude-opus-5-5", effort: "high" },
-  helper: { backend: "claude", model: "claude-fable-5-1", effort: "high" },
-} as const satisfies { intern: Selector; helper: Selector };
 
 /** Selectors proven with real calls. Only these are offered with pictures. */
 export const CLAUDE_VERIFIED: readonly Selector[] = [CLAUDE_DEFAULTS.intern, CLAUDE_DEFAULTS.helper];
