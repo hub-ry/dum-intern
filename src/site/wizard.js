@@ -15,7 +15,7 @@
     '.sosos..t', '.sWWWs..t', 'pWWWWWp.t', '.ppypp..t',
   ];
   var dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
-  var pixel = 4;
+  var pixel = 3;
   canvas.width = 9 * pixel * dpr;
   canvas.height = 8 * pixel * dpr;
   var ctx = canvas.getContext('2d');

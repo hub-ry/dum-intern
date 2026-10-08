@@ -154,7 +154,7 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
 
-  scale       = Math.max(2, Math.min(10, Math.floor(ch / 60)));
+  scale       = Math.max(2, Math.min(10, Math.round(ch / 40)));
   groundY     = Math.floor(ch * 0.83);
   internX     = SW * scale * 2;
   const newBase = groundY - SH * scale;

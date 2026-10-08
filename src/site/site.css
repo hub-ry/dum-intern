@@ -78,10 +78,10 @@ hr.section-divider { height: 0; margin: 34px 0; border: 0; border-top: 1px solid
 .copy-button { padding: 4px 8px; border: 1px solid var(--overlay); background: transparent; color: var(--subtle); font: inherit; font-size: 11px; cursor: pointer; }
 .copy-button:hover { border-color: var(--text); color: var(--text); }
 
-/* Dum's jumping game: a phone-width scene in front of the mountains. */
-.game-section { position: relative; width: min(100%, 420px); height: 240px; margin: 56px auto 0; overflow: hidden; border: 1px solid #56526e; }
+/* Dum's jumping game: a wide, shallow strip in front of the mountains. */
+.game-section { position: relative; width: min(100%, 760px); height: 120px; margin: 0 auto; overflow: hidden; border: 1px solid #56526e; }
 #game-canvas { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; height: 100%; }
-.game-section .sprite-wizard { position: absolute; z-index: 1; right: 18%; bottom: 17%; width: 36px; height: 32px; }
+.game-section .sprite-wizard { position: absolute; z-index: 1; right: 16%; bottom: 17%; width: 27px; height: 24px; }
 .game-controls { position: absolute; z-index: 3; right: 10px; bottom: 9px; display: flex; align-items: center; gap: 9px; pointer-events: none; }
 .game-jump-btn { padding: 3px 9px; border: 1px solid #6e6a86; border-radius: 2px; background: var(--surface); color: var(--subtle); font: inherit; font-size: 11px; cursor: pointer; pointer-events: auto; }
 .game-jump-btn:hover { border-color: #777; color: var(--text); }
@@ -95,14 +95,14 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
 .home-page .nav-logo { font-size: 15px; }
 .home-page .nav-links a { font-size: 12px; }
 .home-main { width: min(1120px, calc(100% - 48px)); max-width: 1120px; padding: 0 0 28px; }
-.hero { display: grid; grid-template-columns: .93fr 1.07fr; align-items: center; gap: 54px; padding: 76px 0 66px; }
+.hero { display: grid; grid-template-columns: .93fr 1.07fr; align-items: center; gap: 54px; padding: 64px 0 48px; }
 .hero h1 { max-width: 540px; margin: 0 0 19px; font-size: clamp(34px, 4.2vw, 52px); font-weight: 560; letter-spacing: -.045em; line-height: 1.08; }
-.hero-lede { max-width: 47ch; color: var(--home-muted); font-size: 15px; line-height: 1.7; }
-.hero-actions { display: flex; align-items: center; gap: 21px; margin-top: 27px; }
+.hero-lede { max-width: 44ch; margin: 0 0 10px; color: var(--home-muted); font-size: 15px; line-height: 1.7; }
+.hero-question { max-width: 44ch; margin: 0 0 26px; color: var(--muted); font-size: 13px; }
+.hero-question a { color: var(--subtle); }
+.hero-question a:hover { color: var(--pine); }
 .button-primary { display: inline-block; padding: 10px 14px; border: 1px solid var(--text); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; }
 .button-primary:hover { background: var(--text); color: var(--bg); }
-.text-link { color: var(--subtle); font-size: 12px; text-decoration: none; }
-.text-link:hover { color: var(--pine); }
 .video-slot { min-width: 0; margin: 0; }
 .video-stage { display: flex; aspect-ratio: 16 / 9; align-items: center; justify-content: center; border: 1px solid #56526e; background: var(--surface); }
 .mountain-world { position: absolute; inset: 0; overflow: hidden; background: #302d54; }
@@ -115,47 +115,15 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
 .world-star-two { top: 39%; right: 27%; width: 3px; height: 3px; background: #9ccfd8; }
 .world-star-three { top: 17%; right: 12%; width: 5px; height: 5px; background: #c4a7e7; }
 .video-note { margin: 0; color: var(--muted); font-size: 12px; }
-
-.story-section { padding: 40px 0 67px; border-top: 1px solid var(--overlay); }
-.story-layout { display: grid; grid-template-columns: 1.03fr .97fr; gap: 76px; }
-.story-heading h2 { max-width: 510px; margin: 0 0 17px; font-size: clamp(24px, 3vw, 32px); font-weight: 530; letter-spacing: -.055em; line-height: 1.25; }
-.source-link { font-size: 11px; }
-.story-copy { color: var(--home-muted); font-size: 13px; line-height: 1.75; }
-.story-copy p { margin: 0 0 13px; }
-.story-copy .story-lead { color: var(--text); font-size: 15px; }
-
-.demo-section { display: grid; grid-template-columns: .8fr 1.2fr; gap: 64px; padding: 43px 0 58px; border-top: 1px solid var(--overlay); }
-.demo-heading h2, .learning-loop h2 { margin: 0 0 12px; font-size: clamp(25px, 3vw, 34px); font-weight: 540; letter-spacing: -.055em; line-height: 1.2; }
-.demo-heading > p { max-width: 37ch; color: var(--home-muted); font-size: 13px; }
-.demo-tabs { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 20px; }
-.demo-tabs button { padding: 5px 0; border: 0; border-bottom: 1px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
-.demo-tabs button:hover, .demo-tabs button[aria-pressed="true"] { border-bottom-color: var(--text); color: var(--text); }
-.demo-tabs button:focus-visible { outline-offset: 1px; }
-.demo-panel { min-width: 0; padding: 0 0 0 22px; border-left: 1px solid var(--overlay); }
-.demo-caption { margin: 15px 0 15px; color: var(--subtle); font-size: 12px; }
-.demo-turns { margin: 0; }
-.demo-turns div { display: grid; grid-template-columns: 88px 1fr; gap: 10px; padding: 10px 0; border-top: 1px solid var(--overlay); }
-.demo-turns dt { color: var(--muted); font-size: 11px; }
-.demo-turns dd { margin: 0; color: var(--text); font-size: 12px; line-height: 1.65; }
-
-.learning-loop { padding: 42px 0 50px; border-top: 1px solid var(--overlay); }
-.learning-loop ol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; max-width: none; margin: 27px 0 18px; padding-left: 1.2em; }
-.learning-loop li { margin: 0; color: var(--subtle); font-size: 12px; }
-.learning-loop li::marker { color: var(--muted); font-family: 'Hack', monospace; font-size: 10px; }
-.loop-note { max-width: 78ch; color: var(--muted); font-size: 11px; }
-.home-footer { display: flex; align-items: center; gap: 24px; padding: 20px 0 26px; }
+.home-footer { display: flex; align-items: center; gap: 24px; margin-top: 40px; padding: 20px 0 26px; border-top: 1px solid var(--overlay); }
 .footer-brand { margin-right: auto; color: var(--text); font-size: 14px; font-weight: 650; letter-spacing: -.04em; text-decoration: none; }
 .home-footer > a:not(.footer-brand) { color: var(--muted); font-size: 11px; text-decoration: none; }
 .home-footer a:hover { color: var(--text); }
 
 @media (max-width: 760px) {
-  .hero { grid-template-columns: 1fr; gap: 35px; padding: 54px 0 45px; }
+  .hero { grid-template-columns: 1fr; gap: 35px; padding: 48px 0 40px; }
   .hero h1 { max-width: 620px; font-size: clamp(34px, 8vw, 46px); }
   .video-slot { max-width: 650px; }
-  .story-layout, .demo-section { grid-template-columns: 1fr; gap: 26px; }
-  .story-layout { gap: 22px; }
-  .demo-panel { padding-left: 15px; }
-  .learning-loop ol { gap: 17px; }
 }
 @media (max-width: 560px) {
   nav, .home-page .home-nav { width: calc(100% - 32px); min-height: 52px; flex-wrap: wrap; gap: 9px 12px; padding: 9px 0; }
@@ -164,17 +132,12 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
   main, .home-main { width: calc(100% - 32px); }
   main { padding-top: 31px; }
   .home-main { padding-top: 0; }
-  .hero { gap: 27px; padding: 45px 0 36px; }
+  .hero { gap: 27px; padding: 40px 0 32px; }
   .hero h1 { font-size: clamp(34px, 10vw, 42px); }
   .hero-lede { font-size: 14px; }
-  .hero-actions { gap: 16px; }
   .video-stage { aspect-ratio: 4 / 3; }
-  .story-section, .demo-section, .learning-loop { padding-top: 32px; padding-bottom: 40px; }
-  .story-heading h2 { font-size: 27px; }
-  .demo-section { gap: 22px; }
-  .learning-loop ol { grid-template-columns: 1fr; gap: 11px; }
-  .demo-turns div { grid-template-columns: 72px 1fr; gap: 8px; }
-  .game-section { height: 220px; }
+  .game-section { height: 110px; }
+  .game-section .sprite-wizard { right: 30%; }
   .home-footer { gap: 13px; flex-wrap: wrap; }
   .footer-brand { flex-basis: 100%; }
 }
@@ -185,5 +148,3 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
 @media (prefers-reduced-motion: reduce) {
   .motion-notice { display: inline; }
 }
-.demo-panel[data-attention="quiet"] .demo-turns { display: none; }
-.demo-panel[data-attention="quiet"] .demo-caption { max-width: 42ch; padding: 24px 0 30px; color: var(--text); font-size: 16px; }
