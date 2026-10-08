@@ -26,58 +26,38 @@
 <main class="home-main">
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy">
-      <p class="eyebrow">A personal intern for your Git repo</p>
       <h1 id="hero-title">Dum is a small intern on your Mac that you train as you build.</h1>
-      <p class="hero-lede">It sits next to your editor and can only write code for skills you've taught it. You teach it by explaining a skill in your own words or by handing in code you wrote without AI, so each thing it learns is something you've learned too.</p>
+      <p class="hero-lede">It sits next to your editor and only writes code for skills you've taught it. You teach it by explaining a skill in your own words, or by handing in code you wrote without AI. It ends up knowing what you know.</p>
       <div class="hero-actions">
         <a class="button-primary" href="/install">Install Dum</a>
         <a class="text-link" href="#demo">See the example <span aria-hidden="true">↓</span></a>
       </div>
-      <p class="hero-mode">Your repo stays in your editor. Dum stays nearby.</p>
     </div>
 
-    <figure class="video-slot" aria-labelledby="video-caption">
-      <div class="video-stage" aria-label="Reserved space for the Dum product video">
-        <div class="mountain-world" aria-hidden="true">
-          <span class="world-star world-star-one"></span>
-          <span class="world-star world-star-two"></span>
-          <span class="world-star world-star-three"></span>
-          <span class="mountain mountain-back"></span>
-          <span class="mountain mountain-mid"></span>
-          <span class="mountain mountain-front"></span>
-          <span class="world-path"></span>
-        </div>
-        <span class="video-label">PRODUCT DEMO</span>
-        <p class="video-note">A short walkthrough will go here.</p>
-        <div class="video-characters" aria-hidden="true">
-          <canvas id="hero-dum" class="sprite-dum"></canvas>
-          <canvas data-wizard-portrait class="sprite-wizard"></canvas>
-        </div>
-        <span class="video-placeholder-note">Recording slot · no video yet</span>
+    <figure class="video-slot" aria-label="Product video, not recorded yet">
+      <div class="video-stage">
+        <p class="video-note">Walkthrough video coming soon.</p>
       </div>
-      <figcaption id="video-caption">A real product walkthrough belongs here. This space is reserved for the recording.</figcaption>
     </figure>
   </section>
 
   <section class="story-section" id="story" aria-labelledby="story-title">
-    <p class="section-kicker">01 / THE QUESTION</p>
     <div class="story-layout">
       <div class="story-heading">
         <h2 id="story-title">“I’m doing almost everything with AI during my internship. What do I do?”</h2>
-        <a class="source-link" href="https://www.reddit.com/r/cscareerquestions/comments/1ll3g9y/im_doing_almost_everything_with_ai_during_my/" target="_blank" rel="noreferrer">Asked on r/cscareerquestions <span aria-hidden="true">↗</span></a>
+        <a class="source-link" href="https://www.reddit.com/r/cscareerquestions/comments/1ll3g9y/im_doing_almost_everything_with_ai_during_my/" target="_blank" rel="noreferrer">r/cscareerquestions <span aria-hidden="true">↗</span></a>
       </div>
       <div class="story-copy">
-        <p>Someone asked this on r/cscareerquestions. With Dum, you have an intern of your own, and its skill tree starts empty. Before it can take on more of the work, you have to teach it, so you end up understanding each skill it uses.</p>
-        <p>Some skills unlock when you explain them in your own words. Others need code you wrote without AI first. You still build in your own editor, and the wizard next to Dum gives advice now and then.</p>
+        <p>Dum is one answer: keep using AI, but only for the parts you already understand. Its skill tree starts empty and grows when you do.</p>
+        <p>You still build in your own editor. The wizard next to Dum drops in with advice now and then.</p>
       </div>
     </div>
   </section>
 
   <section class="demo-section" id="demo" data-demo aria-labelledby="demo-title">
     <div class="demo-heading">
-      <p class="section-kicker">02 / A SCRIPTED EXAMPLE</p>
       <h2 id="demo-title">Teaching Dum</h2>
-      <p>Step through a small learning loop. This is a scripted preview, not a live AI conversation.</p>
+      <p>A scripted example. Click through it.</p>
       <div class="demo-tabs" role="group" aria-label="Choose a moment in the Dum workflow">
         <button type="button" data-scene="build" aria-pressed="true">The question</button>
         <button type="button" data-scene="explain" aria-pressed="false">Explain it</button>
@@ -86,29 +66,35 @@
       </div>
     </div>
     <div class="demo-panel" data-demo-panel data-attention="active" aria-label="Scripted cache example">
-      <div class="demo-state"><span data-demo-context>EXAMPLE / CACHE EVICTION</span><span data-demo-step aria-live="polite">01 / 04</span></div>
-      <p class="demo-caption" data-demo-label aria-live="polite">Dum asks for your thinking before it reaches for code.</p>
+      <p class="demo-caption" data-demo-label aria-live="polite">Dum asks how you'd do it before it writes anything.</p>
       <dl class="demo-turns">
         <div><dt>You</dt><dd data-demo-user>Can you build a cache for my app?</dd></div>
         <div><dt>Dum</dt><dd data-demo-dum>I can help once this skill is unlocked. What should the cache do when it runs out of space?</dd></div>
-        <div><dt>The wizard</dt><dd data-demo-wizard>Start with the tradeoff: keep the oldest item, or the least recently used? Pick the rule and explain why.</dd></div>
+        <div><dt>The wizard</dt><dd data-demo-wizard>Start with the tradeoff: drop the oldest item, or the least recently used? Pick one and say why.</dd></div>
       </dl>
     </div>
   </section>
 
   <section class="learning-loop" aria-labelledby="loop-title">
-    <p class="section-kicker">03 / THE LEARNING LOOP</p>
     <h2 id="loop-title">How the explaining part works</h2>
     <ol>
-      <li><span>01</span><p>Pick a real decision in the work.</p></li>
-      <li><span>02</span><p>Explain your approach in everyday words.</p></li>
-      <li><span>03</span><p>Notice what is still fuzzy. Revisit it, then build.</p></li>
+      <li>Pick a real decision in the work.</li>
+      <li>Explain your approach in everyday words.</li>
+      <li>Notice what's still fuzzy. Go back to it, then build.</li>
     </ol>
-    <p class="loop-note">This borrows from the Feynman technique. Explaining something can count as recognizing a skill on your tree. It doesn't count as proof you built it.</p>
+    <p class="loop-note">It's the Feynman technique. An explanation marks a skill as recognized on your tree. Marking it as built takes code you wrote yourself.</p>
   </section>
 
-  <section class="game-section" aria-label="Optional Dum jumping game">
-    <span class="game-label">A small break</span>
+  <section class="game-section" aria-label="Dum jumping game">
+    <div class="mountain-world" aria-hidden="true">
+      <span class="world-star world-star-one"></span>
+      <span class="world-star world-star-two"></span>
+      <span class="world-star world-star-three"></span>
+      <span class="mountain mountain-back"></span>
+      <span class="mountain mountain-mid"></span>
+      <span class="mountain mountain-front"></span>
+    </div>
+    <canvas data-wizard-portrait class="sprite-wizard" aria-hidden="true"></canvas>
     <div id="game-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
     <canvas id="game-canvas" tabindex="-1" aria-hidden="true"></canvas>
     <div class="game-controls">
@@ -116,7 +102,6 @@
       <span class="motion-notice">motion reduced</span>
     </div>
   </section>
-
   <footer class="home-footer"><a href="/" class="footer-brand">dum</a><a href="/how-it-works">how Dum works</a><a href="/install">install</a></footer>
 
 </main>
