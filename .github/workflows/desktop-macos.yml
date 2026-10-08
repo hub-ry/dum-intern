@@ -45,6 +45,20 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: DIAG-TEMP Homebrew libomp deployment target and upstream OpenMP detection
+        if: matrix.arch == 'arm64'
+        continue-on-error: true
+        run: |
+          brew install libomp >/dev/null
+          otool -l /opt/homebrew/opt/libomp/lib/libomp.dylib | grep -A4 LC_BUILD_VERSION
+          probe="$RUNNER_TEMP/omp-probe"
+          mkdir -p "$probe/whisper.cpp"
+          grep -v 'GGML_OPENMP' vendor/OpenSuperWhisper/libwhisper/CMakeLists.txt > "$probe/CMakeLists.txt"
+          git -C "$probe/whisper.cpp" init -q
+          git -C "$probe/whisper.cpp" fetch -q --depth 1 https://github.com/ggerganov/whisper.cpp f3ff80ea8da044e5b8833e7ba54ee174504c518d
+          git -C "$probe/whisper.cpp" checkout -q FETCH_HEAD
+          cmake -G Xcode -B "$probe/build" -S "$probe" 2>&1 | grep -i -E 'openmp' || echo "no OpenMP lines"
+          grep -E '^(OpenMP_C_FLAGS|OpenMP_FOUND|OpenMP_C_LIB_NAMES)' "$probe/build/CMakeCache.txt" || true
       - name: Build ad-hoc signed, non-notarized public-flavor test app
         run: npm run desktop:mac -- --${{ matrix.arch }}
       - name: Verify the public flavor
@@ -69,6 +83,15 @@ jobs:
             test -x "$osw/Contents/MacOS/OpenSuperWhisper"
             test -s "$APP/Contents/Resources/OpenSuperWhisper-LICENSE.txt"
             lipo "$osw/Contents/MacOS/OpenSuperWhisper" -verify_arch arm64
+            # The voice helper loads only the OS and what its bundle carries: no OpenMP, nothing from Homebrew.
+            linked="$(otool -L "$osw/Contents/MacOS/OpenSuperWhisper")"
+            echo "$linked"
+            if grep -E 'libomp|/opt/homebrew|/usr/local/' <<<"$linked"; then echo "the voice helper links a build-machine library"; exit 1; fi
+            for lib in $(awk 'NR > 1 && $1 ~ /^@rpath\// {print substr($1, 8)}' <<<"$linked"); do
+              test -f "$osw/Contents/Frameworks/$lib"
+              test "$(otool -D "$osw/Contents/Frameworks/$lib" | sed -n 2p)" = "@rpath/$lib"
+            done
+            if find "$osw" -name 'libomp*' | grep .; then echo "libomp is in the voice helper"; exit 1; fi
           fi
           hdiutil verify release/*.dmg
           mkdir -p "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/dmg-app" "$RUNNER_TEMP/zip-app"

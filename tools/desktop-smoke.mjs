@@ -684,9 +684,10 @@ async function zones() {
     if ((await panel.evaluate(() => document.activeElement?.querySelector('.zone-name')?.textContent)) !== CHILD.name) await panel.keyboard.press('ArrowDown');
     await panel.keyboard.press('F2');
     await panel.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Name');
-    await panel.keyboard.down('Control');
-    await panel.keyboard.press('KeyA');
-    await panel.keyboard.up('Control');
+    // No select-all chord: Ctrl+A selects all only off macOS (on macOS it moves to the line start).
+    // Like a Finder rename, F2 must already have selected the whole name, so typing replaces it.
+    const field = await panel.evaluate(() => ({ value: document.activeElement.value, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd }));
+    assert.deepEqual(field, { value: CHILD.name, start: 0, end: CHILD.name.length }, 'F2 selects the whole name');
     await panel.keyboard.type('Trees');
     await panel.keyboard.press('Enter');
     const s = await until((v) => v.activeZone?.breadcrumb.at(-1)?.name === 'Trees', 'renamed zone');
@@ -754,14 +755,18 @@ async function whoPowersDum(flavor) {
   const { panel } = active;
   await step('"Who powers Dum?" appears at the first model-backed request; nothing is sent', async () => {
     const before = await snapshot();
-    if (before.draft.text !== DRAFT) {
-      await panel.focus('textarea.composer-input');
-      await panel.keyboard.type(DRAFT);
-    }
+    console.error(`DIAG-TEMP before: ${JSON.stringify(await panel.evaluate(() => ({ chatHidden: document.querySelector('.chat')?.hidden, pane: document.querySelector('#pane-title')?.textContent, active: document.activeElement?.outerHTML.slice(0, 120), draft: document.querySelector('textarea.composer-input')?.value })))} backends ${JSON.stringify(before.agent.backends.map((b) => [b.id, b.installed, b.ready, b.message]))}`);
+    // The Zones steps leave the Zones pane open over the conversation; a message is typed there.
+    // (On Linux the command bar steps already brought the conversation back.)
+    await panel.focus('#tab-chat');
+    await panel.keyboard.press('Enter');
+    await panel.waitForFunction(() => !document.querySelector('.chat')?.hidden && document.activeElement?.matches('textarea.composer-input'), { timeout: 10_000 });
+    if (before.draft.text !== DRAFT) await panel.keyboard.type(DRAFT);
     await panel.waitForFunction((t) => document.querySelector('textarea.composer-input')?.value === t, { timeout: 10_000 }, DRAFT);
-    await panel.focus('textarea.composer-input');
+    const t0 = Date.now();
     await panel.keyboard.press('Enter');
     await panel.waitForSelector('.agent-setup:not([hidden]) h2', { timeout: 10_000 });
+    console.error(`DIAG-TEMP sheet after ${Date.now() - t0} ms; rows ${await panel.$$eval('.agent-setup .backend-row', (els) => els.length)}`);
     assert.equal(await panel.$eval('.agent-setup h2', (el) => el.textContent), 'Who powers Dum?');
     assert.match(await panel.$eval('.agent-note', (el) => (el.hidden ? '' : el.textContent)), /Choose who powers Dum first/);
     const s = await snapshot();

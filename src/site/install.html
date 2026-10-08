@@ -70,8 +70,7 @@ npm run desktop:mac        # package the public-flavor DMG and ZIP</code></pre>
   <p class="note"><code>npm run desktop</code> runs without Dum's two native helpers, so there's
      no voice, no noticing app switches, and <code>Esc</code> can't hand focus back to the app you
      were in. Packaging builds them: the focus helper on any Mac, voice only on Apple Silicon, which
-     needs Xcode, cmake, Rust with the <code>aarch64-apple-darwin</code> target, and Homebrew
-     <code>libomp</code>.</p>
+     needs Xcode, cmake, and Rust with the <code>aarch64-apple-darwin</code> target.</p>
 
   <p class="note">The checkout also starts on Linux. That's for development and testing only; Dum
      is a Mac app.</p>

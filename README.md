@@ -62,7 +62,7 @@ npm run typecheck
 npm run desktop:build && npm run desktop:smoke   # xvfb-run -a on Linux
 ```
 
-- `npm run desktop` has no native helpers: no voice, no app-switch noticing, no focus return. Packaging builds them; voice builds only on Apple Silicon and needs Xcode, cmake, Rust with `aarch64-apple-darwin`, and Homebrew libomp.
+- `npm run desktop` has no native helpers: no voice, no app-switch noticing, no focus return. Packaging builds them; voice builds only on Apple Silicon and needs Xcode, cmake, and Rust with `aarch64-apple-darwin`.
 - Not yet tried on a physical Mac: voice, the focus helper, Screen Recording prompts and capture, tray rendering, the bubble over full-screen apps, launch at login, Keychain-backed key storage, subscription sign-in, Gatekeeper on first launch.
 - Code, build and product rules: [CONTRIBUTING.md](CONTRIBUTING.md).
 
