@@ -46,6 +46,7 @@ const SITE_ASSETS: Record<string, string> = {
   "hack-regular.woff2": "font/woff2",
   "hack-bold.woff2": "font/woff2",
   "hack-LICENSE.md": "text/plain; charset=utf-8",
+  "favicon.png": "image/png",
 };
 const SITE_HEADERS = {
   "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
