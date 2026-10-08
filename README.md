@@ -183,7 +183,7 @@ Optional web tree:
 - Anyone with the link can see and edit that tree. Web edits follow the same prerequisite and self-report rules as terminal tree edits. Removals have tombstones so synchronization doesn't bring them back.
 - Trees merge skill by skill. Personal context, project evidence ledgers, memory, and sessions aren't synchronized.
 - To run the optional server: `PORT=8787 DUM_WEB_DATA=/srv/dum-trees npm run web`. It listens on localhost by default. Use a TLS reverse proxy or tunnel for remote access.
-- The same server serves the public homepage at `/` and docs at `/install`, `/how-it-works`, and `/subjects`. The homepage is one screen: the pitch, an empty future video slot, and a small optional runner where Dum jumps in front of a pixel mountain scene with the Wizard. Private tree links keep their separate capability checks, no-index, and no-store headers.
+- The same server serves the public homepage at `/` and docs at `/install`, `/philosophy`, `/how-it-works`, and `/subjects`. The homepage is one screen: the pitch, an empty future video slot, and a small optional runner where Dum jumps in front of a pixel mountain scene with the Wizard. `/philosophy` covers where the idea came from and the research behind it. Private tree links keep their separate capability checks, no-index, and no-store headers.
 - `/install` keeps the Mac downloads and offers a copyable source-install prompt for a terminal LLM. The prompt asks before authentication, 2FA, system changes, writes outside the chosen folder, or existing-project changes.
 - Existing hosting scripts are in `deploy/`. They aren't part of ordinary terminal startup and don't run automatically.
 

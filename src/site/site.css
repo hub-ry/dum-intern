@@ -97,10 +97,7 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
 .home-main { width: min(1120px, calc(100% - 48px)); max-width: 1120px; padding: 0 0 28px; }
 .hero { display: grid; grid-template-columns: .93fr 1.07fr; align-items: center; gap: 54px; padding: 64px 0 48px; }
 .hero h1 { max-width: 540px; margin: 0 0 19px; font-size: clamp(34px, 4.2vw, 52px); font-weight: 560; letter-spacing: -.045em; line-height: 1.08; }
-.hero-lede { max-width: 44ch; margin: 0 0 10px; color: var(--home-muted); font-size: 15px; line-height: 1.7; }
-.hero-question { max-width: 44ch; margin: 0 0 26px; color: var(--muted); font-size: 13px; }
-.hero-question a { color: var(--subtle); }
-.hero-question a:hover { color: var(--pine); }
+.hero-lede { max-width: 44ch; margin: 0 0 26px; color: var(--home-muted); font-size: 15px; line-height: 1.7; }
 .button-primary { display: inline-block; padding: 10px 14px; border: 1px solid var(--text); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; }
 .button-primary:hover { background: var(--text); color: var(--bg); }
 .video-slot { min-width: 0; margin: 0; }

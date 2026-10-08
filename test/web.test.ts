@@ -114,7 +114,7 @@ test("the server keeps a tree at a private link, edits it under the rules, and n
 test("public docs serve typed assets without making private trees cacheable or exposing source paths", async () => {
   const s = await server();
   try {
-    for (const path of ["/", "/install", "/how-it-works", "/subjects"]) {
+    for (const path of ["/", "/install", "/philosophy", "/how-it-works", "/subjects"]) {
       const page = await fetch(`${s.base}${path}`);
       assert.equal(page.status, 200);
       assert.equal(page.headers.get("content-type"), "text/html; charset=utf-8");
