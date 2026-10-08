@@ -60,7 +60,7 @@ flowchart LR
 - **Change**: a file Dum writes on command, applied directly, with a diff shown after and one-click revert. Replaces "proposal".
 - **Practice**: "suggested projects that fit a skill's scope well". No guided practice.
 - **Track**: a curated ladder of skills with prerequisites.
-- **Wizard**: the advisor.
+- **Wizard**: the advisor that helps you decide. Teaching comes later: "the wizard should be there for basic learning eventually, but for now i think it should just be there to help you decide."
 
 ## Rules
 
@@ -76,6 +76,9 @@ flowchart LR
 10. Voice and keyboard are both first-class. Voice goes through OpenSuperWhisper, and everything works from the keyboard without the mouse.
 11. Dum may run on agents other than Claude, and you pick the backend and model.
 12. Dum connects to cloud models only with your own API key: "let's just have dum be strictly api keys for now". There is no subscription sign-in.
+13. Dum's job is to help you delegate: "you have to tell dum what you need done ultimately. I think the goal should be to help you delegate something." As your skills grow, beginner work moves to the intern, so your workload doesn't grow with them.
+14. Every goal starts with alignment: "at the beginning of every goal, you need to prompt to make sure you and your intern are on the same page, it can suggest projects/decisions to make to move you towards your goal."
+15. For now the Wizard only helps you decide. It doesn't post unprompted teaching tips.
 
 ## Known limitations
 
