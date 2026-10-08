@@ -91,7 +91,7 @@ export type HostResult = {
 export type HostEvent =
   | { type: "ready"; epoch: string }
   | {
-    type: "state"; epoch: string; state: State | null; tree: View | null; registry: ZoneRegistry; activeZone: ZoneContext | null;
+    type: "state"; epoch: string; zoneEpoch: string | null; state: State | null; tree: View | null; registry: ZoneRegistry; activeZone: ZoneContext | null;
     inputToken: string; canAttach: boolean; shares: ShareGrant[]; follows: FollowGrant[]; changes: ChangeReceipt[];
     look: { status: string };
   }
@@ -182,7 +182,7 @@ export const HostResultSchema = z.object({
 export const HostEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ready"), epoch: TokenSchema }).strict(),
   z.object({
-    type: z.literal("state"), epoch: TokenSchema, state: StateSchema.nullable(), tree: ViewSchema.nullable(), registry: ZoneRegistrySchema,
+    type: z.literal("state"), epoch: TokenSchema, zoneEpoch: TokenSchema.nullable(), state: StateSchema.nullable(), tree: ViewSchema.nullable(), registry: ZoneRegistrySchema,
     activeZone: ZoneContextSchema.nullable(), inputToken: TokenSchema, canAttach: z.boolean(), shares: z.array(ShareGrantSchema).max(64),
     follows: z.array(FollowGrantSchema).max(64), changes: z.array(ChangeReceiptSchema).max(200), look: z.object({ status: line }).strict(),
   }).strict(),

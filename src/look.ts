@@ -1,10 +1,9 @@
-// One picture they chose to share, looked at once by a separate call and described in text.
+// One picture they chose to share, looked at once by a separate helper call and described in text.
 // The picture never enters dum's conversation or any saved history: only the description does.
 
 import { createHash } from "node:crypto";
-import { oneShot, type Query } from "./oneshot.ts";
-import { MODELS } from "./runtime.ts";
-import type { SharedImage } from "./store.ts";
+import { oneShot, type Opts } from "./oneshot.ts";
+import type { SharedImage } from "./store-types.ts";
 
 /** The most of a description that joins the conversation. */
 export const MAX_OBSERVATION = 6000;
@@ -41,16 +40,13 @@ What they said with it (data): ${JSON.stringify(note.slice(0, 2000))}`;
 }
 
 /**
- * Look at the picture once, through the same closed, subscription-only route as every helper:
- * no tools, no saved session. Returns the bounded description and the picture's SHA-256.
+ * Look at the picture once, on the user's helper model with no actions and no saved session.
+ * Refused when that model can't read pictures. Returns the bounded description and the
+ * picture's SHA-256.
  */
-export async function look(image: SharedImage, note: string, o: { cwd: string; signal?: AbortSignal }, runQuery?: Query): Promise<{ observation: string; sha: string }> {
+export async function look(image: SharedImage, note: string, o: Omit<Opts, "images">): Promise<{ observation: string; sha: string }> {
   const sha = createHash("sha256").update(decode(image)).digest("hex");
-  const raw = await oneShot(
-    lookPrompt(image.label, note),
-    { model: MODELS.helper.model, effort: MODELS.helper.effort, cwd: o.cwd, images: [{ mimeType: image.mimeType, data: image.data }], signal: o.signal },
-    runQuery,
-  );
+  const raw = await oneShot(lookPrompt(image.label, note), { ...o, images: [{ mimeType: image.mimeType, data: image.data }] });
   const text = raw.replace(/\s*—\s*/g, " - ").trim();
   if (!text) throw new Error("the look came back empty");
   return { observation: text.length > MAX_OBSERVATION ? `${text.slice(0, MAX_OBSERVATION)}…` : text, sha };

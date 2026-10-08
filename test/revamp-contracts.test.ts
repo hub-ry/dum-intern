@@ -196,10 +196,12 @@ test("host events are validated too", () => {
     models: { intern: { backend: "claude", model: "claude-opus-4-1", effort: "high" }, helper: null },
   };
   const event = {
-    type: "state", epoch: "e1", state, tree: { tracks: [], off: [], count: 0, usableBuilt: 0 }, registry, activeZone: context,
+    type: "state", epoch: "e1", zoneEpoch: "z1", state, tree: { tracks: [], off: [], count: 0, usableBuilt: 0 }, registry, activeZone: context,
     inputToken: "t1", canAttach: true, shares: [], follows: [], changes: [], look: { status: "watching" },
   };
   ok(HostEventSchema, wire(event));
+  ok(HostEventSchema, wire({ ...event, zoneEpoch: null }));
+  bad(HostEventSchema, wire({ ...event, zoneEpoch: undefined }));
   bad(HostEventSchema, wire({ ...event, state: { ...state, prompt: { type: "plan", plan: "x" } } }));
   bad(HostEventSchema, wire({ ...event, state: { ...state, repo: home } }));
   ok(HostEventSchema, { type: "reply", epoch: "e1", id: "q1", ok: true, result: { models: [{ id: "m", label: "M", efforts: [], images: false, actions: true, verified: false }] } });

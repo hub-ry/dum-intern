@@ -1,28 +1,21 @@
-// The skill tree as text, for any surface: the terminal's :tree and --skills, the desktop panel.
+// The skill tree as text, for the tree panel and the :tree command.
 
 import { homedir } from "node:os";
-import { readRepo } from "./repo.ts";
-import { mainLang } from "./session.ts";
 import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
 
-/** The languages worth drawing: whatever has something on the tree, plus where they're standing. */
-function langsToShow(t: skills.Tree, root: string): string[] {
-  const here = root ? mainLang(readRepo(root)) : "";
-  return [...new Set([here, ...t.skills.map((s) => s.lang)].filter(Boolean))];
-}
-
 /**
  * The tree as text: what you know, then each track with its levels, prerequisites and what's open
- * next. `arg` picks a language or "all"; with nothing chosen and nothing to go on, every track's
- * summary, so an empty tree still shows where to start.
+ * next. `language` is the active zone's language ("" for none); with nothing on the tree in any
+ * language and no zone language, every track's summary, so an empty tree still shows where to
+ * start. `filter` picks a language or "all".
  */
-export function treeText(t: skills.Tree, root: string, arg = ""): string {
-  const want = arg.trim().toLowerCase().replace(/^in\s+/, "");
+export function treeText(t: skills.Tree, language: string, filter = ""): string {
+  const want = filter.trim().toLowerCase().replace(/^in\s+/, "");
   const known = curriculum.languages();
   const lang = want && want !== "all" ? skills.langName(want) : "";
-  if (lang && !known.includes(lang)) return `no curated track for "${arg.trim()}". tracks: ${known.join(", ")}.\n:tree <language> picks one; :tree all shows every track.`;
-  const langs = lang ? [lang] : want === "all" ? [] : langsToShow(t, root);
+  if (lang && !known.includes(lang)) return `no curated track for "${filter.trim()}". tracks: ${known.join(", ")}.\n:tree <language> picks one; :tree all shows every track.`;
+  const langs = lang ? [lang] : want === "all" ? [] : [...new Set([skills.langName(language), ...t.skills.map((s) => s.lang)].filter(Boolean))];
   const built = t.skills.filter((s) => skills.rank(s.level) >= skills.rank("build")).length;
   const out = [t.skills.length ? `you know: ${built} built, ${t.skills.length - built} recognized only` : "you know: nothing on the tree yet", ""];
   if (want !== "all" && !langs.length) {
@@ -38,7 +31,7 @@ export function treeText(t: skills.Tree, root: string, arg = ""): string {
     "",
     "● built   ◐ recognized   ○ open: its prerequisites are built   · locked",
     "AI writes a concept once you've built it, and uses a tool once you recognize it. Core algorithms follow the same prerequisites.",
-    ":practice <skill> suggests a task for your own editor; :submit it when it's done. :skill x adds what you can already write.",
+    ":projects <skill> suggests projects that fit its scope; :submit your own work when it's done. :skill x adds what you can already write.",
     `one note per skill in ${`${skills.folder()}/`.replace(homedir(), "~")}`,
   );
   return out.join("\n");

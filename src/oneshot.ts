@@ -1,81 +1,71 @@
-// One prompt, one reply, no conversation, no tools.
+// One prompt, one reply, no conversation, no actions: every bounded helper call, on the user's helper model.
 
-import { query, type EffortLevel, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { assertSubscription, closed, start } from "./runtime.ts";
+import type { Registry } from "./agent/registry.ts";
+import type { Picture } from "./agent/types.ts";
+import type { RequestBinding } from "./share-types.ts";
+import type { ZoneContext } from "./zone-types.ts";
 
 export type Opts = {
-  /** One of runtime.MODELS; anything else is refused rather than tried. */
-  model: string;
-  effort: EffortLevel;
-  cwd?: string;
-  /** Pictures that go with the prompt, as image blocks. Sent only once the login checks pass. */
-  images?: { mimeType: "image/png"; data: string }[];
-  /** Stops the call wherever it is: starting, waiting on the login, or waiting on the reply. */
+  agent: Registry;
+  /** The zone's empty runtime/ directory. Never the process's own working directory. */
+  cwd: string;
+  zone: ZoneContext;
+  binding: RequestBinding;
+  /** Pictures that go with the prompt. Refused when the helper model can't read pictures. */
+  images?: readonly Picture[];
+  /** Stops the call wherever it is: opening the session or waiting on the reply. */
   signal?: AbortSignal;
 };
-
-export type Query = typeof query;
 
 const SYSTEM = "Answer the prompt you're given directly. You have no tools, files or web access in this conversation.";
 
 /**
- * The final text. Route, login and model failures throw with a readable reason - a caller that
- * would rather stay quiet catches them; nothing here falls back to another model.
+ * The reply's text, from the registry's helper selector. Choice, login and model failures throw
+ * with a readable reason; nothing here falls back to another backend or model. Stopped: "stopped".
  */
-export async function oneShot(prompt: string, o: Opts, runQuery: Query = query): Promise<string> {
+export async function oneShot(prompt: string, o: Opts): Promise<string> {
   if (o.signal?.aborted) throw new Error("stopped");
+  const choice = o.agent.chosen();
+  const selector = choice.helper;
+  const backend = o.agent.backend(selector.backend);
+  if (o.images?.length && !backend.capabilities(selector).images) {
+    throw new Error(`${selector.model} can't look at pictures - choose a helper model that can`);
+  }
   const abort = new AbortController();
   const stop = () => abort.abort();
   o.signal?.addEventListener("abort", stop, { once: true });
-  const turn: SDKUserMessage | null = o.images?.length
-    ? {
-        type: "user",
-        message: {
-          role: "user",
-          content: [
-            ...o.images.map((i) => ({ type: "image" as const, source: { type: "base64" as const, media_type: i.mimeType, data: i.data } })),
-            { type: "text" as const, text: prompt },
-          ],
-        },
-        parent_tool_use_id: null,
-      }
-    : null;
   try {
-    const session = await start(turn ? (async function* (t: SDKUserMessage) { yield t; })(turn) : prompt, {
-        ...closed({ cwd: o.cwd ?? process.cwd(), systemPrompt: SYSTEM, model: o.model, effort: o.effort, maxTurns: 1 }),
-        persistSession: false,
-        abortController: abort,
-    }, runQuery);
-    let out = "";
-    let started = false;
+    const session = await backend.open({
+      cwd: o.cwd,
+      zone: o.zone,
+      binding: o.binding,
+      systemPrompt: SYSTEM,
+      selector,
+      login: choice.login,
+      actions: [],
+      signal: abort.signal,
+      maxTurns: 1,
+    });
     try {
-      for await (const msg of session) {
-        if (msg.type === "system" && msg.subtype === "init") {
-          assertSubscription(msg, []);
-          started = true;
-        }
-        if (msg.type === "assistant") {
-          for (const block of msg.message.content) if (block.type === "text" && block.text) out = block.text;
-        }
-        if (msg.type === "result") {
-          if (!started) throw new Error("Claude answered without reporting its session setup");
-          if (msg.subtype !== "success") throw new Error(msg.errors.join("\n") || msg.subtype);
-          if (msg.is_error) throw new Error(msg.result || "Claude reported an error");
-          return msg.result || out;
+      const said: string[] = [];
+      for await (const event of session.turn({ text: prompt, ...(o.images?.length ? { images: o.images } : {}) })) {
+        if (event.type === "text") said.push(event.text);
+        else if (event.type === "action") throw new Error(`it tried to use ${event.name}, and a one-shot call has no actions`);
+        else if (event.type === "end") {
+          if (event.interrupted || abort.signal.aborted) throw new Error("stopped");
+          if (event.error) throw new Error(event.error);
+          const out = said.join("\n\n").trim();
+          if (!out) throw new Error("it ended without an answer");
+          return out;
         }
       }
-    } catch (err) {
-      if (abort.signal.aborted) throw new Error("stopped");
-      throw new Error(`${o.model} couldn't answer: ${(err as Error).message}`);
+      throw new Error("it ended without an answer");
     } finally {
       session.close();
     }
-    if (abort.signal.aborted) throw new Error("stopped");
-    throw new Error(`${o.model} ended without an answer`);
   } catch (err) {
-    // Stopping while the login is checked surfaces as that check failing: say it was stopped.
     if (abort.signal.aborted) throw new Error("stopped");
-    throw err;
+    throw new Error(`${selector.model} couldn't answer: ${(err as Error).message}`);
   } finally {
     o.signal?.removeEventListener("abort", stop);
   }
