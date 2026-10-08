@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PREFERENCES, type DesktopPreferences } from "../src/desktop/protocol.ts";
-import { DesktopSettings } from "../src/desktop/settings.ts";
+import { DesktopSettings, withPlacement, type CircleLayout, type CirclePlacement } from "../src/desktop/settings.ts";
 import { CLAUDE_DEFAULTS } from "../src/agent/schema.ts";
 import type { AgentChoice } from "../src/agent/types.ts";
 
@@ -40,6 +40,9 @@ test("a fresh install uses the defaults, with the look on", () => {
   } finally { done(); }
 });
 
+const NO_CIRCLE: CircleLayout = { lastChosenDisplayId: null, placements: [] };
+const v3 = (settings: unknown, circle: unknown = NO_CIRCLE) => JSON.stringify({ version: 3, settings, circle });
+
 test("a version 1 file migrates in place once: window, workspace, recent and companion fields go, screen advice becomes the look", () => {
   const { dir, file, done } = scratch();
   try {
@@ -49,7 +52,8 @@ test("a version 1 file migrates in place once: window, workspace, recent and com
     assert.deepEqual(settings.get(), expected);
     assert.equal(settings.warning, "");
     const stored = JSON.parse(readFileSync(file, "utf8"));
-    assert.deepEqual(stored, { version: 2, settings: expected });
+    assert.deepEqual(stored, { version: 3, settings: expected, circle: NO_CIRCLE }, "the old companion position is not imported");
+    assert.deepEqual(settings.circle(), NO_CIRCLE);
     assert.ok(readFileSync(file, "utf8").endsWith("\n"));
     assert.deepEqual(readdirSync(dir), ["settings.json"], "rewritten in place, nothing set aside");
     const again = DesktopSettings.load(dir);
@@ -85,7 +89,9 @@ test("an older Claude choice migrates once: the subscription becomes the API key
     assert.equal(settings.get().mode, "anti-vibe", "the rest of the preferences still load");
     assert.match(settings.warning, /only with your own Anthropic API key/);
     assert.match(settings.warning, /look model: haiku \(low\)/);
-    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).settings.agent, apiKey, "written once");
+    const stored = JSON.parse(readFileSync(file, "utf8"));
+    assert.deepEqual(stored.settings.agent, apiKey, "written once");
+    assert.equal(stored.version, 3);
     assert.deepEqual(readdirSync(dir), ["settings.json"], "nothing set aside");
     const again = DesktopSettings.load(dir);
     assert.deepEqual(again.get().agent, apiKey);
@@ -108,7 +114,7 @@ test("a non-Claude choice without a look model gets its own helper selector as t
 test("a current choice loads as saved; one that still doesn't parse loads as null, unchanged on disk", () => {
   const { dir, file, done } = scratch();
   try {
-    const body = JSON.stringify({ version: 2, settings: { ...DEFAULT_PREFERENCES, agent: apiKey } });
+    const body = v3({ ...DEFAULT_PREFERENCES, agent: apiKey });
     writeFileSync(file, body);
     const settings = DesktopSettings.load(dir);
     assert.deepEqual(settings.get().agent, apiKey);
@@ -187,4 +193,93 @@ test("a failed write leaves the previous preferences in force; get() hands out c
     }
     assert.equal(settings.get().mode, "understand");
   } finally { done(); }
+});
+
+const placement = (displayId: string, usedAt: string, u = 0.5, v = 0.25): CirclePlacement => ({ displayId, u, v, usedAt });
+
+test("a version 2 file becomes version 3 once with every preference unchanged and the circle at its default", () => {
+  const { dir, file, done } = scratch();
+  try {
+    const prefs: DesktopPreferences = {
+      ...DEFAULT_PREFERENCES, hotkey: "Alt+K", voiceHotkey: "Control+Option+V", sendDraftHotkey: "Alt+Return", mode: "anti-vibe",
+      launchAtLogin: true, personalContext: true, look: { apps: false, screen: false }, agent: apiKey,
+    };
+    writeFileSync(file, JSON.stringify({ version: 2, settings: prefs }));
+    const settings = DesktopSettings.load(dir);
+    assert.deepEqual(settings.get(), prefs);
+    assert.deepEqual(settings.circle(), NO_CIRCLE);
+    assert.equal(settings.warning, "");
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 3, settings: prefs, circle: NO_CIRCLE });
+    const written = readFileSync(file, "utf8");
+    const again = DesktopSettings.load(dir);
+    assert.deepEqual(again.get(), prefs);
+    assert.equal(readFileSync(file, "utf8"), written, "migrated once");
+  } finally { done(); }
+});
+
+test("set keeps the circle's placement and setCircle keeps the preferences", () => {
+  const { dir, file, done } = scratch();
+  try {
+    const settings = DesktopSettings.load(dir);
+    const layout: CircleLayout = { lastChosenDisplayId: "69733382", placements: [placement("69733382", "2026-10-08T10:00:00.000Z")] };
+    settings.setCircle(layout);
+    assert.deepEqual(settings.get(), DEFAULT_PREFERENCES);
+    settings.set({ ...DEFAULT_PREFERENCES, mode: "anti-vibe" });
+    assert.deepEqual(settings.circle(), layout, "a preference write keeps the placement");
+    settings.setCircle({ ...layout, placements: [placement("69733382", "2026-10-08T11:00:00.000Z", 1, 0)] });
+    assert.equal(settings.get().mode, "anti-vibe", "a placement write keeps the preferences");
+    const reloaded = DesktopSettings.load(dir);
+    assert.equal(reloaded.get().mode, "anti-vibe");
+    assert.deepEqual(reloaded.circle().placements[0], placement("69733382", "2026-10-08T11:00:00.000Z", 1, 0));
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).version, 3);
+    const copy = reloaded.circle();
+    copy.placements.length = 0;
+    assert.equal(reloaded.circle().placements.length, 1, "circle() hands out copies");
+  } finally { done(); }
+});
+
+test("a placement outside [0,1], a bad display id or a duplicate display is refused and nothing is written", () => {
+  const { dir, file, done } = scratch();
+  try {
+    const settings = DesktopSettings.load(dir);
+    settings.set(DEFAULT_PREFERENCES);
+    const saved = readFileSync(file, "utf8");
+    const at = "2026-10-08T10:00:00.000Z";
+    assert.throws(() => settings.setCircle({ lastChosenDisplayId: null, placements: [placement("1", at, 1.5)] }));
+    assert.throws(() => settings.setCircle({ lastChosenDisplayId: "../x", placements: [] }));
+    assert.throws(() => settings.setCircle({ lastChosenDisplayId: null, placements: [placement("1", at), placement("1", at)] }));
+    assert.throws(() => settings.setCircle({ lastChosenDisplayId: null, placements: [placement("1", "yesterday")] }));
+    assert.throws(() => settings.setCircle({ lastChosenDisplayId: null, placements: Array.from({ length: 17 }, (_, i) => placement(String(i), at)) }));
+    assert.equal(readFileSync(file, "utf8"), saved);
+    assert.deepEqual(settings.circle(), NO_CIRCLE);
+  } finally { done(); }
+});
+
+test("an unreadable circle layout loads as none and keeps the preferences; the file is left until the next write", () => {
+  const { dir, file, done } = scratch();
+  try {
+    const body = v3({ ...DEFAULT_PREFERENCES, mode: "anti-vibe" }, { lastChosenDisplayId: 7, placements: "everywhere" });
+    writeFileSync(file, body);
+    const settings = DesktopSettings.load(dir);
+    assert.equal(settings.get().mode, "anti-vibe");
+    assert.deepEqual(settings.circle(), NO_CIRCLE);
+    assert.equal(readFileSync(file, "utf8"), body);
+    assert.deepEqual(readdirSync(dir), ["settings.json"], "nothing set aside");
+  } finally { done(); }
+});
+
+test("one placement per display, at most 16; the least recently user-chosen one goes", () => {
+  let layout: CircleLayout = NO_CIRCLE;
+  for (let i = 0; i < 16; i++) layout = withPlacement(layout, placement(`d${i}`, `2026-10-08T10:${String(i).padStart(2, "0")}:00.000Z`));
+  assert.equal(layout.placements.length, 16);
+  assert.equal(layout.lastChosenDisplayId, "d15");
+  // Choosing d0 again refreshes it in place: no eviction.
+  layout = withPlacement(layout, placement("d0", "2026-10-08T11:00:00.000Z", 0.1, 0.9));
+  assert.equal(layout.placements.length, 16);
+  assert.deepEqual(layout.placements.find((p) => p.displayId === "d0"), placement("d0", "2026-10-08T11:00:00.000Z", 0.1, 0.9));
+  layout = withPlacement(layout, placement("new", "2026-10-08T12:00:00.000Z"));
+  assert.equal(layout.placements.length, 16);
+  assert.ok(!layout.placements.some((p) => p.displayId === "d1"), "d1 was the least recently chosen");
+  assert.ok(layout.placements.some((p) => p.displayId === "d0"));
+  assert.equal(layout.lastChosenDisplayId, "new");
 });

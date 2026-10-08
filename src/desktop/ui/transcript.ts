@@ -2,7 +2,7 @@
 
 import type { Entry, Prompt } from "../../store-types.ts";
 import type { ChangeReceipt } from "../../zone-types.ts";
-import { h, icon, plain, type Client } from "./dom.ts";
+import { chip, h, icon, plain, type Client } from "./dom.ts";
 import { portrait } from "./sprites.ts";
 import { diffBody, revertButton } from "./change-view.ts";
 
@@ -64,10 +64,6 @@ export function prose(text: string): HTMLElement {
   }
   endPara();
   return box;
-}
-
-function chip(text: string, tone: "ok" | "warn" | "bad" | "info" | "muted"): HTMLElement {
-  return h("span", { class: `chip chip-${tone}` }, text);
 }
 
 function speech(cls: string, who: "dum" | "wizard" | "you", label: string, ...body: (Node | null)[]): HTMLLIElement {

@@ -2,6 +2,7 @@
 // Pure, so the rules are tested without a window (docs/llm-setup-design.md §4.1-4.4).
 
 import { BACKEND_LOGINS, CLAUDE_DEFAULTS, ROLES } from "../../agent/schema.ts";
+import { RELEASED } from "../../agent/registry.ts";
 import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption, Role, Selector } from "../../agent/types.ts";
 
 /** One backend as the sheet shows it, with only the sign-in methods Dum offers for it. */
@@ -20,10 +21,14 @@ export function methodLabel(method: LoginMethod): string {
   return METHOD_LABELS[method];
 }
 
-/** One row per backend main reports, ready rows first. A method the backend doesn't take is never listed or shown as ready. */
+/**
+ * One row per released backend main reports, ready rows first. An unreleased backend's sign-in is
+ * never offered, and a method the backend doesn't take is never listed or shown as ready.
+ */
 export function backendRows(backends: readonly BackendStatus[]): BackendRow[] {
   const rows: BackendRow[] = [];
   for (const b of backends) {
+    if (!RELEASED[b.id]) continue;
     const offered = BACKEND_LOGINS[b.id];
     const methods = b.methods.filter((m) => offered.includes(m));
     if (!methods.length) continue;

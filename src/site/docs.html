@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>docs — dum intern</title>
-  <meta name="description" content="How Dum works: zones, the skill tree and evidence, voice and keyboard, direct changes with revert, the look, suggested projects, the Wizard, backends and privacy.">
+  <meta name="description" content="How Dum works: the circle and its window, goal alignment, decision cards and handoffs, sessions, trail and story, zones, the skill tree and evidence, voice and keyboard, direct changes with revert, the look, the Wizard, Settings, backends and privacy.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -16,16 +16,27 @@
 <main>
   <h1>Docs</h1>
 
-  <p>Dum is a Mac app that stays on in the menu bar. It follows what you're learning across a
-     tree of zones, keeps track of the skills you've shown you have, and writes code when you
-     ask, but only with those skills. The point is that you could take the AI away and still
-     understand the architecture, start implementing, and ask precise questions.</p>
+  <p>Dum is a Mac app you delegate to. It sits on your screen as a small floating circle with
+     Dum's face. It follows what you're learning across a tree of zones, keeps track of the skills
+     you've shown you have, and writes code when you tell it to, but only with those skills. The
+     point is that you could take the AI away and still understand the architecture, start
+     implementing, and ask precise questions.</p>
 
-  <p>Two characters talk to you. Dum is the intern you work with. The Wizard is the advisor
-     who speaks up now and then.</p>
+  <p>The loop goes like this. You say what you need done. Dum checks that you and it agree on
+     what your zone's goal means. The Wizard lays out a few things you could hand off now, and
+     marks the ones you'd have to learn first. You choose one, check the handoff, and press
+     <em>Do this</em>. Dum does it, you review the result, and all of it goes on the session's
+     trail.</p>
+
+  <p>Two characters talk to you. Dum is the intern you work with. The Wizard helps you decide
+     when you're choosing a direction or the next thing to hand off. It doesn't chime in
+     otherwise.</p>
 
   <ul>
     <li><a href="#start">Getting started</a></li>
+    <li><a href="#circle">The circle and the window</a></li>
+    <li><a href="#delegating">Delegating</a></li>
+    <li><a href="#context">Current context, sessions and the story</a></li>
     <li><a href="#zones">Zones</a></li>
     <li><a href="#skills">Skills and evidence</a></li>
     <li><a href="#talking">Talking to Dum</a></li>
@@ -33,6 +44,7 @@
     <li><a href="#look">The look</a></li>
     <li><a href="#projects">Suggested projects</a></li>
     <li><a href="#wizard">The Wizard</a></li>
+    <li><a href="#settings">Settings and debug chat</a></li>
     <li><a href="#backends">Who powers Dum</a></li>
     <li><a href="#privacy">Privacy</a></li>
   </ul>
@@ -42,22 +54,170 @@
   <p>See <a href="/install">installation</a>. Dum needs macOS 13 or later. Voice needs macOS 14
      or later on Apple Silicon; everything else works from the keyboard on Intel too.</p>
 
-  <p>Dum has no Dock icon. It lives in the menu bar, where its icon is Dum's own face. The menu
-     has <em>Ask Dum…</em>, <em>Open Panel</em>, <em>Switch Zone</em>, <em>Start Voice</em>,
-     <em>Send Draft</em>, <em>Pause the Look</em> and <em>Quit Dum</em>.</p>
-
-  <p>On first launch Dum asks <em>What are you trying to learn?</em> Type an answer or say it.
-     It becomes your first zone: the answer is the zone's goal, and its first 80 characters are
-     the name, which you can change later. Nothing is sent to a model for this.</p>
+  <p>Dum has no Dock icon and no menu bar icon. On first launch its window opens and asks
+     <em>What are you trying to learn?</em> Type an answer or say it. It becomes your first zone:
+     the answer is the zone's goal, and its first 80 characters are the name, which you can change
+     later. Nothing is sent to a model for this.</p>
 
   <p>Because the look is on by default, macOS asks for Screen Recording permission the first time
-     Dum starts. You can say no; see <a href="#look">the look</a> for what changes.</p>
+     Dum looks. You can say no; see <a href="#look">the look</a> for what changes.</p>
 
   <p>Next, Dum needs someone to power it. A banner says <em>Dum isn't powered yet</em> with a
      <em>Who powers Dum?</em> button. Zones, skills, notes and commands like <code>:tree</code>
-     work without a backend. Messages to Dum, <code>:projects</code> and <code>:submit</code>
-     don't. If you send a message first, it stays in the box until you've picked one. See
-     <a href="#backends">who powers Dum</a>.</p>
+     work without a backend. Messages to Dum, goal alignment, decision cards,
+     <code>:projects</code> and <code>:submit</code> don't. Your goal is kept, and alignment picks
+     up once Dum is powered. See <a href="#backends">who powers Dum</a>.</p>
+
+  <h2 id="circle">The circle and the window</h2>
+
+  <p>The circle floats above your other apps, on every Space. Click it to open Dum's window
+     beside it. Click it again while the window is focused to hide the window. The
+     <em>Open Dum</em> shortcut, <code>⌘⇧D</code> by default, does the same from anywhere.</p>
+
+  <p>Drag the circle to move it. Dum remembers one spot per display and puts the circle back
+     there next time. The window always opens next to the circle, on the same display. To move the
+     circle without a mouse, use <em>Move circle</em> in the Chat header: the arrow keys move it 10
+     points, Shift and an arrow 1 point, <code>Return</code> keeps it there and <code>Esc</code>
+     puts it back. You can also pick a display from the list.</p>
+
+  <p>The face tells you what Dum is doing: idle, looking, thinking, listening while you talk, or
+     a <code>!</code> badge when something needs you, such as a decision waiting, a rejected API
+     key, a voice error, or Dum's background process having stopped. A dashed ring means the look
+     is paused. The circle is a labeled button, and its label says the same thing in words.</p>
+
+  <p>There's one window, and it has three parts, top to bottom.</p>
+
+  <ul>
+    <li><strong>Zones.</strong> The active zone's path: click it, or press <code>⌘K</code>, to
+        switch zones. <em>Manage</em> shows the zone tree with its tools. Then
+        <em>Settings</em> and <em>Hide</em>.</li>
+    <li><strong>Current context.</strong> What Dum is working from right now. See
+        <a href="#context">current context</a>.</li>
+    <li><strong>Chat.</strong> The conversation, the decision and handoff cards, and the message
+        box. Its header has <em>Mode</em>, the <em>Skills / Records</em> menu and <em>Move
+        circle</em>. Settings, Skills, the records and the story open inside Chat; <em>Back</em>
+        returns to the conversation and to where you were.</li>
+  </ul>
+
+  <p>Switching to another app hides the window. <code>Esc</code> or <code>⌘W</code> hides it and
+     gives focus back to the app you were in. Your draft stays.</p>
+
+  <h2 id="delegating">Delegating</h2>
+
+  <h3>Goal alignment</h3>
+
+  <p>Every zone's goal starts with alignment, so you and Dum agree on what it means. It runs when
+     you create a zone with a goal and when you change a zone's goal. Renaming a zone doesn't
+     count. If you edit the goal of a zone you're not in, the alignment card names that zone and
+     leaves the one you're in alone.</p>
+
+  <ol>
+    <li>Dum reflects your goal back as something you want to become able to do.</li>
+    <li>It asks at most two questions, and only ones whose answer changes the plan. Each says why
+        it matters. Answer in the card.</li>
+    <li>The Wizard offers directions to choose from. Each is a learning project or a decision,
+        with the skills it builds, why it advances your goal, its tradeoff, and
+        <em>Based on</em>: the context it used.</li>
+  </ol>
+
+  <p><em>Use this direction</em> or <em>Use my own direction</em> opens a short form: what you'll
+     be able to do, how you'll know it worked, and any assumptions you accept. <em>Agree this
+     direction</em> saves it. <em>Revise</em> asks again; <em>Not now</em> puts it off. Current
+     context shows <em>Alignment needed</em> until you agree one.</p>
+
+  <p>A direction records intent. It writes no file, isn't a schedule, and doesn't let Dum do
+     anything it couldn't before. Chat, Settings and commands you're allowed to give all work
+     without one.</p>
+
+  <h3>Decision cards</h3>
+
+  <p>Say what you need done next and press <em>Help me decide</em>. Dum restates your outcome, may
+     ask a question, and the Wizard compares two or three ways to get there. Each option names the
+     task, the expected result, what you'll review, the skills it needs, why it helps and its
+     tradeoff, and what it's based on. Dum, not the model, checks each option against your skills
+     and labels it:</p>
+
+  <ul>
+    <li><strong>Can delegate now.</strong> <em>Choose</em> turns it into a handoff.</li>
+    <li><strong>Learn first.</strong> It needs a skill you haven't proven yet. <em>Suggest a
+        project to learn it</em> asks for <a href="#projects">suggested projects</a> for that
+        skill.</li>
+    <li><strong>Needs a detail.</strong> Something it can't guess. <em>Give this detail</em>
+        puts you in the message box.</li>
+  </ul>
+
+  <p><em>Revise</em> asks again, <em>Use my own plan</em> puts you in the message box, and
+     <em>Dismiss</em> clears the card. A dismissed card doesn't come back until you ask again. You
+     can always ignore the cards and type your own request.</p>
+
+  <h3>The handoff</h3>
+
+  <p>Choosing an option makes a handoff card with three fields: <em>Task</em>, <em>Expected
+     result</em> and <em>What you'll review</em>. Choosing writes nothing. <em>Edit</em> changes the
+     fields, <em>Dismiss</em> drops it, and <em>Do this</em> tells Dum to do it.</p>
+
+  <ul>
+    <li>Nothing runs until you press <em>Do this</em>, and a handoff runs once.</li>
+    <li>If your goal, direction, notes or session changed since you chose it, the card says
+        <em>Needs refresh</em>; <em>Refresh handoff</em> rebinds it to what's current.</li>
+    <li>If the message box has unsent text, the card says so. <em>Do this</em> never sends it
+        along.</li>
+    <li>Every file Dum writes goes through the same gate and save check as any other
+        <a href="#changes">change</a>. A skill taken back after you chose stops it.</li>
+    <li><code>⌘.</code> stops it. Changes already made stay listed with Revert.</li>
+  </ul>
+
+  <h3>Review</h3>
+
+  <p>When it's done the card shows what happened and each change's diff, with <em>Revert</em> and
+     <em>open the change record</em>. <em>Reviewed…</em> asks whether it met the expected result
+     and saves your verdict on the session's trail. A verdict can be that it didn't help. It never
+     counts as evidence of a skill.</p>
+
+  <h2 id="context">Current context, sessions and the story</h2>
+
+  <p>Current context sits between Zones and Chat and shows what Dum is working from.</p>
+
+  <ul>
+    <li><strong>The look</strong>: watching, checking, not looking, no backend or call failed,
+        with <em>Pause</em>/<em>Resume</em> and <em>Details</em>.</li>
+    <li><strong>Your goal</strong> and the agreed direction, or <em>Alignment needed</em>, with
+        <em>Revise</em> or <em>Align now</em>.</li>
+    <li><strong>Using</strong>: what the current request draws on, and what the look saw last and
+        when. <em>Inspect</em> lists each source, used or left out. <em>Correct</em> has <em>Edit
+        goal</em>, <em>Zone notes</em>, <em>Revise direction</em>, <em>Open memory to edit</em>,
+        <em>Reload context</em>, <em>Ignore this observation</em>, personal background and
+        followed folders. A correction changes what the next decision uses; it doesn't erase the
+        trail, and a ready handoff then needs a refresh.</li>
+    <li><strong>This session</strong>: the trail so far, and what you can delegate now and what
+        to learn next.</li>
+    <li><em>This session</em>, <em>Full story</em>, <em>Context / followed folders</em> and
+        <em>New session</em>.</li>
+  </ul>
+
+  <h3>Sessions</h3>
+
+  <p>A session is one stretch of work in one zone. It starts when you're active in the zone and
+     ends when you leave the zone, press <em>New session</em>, quit, or go 30 minutes without
+     activity. Changing what Dum works from also starts a new one: the mode, the backend, the
+     zone's goal, language or notes, personal context, an agreed direction, or a correction.</p>
+
+  <h3>The trail</h3>
+
+  <p>A trail is the skills a session visited, in order. Coming back to a skill after leaving it
+     is a new visit, marked as a revisit. A line between two visits means "came next", not "is a
+     prerequisite of". Agreed directions and each handoff step (commanded, then done, blocked,
+     failed, cancelled or interrupted, then reviewed) are marked on it. Something Dum couldn't
+     place on your tree shows as a gap;
+     <em>Map to skill</em> lets you place it. Select a visit to see its sources. A visit isn't
+     credit: only <a href="#skills">evidence</a> moves a skill.</p>
+
+  <h3>The story</h3>
+
+  <p><em>Full story</em> lists your sessions newest first, for this zone or for <em>All
+     zones</em>, filtered by skill and by date. Open a session to see its trail and the direction
+     that was in force. The story is a cache over the saved sessions, kept in
+     <code>~/.dum/zones/&lt;zone&gt;/story/</code>, and the sessions stay the record.</p>
 
   <h2 id="zones">Zones</h2>
 
@@ -68,24 +228,24 @@
     <li>Each zone has a name, a goal in your words, and an optional language. Leave the language
         empty and the zone uses its parent's.</li>
     <li>Zones nest, up to 16 levels deep. Names must differ between siblings.</li>
-    <li>The <em>Zones</em> tab has <em>New zone</em>, and for the selected zone <em>Enter</em>,
-        <em>New zone inside</em>, <em>Edit</em> and <em>Delete</em>. There's no way to move a
-        zone to a new parent.</li>
-    <li>The <em>Context</em> tab holds <em>Notes for this zone</em>: background Dum reads in this
-        zone and the zones inside it, up to 16 KiB per zone. Notes are context. They never unlock
-        a skill or give Dum access to a file.</li>
+    <li><em>Manage</em> shows the tree with <em>New zone</em>, and for the selected zone
+        <em>Enter</em>, <em>Inside</em> (a new zone inside it), <em>Edit</em> and <em>Delete</em>.
+        There's no way to move a zone to a new parent.</li>
+    <li><em>Skills / Records</em> → <em>Context</em> holds <em>Notes for this zone</em>: background
+        Dum reads in this zone and the zones inside it, up to 16 KiB per zone. Notes are context.
+        They never unlock a skill or give Dum access to a file.</li>
   </ul>
 
-  <p>Entering a zone makes it the active context. Do it from the Zones tab, with
-     <code>⌘K</code> in the command bar, or from <em>Switch Zone</em> in the menu bar. Switching
-     stops whatever Dum was doing in the old zone. Earlier conversation in the new zone comes
-     back as history; a question Dum asked last time isn't waiting for an answer any more.</p>
+  <p>Entering a zone makes it the active context. Do it from the tree or with <code>⌘K</code>.
+     Switching stops whatever Dum was doing in the old zone and ends its session. Earlier
+     conversation in the new zone comes back as history; a question Dum asked last time isn't
+     waiting for an answer any more.</p>
 
   <p>A zone inherits its ancestors' goals, nearest language and notes, up to
      64 KiB of notes in total, keeping the nearest zones first. It doesn't inherit their
-     conversation, memory, suggested projects, change history or followed folders. Those belong
-     to one zone. Your skills belong to none: there's one tree, and a skill you prove in one zone
-     counts in all of them.</p>
+     conversation, memory, direction, handoffs, sessions, suggested projects, change history or
+     followed folders. Those belong to one zone. Your skills belong to none: there's one tree, and
+     a skill you prove in one zone counts in all of them.</p>
 
   <p>Deleting a zone also deletes the zones inside it. Your skills, memory notes and evidence
      stay, and the zone's files stay on disk in <code>~/.dum/zones/</code> for you to look at.</p>
@@ -96,9 +256,9 @@
      read, edit or delete them; they open in Obsidian. A skill is scoped to a language or to
      none, so <code>printing</code> in Python doesn't count in Go.</p>
 
-  <p>The <em>Skills</em> tab shows curated tracks: basics for C, C++, Go, Java, JavaScript,
-     Python, Rust and TypeScript, plus graphics, interview, systems and a language-free builder
-     track. Each skill shows as built, recognized, open (everything under it is built) or
+  <p><em>Skills / Records</em> → <em>Skills</em> shows curated tracks: basics for C, C++, Go, Java,
+     JavaScript, Python, Rust and TypeScript, plus graphics, interview, systems and a language-free
+     builder track. Each skill shows as built, recognized, open (everything under it is built) or
      locked. Skills you add that aren't on a track still get up to three mapped prerequisites.</p>
 
   <h3>Recognize, build, apply</h3>
@@ -116,9 +276,9 @@
         same reasoning without a build only records recognition.</li>
   </ul>
 
-  <p>Screens, files Dum reads, suggestions, memory, zone notes and code Dum wrote never count as
-     evidence. A saved file doesn't prove you wrote it; your own yes does, and it can be wrong.
-     Reviews are model judgments, so check them.</p>
+  <p>Screens, files Dum reads, suggestions, memory, zone notes, trail visits, handoff reviews and
+     code Dum wrote never count as evidence. A saved file doesn't prove you wrote it; your own yes
+     does, and it can be wrong. Reviews are model judgments, so check them.</p>
 
   <p>You can also add a skill you already have with <code>:skill name</code> or
      <code>:skill name in python</code>. That records a self-report that you can write it unaided,
@@ -132,9 +292,9 @@
      as concepts. Every prerequisite under a skill has to hold too, so if you take an early rung
      back, the skills that rest on it lock again, though their notes stay.</p>
 
-  <p>The <em>Boundary</em> tab, or <code>:boundary</code>, shows what Dum may do right now: what
-     it may write, what it may use as a tool, what's closed, and which files it may read and
-     change.</p>
+  <p><em>Skills / Records</em> → <em>Boundary</em>, or <code>:boundary</code>, shows what Dum may do
+     right now: what it may write, what it may use as a tool, what's closed, and which files it may
+     read and change.</p>
 
   <h3>"not yet"</h3>
 
@@ -143,40 +303,34 @@
      back to where it was, and Dum holds it there across zones and restarts. Only a reviewed
      unaided build or a <code>:skill</code> self-report lifts the hold.</p>
 
-  <p>The strip at the top of the panel reads newbie, intern, good and cracked at 0, 8, 24 and 64
+  <p>The bar at the top of Skills reads newbie, intern, good and cracked at 0, 8, 24 and 64
      built skills with their prerequisites intact. Messages and recognition don't move it. It's a
      joke label, not a rating.</p>
 
   <h2 id="talking">Talking to Dum</h2>
 
-  <p>There are three surfaces, all sharing one conversation and one draft per zone.</p>
-
-  <ul>
-    <li><strong>The panel</strong> has the tabs: Conversation, Zones, Skills, Memory, History,
-        Context, Evidence, Boundary, Suggested projects, Changes and Settings. Closing it hides
-        it.</li>
-    <li><strong>The command bar</strong> opens with <code>⌘⇧D</code> in the middle of the screen
-        your cursor is on. Type a message or a command, see the latest reply, switch zones with
-        <code>⌘K</code>, or jump to a panel tab. <code>Esc</code> closes it and gives focus back to
-        the app you were in. Your draft stays.</li>
-    <li><strong>The bubble</strong> appears near your cursor when you use voice. It shows what
-        you said and Dum's reply. You can't click it; clicks go through to whatever is under
-        it.</li>
-  </ul>
+  <p>Type in the message box at the bottom of Chat. <code>Return</code> sends. The box has
+     <em>Share</em>, <em>Voice</em>, <em>Stop</em> and <em>Send</em>. There's one conversation and
+     one draft per zone.</p>
 
   <h3>Voice</h3>
 
   <p>Hold <code>⌃⌥Space</code> and talk; let go to stop. Speech is turned into text on your Mac
      by a bundled copy of OpenSuperWhisper, set up under <em>Set up voice</em> in Settings, where
      you allow the microphone and pick a language and a speech model. The text lands in your
-     draft. It never sends itself. The bubble shows it for 20 seconds; press <code>⌘⇧↩</code> to
-     send it, or open the command bar to edit it.</p>
+     draft. It never sends itself.</p>
+
+  <p>The bubble appears near your cursor while you use voice. It shows <em>Listening…</em>, then
+     the draft for 20 seconds; press <code>⌘⇧↩</code> to send it, or open Dum to edit it. Dum's
+     reply to a voice message shows there for a few seconds, up to eight lines, with <em>Open Dum
+     for the full reply</em> when there's more. The full reply is in Chat either way. You can't
+     click the bubble; clicks go through to whatever is under it.</p>
 
   <ul>
     <li>Voice won't start over a draft that isn't empty. Send it, edit it or clear it first.</li>
     <li>A recording stops after two minutes and is thrown away.</li>
     <li>The audio is a temporary file, deleted when transcription finishes or fails.</li>
-    <li>You can also start and stop voice with the <em>Voice</em> button or the menu bar.</li>
+    <li>You can also start and stop voice with the <em>Voice</em> button.</li>
     <li>Voice comes with the packaged app on Apple Silicon. Running Dum straight from a checkout
         with <code>npm run desktop</code> has no voice.</li>
   </ul>
@@ -187,16 +341,17 @@
 
   <ul>
     <li><code>Return</code> sends, <code>Shift-Return</code> adds a line, <code>⌘.</code> stops
-        Dum.</li>
-    <li><code>Esc</code> backs out one step: it closes an open chooser first, then the command
-        bar. In the panel it goes back to Conversation, then hides the panel. It never stops Dum
-        or answers a question.</li>
-    <li>Panel tabs: arrow keys move, <code>Home</code> and <code>End</code> jump, Return
-        opens.</li>
+        Dum (or the debug chat, when your focus is in it).</li>
+    <li><code>Esc</code> backs out one step: an open chooser or form first, then an open view such
+        as Settings or Records, then it hides the window. It never stops Dum, answers a question or
+        dismisses a card.</li>
+    <li><code>⌘K</code> switches zones and filters as you type. <code>⌘W</code> hides the
+        window.</li>
     <li>Zone tree: Up and Down move, Right and Left open and close, Return enters,
         <code>F2</code> edits.</li>
-    <li>The <code>⌘K</code> switcher filters as you type.</li>
-    <li>The three global shortcuts (command bar, hold to talk, send the draft) can be changed in
+    <li>The trail: arrow keys move between visits, <code>Home</code> and <code>End</code>
+        jump.</li>
+    <li>The three global shortcuts (Open Dum, Hold to talk, Send the draft) can be changed in
         Settings. Each needs <code>⌘</code>, <code>⌃</code> or <code>⌥</code>.</li>
   </ul>
 
@@ -230,16 +385,18 @@
     <li><code>:help</code>: this list.</li>
   </ul>
 
-  <p><em>Mode</em> in Settings is <em>understand</em> or <em>anti-vibe</em>. Both use the same
-     gate. Anti-vibe asks for your approach first, then Dum does the unlocked parts.</p>
+  <p><em>Mode</em> in the Chat header is <em>understand</em> or <em>anti-vibe</em>. Both use the
+     same gate. Anti-vibe asks for your approach first, then Dum does the unlocked parts.</p>
 
-  <p class="note">Voice, giving focus back to your previous app, and the bubble floating over
-     full-screen apps use macOS APIs that haven't been tried on a real Mac yet.</p>
+  <p class="note">Voice, the circle's click-through corners and dragging, giving focus back to
+     your previous app, and the circle and bubble over full-screen apps and other Spaces use macOS
+     APIs that haven't been tried on a real Mac yet.</p>
 
   <h2 id="changes">Changes</h2>
 
-  <p>Ask Dum to change a file and, if you hold the skills, it writes the change straight into the
-     file. There's no yes/no step. You see the diff afterward, with a <em>Revert</em> button.</p>
+  <p>Ask Dum to change a file, or hand it off, and if you hold the skills it writes the change
+     straight into the file. There's no yes/no step. You see the diff afterward, with a
+     <em>Revert</em> button.</p>
 
   <ul>
     <li>Dum only writes files you shared with the message or that sit in a folder you follow in
@@ -252,10 +409,10 @@
     <li>A new file is never created over one that appeared in the meantime. Yours is kept.</li>
   </ul>
 
-  <p>The diff shows in the conversation, and the <em>Changes</em> tab lists every change in the
-     zone, newest first. <em>Revert</em> puts the file back the way it was, or deletes a file Dum
-     created. It works after the share has ended. If you've edited the file since Dum wrote it,
-     Revert refuses and your edits stay.</p>
+  <p>The diff shows in the conversation or on the handoff card, and <em>Skills / Records</em> →
+     <em>Changes</em> lists every change in the zone, newest first. <em>Revert</em> puts the file
+     back the way it was, or deletes a file Dum created. It works after the share has ended. If
+     you've edited the file since Dum wrote it, Revert refuses and your edits stay.</p>
 
   <p>Each change is kept in <code>~/.dum/zones/&lt;zone&gt;/changes/</code> with the file before,
      after, and the full patch. <em>open the change record</em> opens the patch.</p>
@@ -275,8 +432,10 @@
     <li><strong>Apps</strong>: which app is in front, its name and window number. Not window
         titles.</li>
     <li><strong>Screen</strong>: a 320-pixel-wide image of the display your cursor is on, shrunk
-        to a 64 × 40 grid of gray levels and compared with the last one. Only the number of
-        changed cells leaves the main app process. The image isn't kept or saved.</li>
+        to a 64 × 40 grid of gray levels and compared with the last one. Cells covered by Dum's own
+        circle, window or bubble are skipped, so the circle moving or animating doesn't count.
+        Only the number of changed cells leaves the main app process. The image isn't kept or
+        saved.</li>
     <li><strong>Followed folders</strong>: whether any file's size or timestamps changed. A file
         that changed is read in full. New files are picked up about every 15 seconds.</li>
   </ul>
@@ -296,20 +455,23 @@
   <h3>What one call sends</h3>
 
   <p>Each call starts fresh. When the screen changed, your look model gets one fresh picture of
-     the display your cursor is on, 1280 pixels wide, and a line about what it saw last, never
-     older pictures. The zone's context goes too. A saved file adds its diff, and an app switch
-     adds the app's name. Nothing you type or copy is sent.</p>
+     the display your cursor is on, 1280 pixels wide, with Dum's own windows painted out, and a
+     line about what it saw last, never older pictures. The zone's context goes too. A saved file
+     adds its diff, and an app switch adds the app's name. Nothing you type or copy is sent.</p>
 
   <h3>What it keeps</h3>
 
   <ul>
-    <li>The latest observation, in memory only. The look status shows it as <em>last saw: …</em>.
-        It isn't saved.</li>
+    <li>The latest observation, in memory only. Current context shows it as <em>last seen</em>,
+        with its time. It isn't saved.</li>
     <li>A short note in the zone's memory, only when what you're doing meaningfully changes: at
         most one a minute, and never one that nearly repeats the last five.</li>
+    <li>The skills it noticed you working on, as visits on the session's
+        <a href="#context">trail</a>. A guess it isn't sure of becomes a gap, never a visit, and
+        none of it counts as evidence.</li>
   </ul>
 
-  <p>Nothing else. The look doesn't publish advice.</p>
+  <p>The look doesn't publish advice.</p>
 
   <h3>The caps</h3>
 
@@ -323,40 +485,34 @@
     <li>Up to four file diffs and 96 KiB per call. A frame over 3.75 MB isn't sent.</li>
   </ul>
 
+  <p>Look calls are billed to your own API key, like every other call. Dum doesn't estimate the
+     cost.</p>
+
   <h3>When it doesn't call</h3>
 
   <p>No call and no frame while the look is paused, while it's blocked (Dum is answering you or
-     waiting on your answer, or there's no zone yet), without a backend, while a Dum window is in
-     front, or with the screen look off. With the screen look off, saved files and app switches
-     still call, without a picture.</p>
-
-  <h3>Cost</h3>
-
-  <p>An estimate, not a bill: with the default look model, Claude <code>haiku</code>, about $0.25
-     per active hour at 1,200 calls an hour, or about $5 a month at 5 hours a week. It's billed
-     to your own Anthropic API key. The estimate uses Haiku 5.5 prices: $0.10 per million input
-     tokens for prompts up to 100k, $0.50 per million output tokens and $0.01 per million
-     cache-read tokens. A 1280 × 800 frame is ⌈1280/28⌉ × ⌈800/28⌉ = 46 × 29 = 1,334 visual
-     tokens. A still screen makes no calls.</p>
+     waiting on your answer, you're recording voice, the Mac is asleep or locked, or there's no
+     zone yet), without a backend, while a Dum window is in front, or with the screen look off.
+     With the screen look off, saved files and app switches still call, without a picture.</p>
 
   <h3>Screen look and permission</h3>
 
   <p>Settings → <em>Look</em> has two switches, <em>Apps</em> and <em>Screen</em>, both on in a new
-     install. The screen look needs macOS Screen Recording permission, which macOS asks for on
-     first launch. If you say no, Dum looks at app switches and saved files only, until you allow
-     it under <em>Screen Recording settings</em>.</p>
+     install, with the Screen Recording status and an <em>Open Screen Recording settings</em>
+     button. If you say no to the permission, Dum looks at app switches and saved files only, until
+     you allow it.</p>
 
   <h3>Pausing</h3>
 
-  <p>Pause from the menu bar (<em>Pause the Look</em>), the <em>looking</em> pill at the top of
-     the panel, or Settings. It stays paused until you resume or restart Dum. The look also
-     stops while you're recording voice and while the Mac sleeps or is locked.</p>
+  <p>Pause and Resume are next to the look's status in Current context. It stays paused until you
+     resume or restart Dum. While it's paused the circle shows a dashed ring.</p>
 
   <h3>Followed folders</h3>
 
-  <p>Settings → <em>Followed folders</em> → <em>Follow a folder…</em> picks a folder for this
-     zone. Dum may read the saved files in it, notices when you save, and can write
-     <a href="#changes">changes</a> there. Up to eight folders per zone.</p>
+  <p><em>Skills / Records</em> → <em>Context</em> → <em>Follow a folder…</em> picks a folder for
+     this zone. Current context has a shortcut to it. Dum may read the saved files in it, notices
+     when you save, and can write <a href="#changes">changes</a> there. Up to eight folders per
+     zone.</p>
 
   <ul>
     <li>Only text files up to 256 KiB are read, up to 2,000 files per folder.</li>
@@ -370,69 +526,113 @@
         followed.</li>
   </ul>
 
-  <p>Without a backend Dum still watches, sends nothing, and the status says advice needs a
-     backend.</p>
+  <p>Without a backend Dum still watches and sends nothing, and the look's status says
+     <em>no backend</em>.</p>
 
   <p class="note">Noticing app switches, the Screen Recording prompt, the 1280-pixel capture on
-     Retina displays and the real cost per hour haven't been tried on a real Mac yet.</p>
+     Retina displays, masking Dum's windows out of real captures, and the real cost per hour
+     haven't been tried on a real Mac yet.</p>
 
   <h2 id="projects">Suggested projects</h2>
 
-  <p>Dum doesn't run courses or quizzes. When you want practice it suggests projects that fit a
-     skill's scope and your zone.</p>
+  <p>Dum doesn't run courses or quizzes. When you want practice, or an option says <em>Learn
+     first</em>, it suggests projects that fit a skill's scope and your zone.</p>
 
   <ul>
     <li><code>:projects new</code> suggests projects for this zone; <code>:projects recursion</code>
-        sizes them to one skill. Add <code>in go</code> for a language. The Skills tab has a
-        <em>suggest projects</em> button on each skill.</li>
+        sizes them to one skill. Add <code>in go</code> for a language. Skills has a <em>suggest
+        projects</em> button on each skill, and <em>Skills / Records</em> → <em>Suggested
+        projects</em> has <em>Suggest projects for this zone</em>.</li>
     <li>Each project says what done means, roughly how many active hours it takes, how hard it is,
         why it fits, and an ordered list of milestones, prerequisites first.</li>
     <li>Projects are sorted by estimated time, then difficulty. A second model call checks each
         one covers what it claims; up to four come back.</li>
     <li>Suggestions use the zone's goal and notes, your tree, the zone's memory, and your personal
         context file if you turned it on in Settings.</li>
-    <li><code>:projects start p1</code> marks one you're working on. The Wizard keeps its asides to
-        itself until you <code>:projects stop</code> or pass every milestone unaided.</li>
+    <li><code>:projects start p1</code> marks one you're working on, until you <code>:projects
+        stop</code> or pass every milestone unaided.</li>
     <li><code>:submit p1 main.go --unaided</code> hands in your work, as does <em>Hand it in</em> in
-        the Suggested projects tab. Each milestone is reviewed on its own, in prerequisite order.
-        Without <code>--unaided</code>, or the <em>I wrote this myself</em> box, you get the review
-        but no build credit.</li>
+        Suggested projects. Each milestone is reviewed on its own, in prerequisite order. Without
+        <code>--unaided</code>, or the <em>I wrote this myself</em> box, you get the review but no
+        build credit.</li>
   </ul>
 
   <p>Choosing or starting a project unlocks nothing. Time estimates are model guesses.</p>
 
   <h2 id="wizard">The Wizard</h2>
 
-  <p>The Wizard is the advisor. It speaks up during a conversation when it suspects a concrete
-     mistake, at most once per request. Most of the time it says nothing.</p>
+  <p>The Wizard helps you decide. It speaks at goal alignment and when you press <em>Help me
+     decide</em>, as cards in Chat. It doesn't teach, quiz, review your code or post tips you
+     didn't ask for. Dum owns the outcome and the handoff; the Wizard lays out the choices and their
+     tradeoffs, and you choose.</p>
 
-  <p>When it cites something, the claim and the link come from a fixed catalog of primary sources:
-     Git, SQLite, Python, Node and Effective Go docs, the Rust Book, cppreference, MDN and the HTTP
-     RFC. Its own sentence passes a word screen that drops dates, statistics, quotes, unsourced
-     names and claims about what everyone does. The screen is a filter, not a fact-checker. If no
-     source fits, the Wizard stays quiet.</p>
+  <p>It can only cite context Dum gave it, shown under <em>Based on</em>, and only skills from your
+     tree. When it backs a tradeoff with an outside fact, the claim and the link come from a fixed
+     catalog of primary sources: Git, SQLite, Python, Node and Effective Go docs, the Rust Book,
+     cppreference, MDN and the HTTP RFC. Its own sentences pass a word screen that drops dates,
+     statistics, quotes, unsourced names and claims about what everyone does. The screen is a
+     filter, not a fact-checker. Whether an option can be delegated is decided by Dum's gate, not
+     by the Wizard.</p>
+
+  <h2 id="settings">Settings and debug chat</h2>
+
+  <p>Settings opens inside Chat. It has exactly this, top to bottom:</p>
+
+  <ul>
+    <li><strong>Agent</strong>: the backend, the three models and your API key.</li>
+    <li><strong>Look</strong>: the Apps and Screen switches, Screen Recording status and
+        <em>Open Screen Recording settings</em>.</li>
+    <li><strong>Shortcuts</strong>: Open Dum, Hold to talk and Send the draft. Click a field and
+        press the new shortcut.</li>
+    <li><strong>Open at login</strong>: starts the circle and Dum's host, not the window.</li>
+    <li><strong>Use personal context</strong>: background about you that shapes decisions and
+        suggested projects, with the files it read. It never adds skills.</li>
+    <li><strong>Set up voice</strong>, with its status.</li>
+    <li><strong>Debug chat</strong>.</li>
+    <li>The version, and <strong>Quit Dum</strong>.</li>
+  </ul>
+
+  <p>The sections start closed, except one that needs fixing: no backend chosen, a shortcut that
+     couldn't be set, or Screen Recording denied. Things that used to live in Settings moved: Mode
+     is in the Chat header, notes and followed folders are in Records → Context, the web tree is
+     in Skills, and Pause is in Current context.</p>
+
+  <h3>Debug chat</h3>
+
+  <p>Debug chat answers questions about Dum itself, like <em>which look model is running?</em> or
+     <em>why didn't the look call just now?</em>. It reads Dum's status, its recent events and a
+     short reference, and nothing else. It can't change settings, zones, files or skills, never
+     sees your zone's conversation, and works with no zone at all. It has <em>Send</em>,
+     <em>Stop</em>, <em>New debug session</em> and <em>Clear</em>.</p>
+
+  <ul>
+    <li>Each Send is one call to your chosen backend. Without one, it says so and opens Agent.</li>
+    <li>The events it reads are kept in memory only: the last 500, 512 KiB, or 30 minutes,
+        whichever is smallest. Keys, tokens and provider error bodies are never recorded, and
+        anything that looks like a key is redacted from your question and the reply.</li>
+    <li>Nothing is saved to disk. A debug session expires after 30 idle minutes.</li>
+  </ul>
 
   <h2 id="backends">Who powers Dum</h2>
 
   <p><em>Who powers Dum?</em> picks the backend and three models: <em>Dum's model</em> for the
-     conversation, the <em>Helper model</em> for the Wizard, screenshots and project suggestions,
-     and the <em>Look model</em> for <a href="#look">the look</a>. All three come from the same
-     backend. The look model has to take pictures. Change them later under Settings →
+     conversation and handoffs, the <em>Helper model</em> for the Wizard, screenshots and project
+     suggestions, and the <em>Look model</em> for <a href="#look">the look</a>. All three come from
+     the same backend. The look model has to take pictures. Change them later under Settings →
      <em>Agent</em>.</p>
 
   <h3>Backends</h3>
 
   <ul>
-    <li><strong>Claude.</strong> Your own Anthropic API key, in every build. There's no
-        subscription sign-in. Defaults are <code>opus</code> at high effort for Dum,
+    <li><strong>Claude.</strong> Your own Anthropic API key, in every build. That's the only way
+        Dum connects to Claude. Defaults are <code>opus</code> at high effort for Dum,
         <code>fable</code> at high effort for the helper and <code>haiku</code> at low effort for
         the look. Dum ships with its own Claude Code, so you don't install anything.</li>
     <li><strong>On this Mac.</strong> Models you run in Ollama or LM Studio. Dum installs neither.
         It finds them on <code>127.0.0.1</code> (ports 11434 and 1234) and won't talk to any other
         address. Ollama cloud models are refused. LM Studio models are text-only in Dum, so they
         can't look at the screen.</li>
-    <li><strong>ChatGPT.</strong> Sign-in with your ChatGPT account is built, but it's switched off
-        in current builds.</li>
+    <li><strong>ChatGPT.</strong> Built, but switched off in current builds.</li>
   </ul>
 
   <p>Model lists come live from the backend. For Claude that means the ids Claude's catalog
@@ -449,28 +649,34 @@
   <p>Your API key is encrypted with Electron's safe storage, which uses the macOS Keychain, and
      kept in Dum's app data, never in settings.</p>
 
-  <p class="note">Key encryption hasn't been tried on a real Mac yet.</p>
+  <p class="note">Key encryption, and the first real picture call to the default look model,
+     haven't been tried on a real Mac yet.</p>
 
   <h2 id="privacy">Privacy</h2>
 
   <h3>What stays on your Mac</h3>
 
   <ul>
-    <li>Your skill tree, zones, conversations, memory, evidence, suggested projects and change
-        records, all as plain files in <code>~/.dum/</code>.</li>
-    <li>Settings and the encrypted API key, in Dum's app data folder.</li>
+    <li>Your skill tree, zones, conversations, memory, evidence, directions, handoffs, sessions,
+        story, suggested projects and change records, all as plain files in
+        <code>~/.dum/</code>.</li>
+    <li>Settings, where the circle sits, and the encrypted API key, in Dum's app data folder.</li>
     <li>Voice: audio and transcription never leave the Mac.</li>
     <li>The look's routine screen samples. Only frames sent with a model call leave, and none are
         saved.</li>
+    <li>Debug events, in memory only.</li>
   </ul>
 
   <h3>What goes to the backend</h3>
 
   <p>Your messages, the zone's goal and notes, your skills and boundary, recent conversation, and
-     the text of files Dum reads from shares and followed folders. For the look: the zone's
+     the text of files Dum reads from shares and followed folders. For goal alignment and decision
+     cards: the goal, the agreed direction, the context they cite (notes, memory, the latest
+     observation, recent conversation) and the skills that could apply. For the look: the zone's
      context, the previous observation in words, the front app's name, diffs of saved files, and
-     one fresh screen frame per call while the screen look is on. For suggestions: your personal
-     context file, if you turned it on.</p>
+     one fresh screen frame per call while the screen look is on. For decisions and suggestions:
+     your personal context file, if you turned it on. For debug chat: your question and Dum's
+     redacted diagnostics, never zone data.</p>
 
   <ul>
     <li><strong>Claude</strong>: sent to Anthropic, through Claude Code, under your own API
@@ -480,9 +686,9 @@
         internet.</li>
   </ul>
 
-  <p>The web tree is off unless you link it under Settings → <em>Web tree</em>. Then only your
-     skills and removals go to that server: no zones, conversations, holds or files. Anyone with
-     the link can see and edit the tree there.</p>
+  <p>The web tree is off unless you link it under Skills → <em>Web tree</em>. Then only your
+     skills and removals go to that server: no zones, sessions, story, conversations, holds or
+     files. Anyone with the link can see and edit the tree there.</p>
 
   <p>Using Dum outside programming? See <a href="/subjects">other subjects</a>.</p>
 

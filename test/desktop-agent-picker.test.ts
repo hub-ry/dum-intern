@@ -27,6 +27,11 @@ test("Claude lists only the API key, and a method the backend doesn't take is ne
   assert.equal(backendRows([status({ id: "claude", methods: ["github"] })]).length, 0);
 });
 
+test("an unreleased backend is never offered, even signed in", () => {
+  const rows = backendRows([status({ id: "chatgpt", methods: ["chatgpt"], ready: "chatgpt" }), status({ id: "copilot", methods: ["github"] }), claude()]);
+  assert.deepEqual(rows.map((r) => r.id), ["claude"]);
+});
+
 test("ready rows sort first and a single ready row is preselected", () => {
   const rows = backendRows([claude(), local({ ready: "none" })]);
   assert.deepEqual(rows.map((r) => r.id), ["local", "claude"]);

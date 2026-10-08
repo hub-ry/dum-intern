@@ -2,17 +2,13 @@
 
 import type { Registry } from "./agent/registry.ts";
 import type { Picture, Role } from "./agent/types.ts";
-import type { RequestBinding } from "./share-types.ts";
-import type { ZoneContext } from "./zone-types.ts";
 
 export type Opts = {
   agent: Registry;
   /** Whose model answers: the helper, or the look's model for live looks. */
   role: Exclude<Role, "intern">;
-  /** The zone's empty runtime/ directory. Never the process's own working directory. */
+  /** An empty runtime directory. Never the process's own working directory. */
   cwd: string;
-  zone: ZoneContext;
-  binding: RequestBinding;
   /** Pictures that go with the prompt. Refused when the role's model can't be sent pictures. */
   images?: readonly Picture[];
   /** Stops the call wherever it is: opening the session or waiting on the reply. */
@@ -40,8 +36,6 @@ export async function oneShot(prompt: string, o: Opts): Promise<string> {
   try {
     const session = await backend.open({
       cwd: o.cwd,
-      zone: o.zone,
-      binding: o.binding,
       systemPrompt: SYSTEM,
       selector,
       login: choice.login,

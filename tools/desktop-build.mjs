@@ -10,12 +10,13 @@ await Promise.all([
   cp('src/art', 'dist/art', { recursive: true }),
   cp('src/desktop/ui/index.html', 'dist/desktop/ui/index.html'),
   cp('src/desktop/ui/style.css', 'dist/desktop/ui/style.css'),
-  build({ entryPoints: ['src/desktop/preload.ts'], outfile: 'dist/desktop/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
-  build({ entryPoints: ['src/desktop/bubble-preload.ts'], outfile: 'dist/desktop/bubble-preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
+  cp('src/desktop/ui/circle.css', 'dist/desktop/ui/circle.css'),
+  ...['preload', 'circle-preload', 'bubble-preload'].map((name) =>
+    build({ entryPoints: [`src/desktop/${name}.ts`], outfile: `dist/desktop/${name}.cjs`, bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' })),
   build({ entryPoints: ['src/desktop/ui/renderer.ts'], outfile: 'dist/desktop/ui/renderer.js', bundle: true, platform: 'browser', format: 'iife', loader: { '.txt': 'text' }, target: 'chrome144' }),
 ]);
-await rm('dist/desktop/preload.js', { force: true });
-await rm('dist/desktop/bubble-preload.js', { force: true });
+// tsc also emitted each preload as an ES module; only the bundled .cjs is loaded.
+await Promise.all(['preload', 'circle-preload', 'bubble-preload'].map((name) => rm(`dist/desktop/${name}.js`, { force: true })));
 
 // Reuse Dum's original portrait for the app icon.
 const { parse } = await import('../dist/art-parser.js');

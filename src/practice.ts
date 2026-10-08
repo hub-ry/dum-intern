@@ -19,7 +19,7 @@ import { IdSchema, SHARE_LIMITS } from "./share-types.ts";
 import { Cancelled, type Store } from "./store.ts";
 import type { Evidence, Origin } from "./evidence.ts";
 import type { Registry } from "./agent/registry.ts";
-import type { RequestBinding, ResourcePath, Resources, SourceSnapshot } from "./share-types.ts";
+import type { ResourcePath, Resources, SourceSnapshot } from "./share-types.ts";
 import type { ZoneContext, ZoneId } from "./zone-types.ts";
 
 export type Verdict = { passed: boolean; feedback: string };
@@ -73,8 +73,8 @@ export const USAGE = [
   ":projects new [in <lang>]        suggest projects for this zone, shorter estimates first",
   ":projects <skill> [in <lang>]    suggest projects sized to one skill",
   ":projects <id>                   show a saved project (p1, p2, ...)",
-  ":projects start <id>             you're building it now: the Wizard keeps its asides to",
-  "                                 itself until you :projects stop or every target passes",
+  ":projects start <id>             mark it as the one you're building now, until you",
+  "                                 :projects stop or every target passes",
   ":submit <id> <file> [<file>...] [--unaided]",
   "                                 review a project, target by target, against files you",
   "                                 shared with this request; quote names with spaces.",
@@ -359,18 +359,6 @@ function load(home: string, zoneId: ZoneId): Saved {
   return saved.data;
 }
 
-/**
- * Whether they're building one of this zone's suggested projects right now, so the Wizard
- * publishes nothing. An unreadable file counts as yes: no aside is safer than an answer.
- */
-export function active(home: string, zoneId: ZoneId): boolean {
-  try {
-    return load(home, zoneId).active !== null;
-  } catch {
-    return true;
-  }
-}
-
 export class Practice {
   private readonly home: string;
   private readonly origin: Origin;
@@ -385,7 +373,6 @@ export class Practice {
     /** Their personal context as resolved for this request; empty when they opted out. */
     readonly personal: context.Context,
     readonly agent: Registry,
-    readonly binding: RequestBinding,
     /** The helper call. Tests hand in a scripted one; the app always uses oneShot. */
     private readonly ask: typeof oneShot = oneShot,
   ) {
@@ -399,7 +386,7 @@ export class Practice {
   private helped(prompt: string): Promise<string> {
     const cwd = join(this.home, "zones", this.zone.id, "runtime");
     mkdirSync(cwd, { recursive: true, mode: 0o700 });
-    return this.store.helper((signal) => this.ask(prompt, { agent: this.agent, role: "helper", cwd, zone: this.zone, binding: this.binding, signal }));
+    return this.store.helper((signal) => this.ask(prompt, { agent: this.agent, role: "helper", cwd, signal }));
   }
 
   /** `:projects` and its arguments. */
@@ -416,7 +403,7 @@ export class Practice {
       if (!chosen) return `no saved project ${id}. :projects lists them.`;
       if (chosen.state === "passed") return `${id} is already built - every target passed.`;
       this.save({ ...saved, active: id });
-      return `building ${id}: ${chosen.title}. the Wizard keeps its asides to itself until you :projects stop or every target passes. :submit ${id} <file> --unaided when you want a review.`;
+      return `building ${id}: ${chosen.title}. :submit ${id} <file> --unaided when you want a review; :projects stop when you put it down.`;
     }
     if (/^stop$/i.test(a)) {
       if (!saved.active) return "you aren't building a suggested project right now.";

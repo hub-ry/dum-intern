@@ -1,7 +1,8 @@
-// Zones: the learning places. A tree to create, rename, nest and switch in the panel, and a quick
-// switcher for the command bar. Both are keyboard-complete; a zone is context, never permission.
+// Zones: the learning places. The compact tree under the Zones header creates, edits, deletes and
+// enters them, and ⌘K opens the quick switcher. Both are keyboard-complete; a zone is context, never permission.
 
 import type { Snapshot } from "../protocol.ts";
+import type { DirectionView } from "../../delegation-types.ts";
 import type { Zone, ZoneId, ZoneRegistry } from "../../zone-types.ts";
 import { h, icon, type Client } from "./dom.ts";
 
@@ -25,7 +26,14 @@ export function nameFromGoal(goal: string): string {
 
 type Form = { kind: "create"; parentId: ZoneId | null } | { kind: "edit"; id: ZoneId } | { kind: "delete"; id: ZoneId };
 
-/** The Zones pane: a tree with roving focus. Arrows move, Right/Left open and close, Enter enters, F2 edits. */
+export type ZoneTreeOptions = {
+  /** A create or edit came back with that zone's alignment, active or not; `goalSet` when it created the zone or changed its goal. */
+  aligned(view: DirectionView, goalSet: boolean): void;
+  /** A zone's pending alignment badge ("Alignment needed", "deferred"), or "" when there's none to show. */
+  badge(id: ZoneId): string;
+};
+
+/** The compact zone tree, with roving focus. Arrows move, Right/Left open and close, Enter enters, F2 edits. */
 export class ZoneTree {
   readonly el = h("div", { class: "zones" });
   private tree = h("ul", { class: "zone-tree", role: "tree", "aria-label": "Zones" });
@@ -36,19 +44,28 @@ export class ZoneTree {
   private form: Form | null = null;
   private key = "";
 
-  constructor(private client: Client) {
+  constructor(private client: Client, private options: ZoneTreeOptions) {
     this.tree.addEventListener("keydown", (e) => this.onKey(e));
     this.el.append(
-      h("div", { class: "actions" }, h("button", { type: "button", class: "btn", onclick: () => this.open({ kind: "create", parentId: null }) }, icon("plus"), "New zone")),
       this.tree,
       this.tools,
       this.formBox,
-      h("p", { class: "hint" }, "Up and Down move, Right and Left open and close, Enter enters the zone, F2 edits it. A zone is what you're learning, not a folder. Your skills are global and carry across zones."),
+      h("p", { class: "hint zone-keys" }, "Up and Down move, Right and Left open and close, Enter enters, F2 edits. A zone is what you're learning, not a folder; your skills carry across zones."),
     );
   }
 
+  /** Opens the goal and name editor for a zone: Current context's Correct → Edit goal. */
+  edit(id: ZoneId) {
+    this.open({ kind: "edit", id });
+  }
+
+  /** Puts keyboard focus on the current tree item. */
+  focus() {
+    this.focusItem();
+  }
+
   update(s: Snapshot) {
-    const key = JSON.stringify(s.zones) + (this.form ? JSON.stringify(this.form) : "");
+    const key = JSON.stringify(s.zones) + (this.form ? JSON.stringify(this.form) : "") + liveZones(s.zones).map((z) => this.options.badge(z.id)).join("\u0000");
     if (key === this.key) return;
     this.key = key;
     const zones = liveZones(s.zones);
@@ -122,17 +139,19 @@ export class ZoneTree {
         h("span", { class: "zone-twisty", "aria-hidden": "true" }, hasKids ? (this.collapsed.has(z.id) ? "▸" : "▾") : ""),
         h("span", { class: "zone-name" }, z.name),
         active ? h("span", { class: "chip chip-ok" }, "current") : null,
+        this.options.badge(z.id) ? h("span", { class: "chip chip-warn" }, this.options.badge(z.id)) : null,
       );
     });
     this.tree.replaceChildren(...(items.length ? items : [h("li", { class: "muted", role: "none" }, "No zones yet.")]));
     const zone = zones.find((z) => z.id === this.focused);
     this.tools.replaceChildren(
+      h("button", { type: "button", class: "btn small", onclick: () => this.open({ kind: "create", parentId: null }) }, icon("plus"), "New zone"),
       ...(zone
         ? [
-            h("button", { type: "button", class: "btn primary", disabled: zone.id === reg.activeZoneId, onclick: () => void this.enter(zone.id) }, "Enter"),
-            h("button", { type: "button", class: "btn", onclick: () => this.open({ kind: "create", parentId: zone.id }) }, icon("plus"), "New zone inside"),
-            h("button", { type: "button", class: "btn ghost", onclick: () => this.open({ kind: "edit", id: zone.id }) }, icon("pencil"), "Edit"),
-            h("button", { type: "button", class: "btn ghost danger-text", onclick: () => this.open({ kind: "delete", id: zone.id }) }, icon("trash"), "Delete"),
+            h("button", { type: "button", class: "btn small primary", disabled: zone.id === reg.activeZoneId, onclick: () => void this.enter(zone.id) }, "Enter"),
+            h("button", { type: "button", class: "btn small", onclick: () => this.open({ kind: "create", parentId: zone.id }) }, icon("plus"), "Inside"),
+            h("button", { type: "button", class: "btn small ghost", onclick: () => this.open({ kind: "edit", id: zone.id }) }, icon("pencil"), "Edit"),
+            h("button", { type: "button", class: "btn small ghost danger-text", onclick: () => this.open({ kind: "delete", id: zone.id }) }, icon("trash"), "Delete"),
           ]
         : []),
     );
@@ -238,13 +257,15 @@ export class ZoneTree {
       const r = form.kind === "create"
         ? await this.client.call({ type: "zone-create", zone: { ...fields, parentId: form.parentId, focusSkills: [] }, enter: enter.checked })
         : await this.client.call({ type: "zone-update", id: form.id, patch: fields, expectedRevision: reg.revision });
-      if (r.ok) this.escape();
+      if (!r.ok) return;
+      if (r.direction) this.options.aligned(r.direction, form.kind === "create" || fields.goal !== zone?.goal);
+      this.escape();
     });
     return el;
   }
 }
 
-/** The command bar's zone switcher: type to filter, Up/Down to pick, Enter to enter, Esc to close. */
+/** ⌘K's zone switcher: type to filter, Up/Down to pick, Enter to enter, Esc to close. */
 export class ZoneSwitcher {
   readonly el = h("div", { class: "switcher", hidden: true, role: "dialog", "aria-label": "Switch zone" });
   private input = h("input", { class: "input", type: "text", role: "combobox", "aria-expanded": "true", "aria-controls": "zone-options", "aria-autocomplete": "list", placeholder: "Switch to zone…", "aria-label": "Switch to zone" });
@@ -312,7 +333,7 @@ export class ZoneSwitcher {
               x.z.id === reg.activeZoneId ? h("span", { class: "chip chip-ok" }, "current") : null,
             ),
           )
-        : [h("li", { class: "muted" }, "No zone matches. Create zones in the panel.")]),
+        : [h("li", { class: "muted" }, "No zone matches. Create zones with Manage.")]),
     );
     this.input.setAttribute("aria-activedescendant", zones.length ? `zone-option-${this.index}` : "");
     this.list.querySelector(".picked")?.scrollIntoView({ block: "nearest" });

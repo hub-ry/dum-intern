@@ -1,8 +1,9 @@
-// Dum's desktop app. Dum lives in the menu bar (Dum's face) and near the mouse: a hotkey command bar,
-// a push-to-talk bubble at the cursor while it listens or answers, and a full panel. Main owns every
-// operating-system capability, settings and credentials; the sandboxed pages only send the finite
-// requests in protocol.ts, which ipc.ts validates and routes. Main makes no model call: the
-// supervised utility host does all model work.
+// Dum's desktop app (docs/circle-design.md §1-§3, §7). One persistent draggable circle with Dum's face
+// opens one working window (Zones → Current context → Chat); a noninteractive bubble at the cursor
+// shows voice status and replies. No Tray, command bar, separate panel or Dock icon. Main owns every
+// operating-system capability, settings, the circle's placement and credentials; the sandboxed pages
+// only send the finite requests in protocol.ts, which ipc.ts validates and routes. Main makes no
+// model call: the supervised utility host does all model work.
 
 import {
   app,
@@ -19,17 +20,13 @@ import {
   session,
   shell,
   systemPreferences,
-  Tray,
+  type Display,
   type IpcMainInvokeEvent,
-  type MenuItemConstructorOptions,
-  type NativeImage,
   type WebPreferences,
 } from "electron";
-import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { framesFor, parse, type Sprite } from "../art-parser.ts";
 import * as context from "../context.ts";
 import { home } from "../skills.ts";
 import { LOOK } from "../observe-types.ts";
@@ -39,22 +36,28 @@ import { RELEASED } from "../agent/registry.ts";
 import { accessToken, chatgptSetup } from "../agent/siwc.ts";
 import { AgentSetup, credentialSource } from "./agent-setup.ts";
 import { Captures, MAX_PNG_BYTES, type Capturer } from "./capture.ts";
-import { Credentials, safeStorageCipher } from "./credentials.ts";
+import { Credentials, safeStorageCipher, type CredentialKind } from "./credentials.ts";
 import { DictationHelper } from "./dictation.ts";
 import { Drafts } from "./draft.ts";
 import { Focus } from "./focus.ts";
 import { HostController } from "./host-client.ts";
-import { Router, ownedPage, type Native, type Role } from "./ipc.ts";
-import { Observer, type Bitmap } from "./observer.ts";
-import { DesktopSettings } from "./settings.ts";
-import { BUBBLE_MAX, BUBBLE_TTL, Bubble, COMMAND_SIZE, FocusReturn, PANEL_SIZE, placeBubble, placeCentered, reclamp } from "./surfaces.ts";
+import { Router, ownedPage, type Native } from "./ipc.ts";
+import { Observer, type Shot } from "./observer.ts";
+import { DesktopSettings, withPlacement } from "./settings.ts";
+import {
+  BUBBLE_MAX, BUBBLE_TTL, Bubble, CIRCLE, CircleGesture, FocusReturn, WINDOW_SIZE,
+  clampCircle, defaultCircle, fromPlacement, insideDisk, nearestDisplay, placeBubble, placeWindow, reclamp, toPlacement,
+  type DisplayArea, type Rect,
+} from "./surfaces.ts";
 import type { BackendId } from "../agent/types.ts";
-import type { BubbleView, DesktopPreferences, Panel } from "./protocol.ts";
+import type { DiagnosticCode, SanitizedMainEvent, ShortcutProblem } from "../diagnostic-types.ts";
+import type { BubbleView, CircleDisplays, CircleView, DesktopPreferences, Role } from "./protocol.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const INDEX = join(here, "ui", "index.html");
 const INDEX_URL = pathToFileURL(INDEX).href;
 const PRELOAD = join(here, "preload.cjs");
+const CIRCLE_PRELOAD = join(here, "circle-preload.cjs");
 const BUBBLE_PRELOAD = join(here, "bubble-preload.cjs");
 const MAC = process.platform === "darwin";
 /** Apple's own Privacy & Security › Screen Recording pane. */
@@ -66,6 +69,9 @@ const CAPTURE_EDGE = 1568;
 const RESTART_MAX_MS = 30_000;
 /** A host that has run this long has recovered; the next failure starts the pause over. */
 const RESTART_HEALTHY_MS = 60_000;
+const CREDENTIALS: readonly CredentialKind[] = ["anthropic-key", "chatgpt-refresh", "chatgpt-host-id"];
+/** Every Dum surface is visible on every Space and over full-screen apps, without turning Dum into a foreground app. */
+const ALL_SPACES = { visibleOnFullScreen: true, skipTransformProcessType: true } as const;
 
 // A private profile the person or a test chose, such as a clean smoke-test profile. Absolute only.
 const profile = process.env.DUM_DESKTOP_DATA;
@@ -103,26 +109,13 @@ function preferences(preload: string): WebPreferences {
   };
 }
 
-/** Dum's idle face for the menu bar: four device pixels per art pixel, drawn at 2x. */
-function trayIcon(dum: Sprite): NativeImage {
-  const frame = framesFor(dum, "idle")[0]!;
-  const unit = 4;
-  const cols = Math.max(...frame.rows.map((r) => r.length));
-  const width = cols * unit;
-  const height = frame.rows.length * unit;
-  const pixels = Buffer.alloc(width * height * 4);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const hex = dum.palette.get(frame.rows[Math.floor(y / unit)]?.[Math.floor(x / unit)] ?? ".");
-      if (!hex) continue;
-      const at = (y * width + x) * 4;
-      pixels[at] = Number.parseInt(hex.slice(4, 6), 16);
-      pixels[at + 1] = Number.parseInt(hex.slice(2, 4), 16);
-      pixels[at + 2] = Number.parseInt(hex.slice(0, 2), 16);
-      pixels[at + 3] = 255;
-    }
-  }
-  return nativeImage.createFromBitmap(pixels, { width, height, scaleFactor: 2 });
+/** One of main's sanitized facts for the diagnostics ring: codes only, never prose or identifiers. */
+function mainEvent(kind: SanitizedMainEvent["kind"], outcome: SanitizedMainEvent["outcome"], reason: DiagnosticCode): SanitizedMainEvent {
+  return { kind, role: null, requestId: null, checkId: null, outcome, reason, latencyMs: null, httpStatus: null };
+}
+
+function sameRect(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 async function start(): Promise<void> {
@@ -130,7 +123,7 @@ async function start(): Promise<void> {
   session.defaultSession.setPermissionRequestHandler(deny);
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setDevicePermissionHandler(() => false);
-  // A menu bar app: no Dock icon, no app switcher entry.
+  // The circle is the entry point: no Dock icon, no app switcher entry.
   if (MAC) app.dock?.hide();
 
   const userData = app.getPath("userData");
@@ -139,24 +132,36 @@ async function start(): Promise<void> {
   const claudeExecutable = bundledExecutable();
   const released = new Set((Object.keys(RELEASED) as BackendId[]).filter((id) => RELEASED[id]));
   const agent = new AgentSetup([claudeSetup({ executable: claudeExecutable, credentials }), chatgptSetup({ credentials }), localSetup()], released);
-  const dum = parse(readFileSync(join(here, "..", "art", "intern.txt"), "utf8"));
 
   // -- windows ----------------------------------------------------------------
 
-  const panel = new BrowserWindow({
-    ...PANEL_SIZE,
-    minWidth: 360,
-    minHeight: 480,
+  // The circle never takes focus, so the app the person is in stays frontmost through a press.
+  const circleWindow = new BrowserWindow({
+    width: CIRCLE.window,
+    height: CIRCLE.window,
     title: "Dum",
     show: false,
-    fullscreenable: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    resizable: false,
+    movable: false,
     minimizable: false,
-    backgroundColor: "#16141f",
-    webPreferences: preferences(PRELOAD),
+    maximizable: false,
+    focusable: false,
+    // Dum is never the active app while the circle is pressed: the first click must reach the page.
+    acceptFirstMouse: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    ...(MAC ? { type: "panel" } : {}),
+    webPreferences: preferences(CIRCLE_PRELOAD),
   });
-  const command = new BrowserWindow({
-    ...COMMAND_SIZE,
-    title: "Ask Dum",
+  circleWindow.setAlwaysOnTop(true, "floating");
+  circleWindow.setVisibleOnAllWorkspaces(true, ALL_SPACES);
+  const work = new BrowserWindow({
+    ...WINDOW_SIZE,
+    title: "Dum",
     show: false,
     frame: false,
     resizable: false,
@@ -169,8 +174,8 @@ async function start(): Promise<void> {
     ...(MAC ? { type: "panel" } : {}),
     webPreferences: preferences(PRELOAD),
   });
-  command.setAlwaysOnTop(true, "floating");
-  command.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  work.setAlwaysOnTop(true, "floating");
+  work.setVisibleOnAllWorkspaces(true, ALL_SPACES);
   const bubbleWindow = new BrowserWindow({
     ...BUBBLE_MAX,
     show: false,
@@ -189,55 +194,188 @@ async function start(): Promise<void> {
   // Click-through pixels: no buttons, no hit regions, nothing to type into.
   bubbleWindow.setIgnoreMouseEvents(true);
   bubbleWindow.setAlwaysOnTop(true, "screen-saver");
-  bubbleWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-  const roles = new Map<number, Role>([[panel.webContents.id, "panel"], [command.webContents.id, "command"], [bubbleWindow.webContents.id, "bubble"]]);
-  const windows = [panel, command, bubbleWindow];
+  bubbleWindow.setVisibleOnAllWorkspaces(true, ALL_SPACES);
+  const roles = new Map<number, Role>([[circleWindow.webContents.id, "circle"], [work.webContents.id, "window"], [bubbleWindow.webContents.id, "bubble"]]);
+  const windows = [circleWindow, work, bubbleWindow];
 
   let quitting = false;
   for (const w of windows) {
     w.on("close", (event) => {
       if (quitting) return;
       event.preventDefault();
-      w.hide();
+      // Cmd+W and the like hide the working window the same way Esc does; the others only go with Quit.
+      if (w === work) void dismissWindow();
     });
   }
 
-  const cursorArea = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  let panelPlaced = false;
-  const showPanel = () => {
-    if (!panelPlaced) {
-      panel.setBounds(placeCentered(cursorArea(), PANEL_SIZE));
-      panelPlaced = true;
-    }
-    panel.show();
-    panel.focus();
+  // -- displays and the circle's place ------------------------------------------
+
+  const readDisplays = (): DisplayArea[] => {
+    const primary = screen.getPrimaryDisplay().id;
+    return screen.getAllDisplays().map((d) => ({ id: String(d.id), workArea: d.workArea, bounds: d.bounds, primary: d.id === primary }));
   };
+  let screens = readDisplays();
+  /** Where the circle sits: its display and normalized place there. Null until a display exists. */
+  let at: { displayId: string; u: number; v: number } | null = null;
+  /** A live keyboard Move circle: where it started, to restore on Esc. */
+  let positioning: { bounds: Rect; at: { displayId: string; u: number; v: number } } | null = null;
+  let asleep = false;
+  let locked = false;
+
+  const currentDisplay = (): DisplayArea | null => screens.find((d) => d.id === at?.displayId) ?? null;
+  /** Clamp onto `display`, remember the normalized place in memory, and move only when it changed. */
+  const putCircle = (rect: Rect, display: DisplayArea): void => {
+    const next = clampCircle(rect, display.workArea);
+    at = { displayId: display.id, ...toPlacement(next, display.workArea) };
+    if (!sameRect(circleWindow.getBounds(), next)) circleWindow.setBounds(next);
+  };
+  /** The display's cached user placement, else the default rule applied to that display. */
+  const placementOn = (display: DisplayArea): Rect => {
+    const saved = settings.circle().placements.find((p) => p.displayId === display.id);
+    return saved ? fromPlacement(saved, display.workArea) : defaultCircle(display.workArea);
+  };
+  /** Launch or first display: the last display the user chose if it's here, else the primary. */
+  const restoreCircle = (): boolean => {
+    const chosen = settings.circle().lastChosenDisplayId;
+    const display = screens.find((d) => d.id === chosen) ?? screens.find((d) => d.primary) ?? screens[0];
+    if (!display) return false;
+    putCircle(placementOn(display), display);
+    return true;
+  };
+  /** Persist the circle's current place as the user's choice for its display. Placement only, never preferences. */
+  const remember = (): void => {
+    if (!at) return;
+    try {
+      settings.setCircle(withPlacement(settings.circle(), { ...at, usedAt: new Date().toISOString() }));
+    } catch {
+      // The circle stays where it is for this run; the next successful move saves it.
+      router?.diagnose([mainEvent("settings", "failed", "io")]);
+    }
+  };
+  const displaysView = (): CircleDisplays => {
+    const all = screen.getAllDisplays();
+    const label = (d: Display, i: number) => d.label.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 160) || `Display ${i + 1}`;
+    return {
+      displays: all.slice(0, 16).map((d, i) => ({
+        id: String(d.id),
+        label: label(d, i),
+        primary: d.id === screen.getPrimaryDisplay().id,
+        current: String(d.id) === at?.displayId,
+      })),
+      positioning: positioning !== null,
+    };
+  };
+
+  // -- the round hit region and gestures ----------------------------------------
+
+  const gesture = new CircleGesture(Date.now);
+  /** Whether the working window had focus when the press began: a click then hides it. */
+  let focusedAtPress = false;
+  let ignoring: boolean | null = null;
+  const setIgnore = (ignore: boolean) => {
+    if (ignore === ignoring) return;
+    ignoring = ignore;
+    circleWindow.setIgnoreMouseEvents(ignore);
+  };
+  /**
+   * Every frame while the circle shows: pointer outside the disk passes through to what's under it;
+   * during a captured press the circle takes everything and follows a proven drag.
+   */
+  const frame = () => {
+    const pointer = screen.getCursorScreenPoint();
+    const id = gesture.active;
+    if (id) {
+      setIgnore(false);
+      if (gesture.overdue(id)) return circleCancel(id);
+      const moved = gesture.move(id, pointer);
+      const display = moved && nearestDisplay(pointer, screens);
+      if (moved && display) putCircle(moved, display);
+      return;
+    }
+    setIgnore(!insideDisk(pointer, circleWindow.getBounds()));
+  };
+  let frames: NodeJS.Timeout | null = null;
+  const showCircle = () => {
+    if (asleep || locked || quitting) return;
+    if (!at && !restoreCircle()) return;
+    if (!circleWindow.isVisible()) circleWindow.showInactive();
+    frames ??= setInterval(frame, CIRCLE.frameMs);
+  };
+  const hideCircle = () => {
+    clearInterval(frames ?? undefined);
+    frames = null;
+    const id = gesture.active;
+    if (id) circleCancel(id);
+    circleWindow.hide();
+  };
+
+  function circleCancel(id: string): void {
+    const start = gesture.cancel(id);
+    const display = start && nearestDisplay({ x: start.x + start.width / 2, y: start.y + start.height / 2 }, screens);
+    if (start && display) putCircle(start, display);
+  }
+
+  // -- the working window -----------------------------------------------------------
 
   const focus = new Focus({ platform: process.platform, resourcesPath: process.resourcesPath });
   const focusReturn = new FocusReturn(focus);
-  const showCommand = async () => {
-    await focusReturn.summon(panel.isVisible() && panel.isFocused());
-    command.setBounds(placeCentered(cursorArea(), COMMAND_SIZE));
-    command.show();
-    command.focus();
+  /** Native pickers, confirmations and one-frame captures in flight: the blur they cause doesn't hide Dum. */
+  let holds = 0;
+  const held = async <T>(run: () => Promise<T>): Promise<T> => {
+    holds++;
+    try {
+      return await run();
+    } finally {
+      holds--;
+    }
   };
-  const dismissCommand = async () => {
-    if (!command.isVisible()) return;
-    command.hide();
-    const back = await focusReturn.dismiss();
-    if (back === "panel") panel.focus();
-    // No captured app to go back to: stepping out of the way hands focus to whatever was before.
-    else if (!back && MAC && !panel.isVisible()) app.hide();
+  /** Beside the circle, on the circle's display; never following the cursor. */
+  const anchor = (force = false) => {
+    if (!force && !work.isVisible()) return;
+    const display = currentDisplay() ?? nearestDisplay(screen.getCursorScreenPoint(), screens);
+    if (!display) return;
+    const next = placeWindow(circleWindow.getBounds(), display.workArea, WINDOW_SIZE);
+    if (!sameRect(work.getBounds(), next)) work.setBounds(next);
   };
-  // Summon activates the command bar; summoning it while it has focus dismisses it.
-  const summon = () => void (command.isVisible() && command.isFocused() ? dismissCommand() : showCommand());
 
-  const keepOnScreen = () => {
-    const areas = screen.getAllDisplays().map((d) => d.workArea);
-    for (const w of windows) if (w.isVisible()) w.setBounds(reclamp(w.getBounds(), areas));
+  // Summons, toggles and dismissals run one at a time, so a slow capture can't reopen after a dismissal.
+  let queue: Promise<void> = Promise.resolve();
+  const serial = (run: () => Promise<void>): Promise<void> => {
+    const next = queue.then(run);
+    queue = next.catch(() => undefined);
+    return next;
   };
-  screen.on("display-removed", keepOnScreen);
-  screen.on("display-metrics-changed", keepOnScreen);
+  const show = async () => {
+    // Capture the external app before Dum activates; with a Dum window already in front there is none.
+    if (BrowserWindow.getFocusedWindow() === null) await focusReturn.summon();
+    else focusReturn.forget();
+    if (!work.isVisible()) anchor(true);
+    work.show();
+    work.focus();
+    broadcast();
+  };
+  /** Hide; `restore` gives focus back to the captured app, once. Never `app.hide()`, which would hide the circle too. */
+  const hide = async (restore: boolean) => {
+    if (!work.isVisible()) return;
+    work.hide();
+    broadcast();
+    if (restore) await focusReturn.dismiss();
+    else focusReturn.forget();
+  };
+  const showWindow = () => serial(show);
+  const dismissWindow = () => serial(() => hide(true));
+  /** Click, accessibility press or hotkey: focused hides, anything else shows and focuses. */
+  const toggle = (focused: boolean) => serial(() => (focused && work.isVisible() ? hide(true) : show()));
+  const summon = () => void toggle(work.isVisible() && work.isFocused());
+
+  work.on("blur", () => {
+    // Settle first: a blur from the circle, a native picker or a Dum window isn't the person leaving.
+    setImmediate(() => {
+      if (quitting || holds > 0 || gesture.active || !work.isVisible() || work.isFocused() || BrowserWindow.getFocusedWindow() !== null) return;
+      // They chose another app: hide, and don't take them back to the one Dum captured.
+      void serial(() => hide(false));
+    });
+  });
 
   const bubble = new Bubble({
     publish(view: BubbleView | null, fresh: boolean) {
@@ -247,30 +385,80 @@ async function start(): Promise<void> {
         bubbleWindow.hide();
         return;
       }
-      // The anchor is sampled once per interaction; the bubble never follows the mouse.
+      // The anchor is sampled once per interaction; the bubble never follows the mouse, and steps off the circle.
       if (fresh || !bubbleWindow.isVisible()) {
-        const at = screen.getCursorScreenPoint();
-        bubbleWindow.setBounds(placeBubble(at, screen.getDisplayNearestPoint(at).workArea));
+        const cursor = screen.getCursorScreenPoint();
+        const circle = circleWindow.isVisible() ? circleWindow.getBounds() : null;
+        bubbleWindow.setBounds(placeBubble(cursor, screen.getDisplayNearestPoint(cursor).workArea, BUBBLE_MAX, circle));
       }
       bubbleWindow.webContents.send("dum:bubble", view);
       if (!bubbleWindow.isVisible()) bubbleWindow.showInactive();
     },
   });
 
+  // -- display changes ----------------------------------------------------------------
+
+  screen.on("display-removed", (_event, old: Display) => {
+    screens = readDisplays();
+    router?.diagnose([mainEvent("native", "ok", "display-change")]);
+    if (!screens.length) {
+      at = null;
+      positioning = null;
+      hideCircle();
+      return;
+    }
+    // A drag in progress is cancelled back to where it started.
+    const id = gesture.active;
+    const started = id ? gesture.cancel(id) : null;
+    if (positioning?.at.displayId === String(old.id)) positioning = null;
+    if (started || at?.displayId === String(old.id)) {
+      // Into the remaining work area nearest the old center; the removed display's saved place and the last choice stay.
+      const bounds = started ?? circleWindow.getBounds();
+      const display = nearestDisplay({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }, screens)!;
+      putCircle(bounds, display);
+    }
+    if (bubbleWindow.isVisible()) bubbleWindow.setBounds(reclamp(bubbleWindow.getBounds(), screens.map((d) => d.workArea)));
+    anchor();
+  });
+  screen.on("display-metrics-changed", (_event, changed: Display) => {
+    screens = readDisplays();
+    router?.diagnose([mainEvent("native", "ok", "display-change")]);
+    const display = screens.find((d) => d.id === String(changed.id));
+    // Same normalized place on the resized work area, then clamped; a drag in progress keeps following the pointer.
+    if (display && at?.displayId === display.id && !gesture.active) putCircle(fromPlacement(at, display.workArea), display);
+    if (bubbleWindow.isVisible()) bubbleWindow.setBounds(reclamp(bubbleWindow.getBounds(), screens.map((d) => d.workArea)));
+    anchor();
+  });
+  screen.on("display-added", () => {
+    screens = readDisplays();
+    router?.diagnose([mainEvent("native", "ok", "display-change")]);
+    // Never teleports mid-use; only a circle still waiting for its first display appears.
+    if (!at) showCircle();
+  });
+
   // -- host, capture, voice, look -----------------------------------------------
 
   let router: Router | null = null;
-  let tray: Tray | null = null;
-  let pending = false;
+  /**
+   * The one deferred publish, coalescing changes within a turn. Quit cancels it: once Quit starts,
+   * Electron destroys the windows, and a publish that read them during teardown would throw
+   * ("Object has been destroyed") with the JavaScript environment going away, which leaves the
+   * main process running after `quit`.
+   */
+  let publish: NodeJS.Immediate | null = null;
+  let circleSent = "";
   const broadcast = () => {
-    if (pending) return;
-    pending = true;
-    setImmediate(() => {
-      pending = false;
-      if (!router) return;
-      const snapshot = router.snapshot();
-      for (const w of [panel, command]) if (!w.isDestroyed()) w.webContents.send("dum:snapshot", snapshot);
-      refreshTray();
+    if (publish || quitting) return;
+    publish = setImmediate(() => {
+      publish = null;
+      if (!router || quitting) return;
+      work.webContents.send("dum:snapshot", router.snapshot());
+      const view: CircleView = router.circle();
+      const json = JSON.stringify(view);
+      if (json !== circleSent) {
+        circleSent = json;
+        circleWindow.webContents.send("dum:circle", view);
+      }
     });
   };
 
@@ -278,15 +466,23 @@ async function start(): Promise<void> {
   let restartDelay = 1_000;
   let startedAt = 0;
   let hostProblem = "";
-  const personal = () => context.read(settings.get().personalContext ? undefined : "off");
+  let firstStart = true;
+  const readPersonal = () => context.read(settings.get().personalContext ? undefined : "off");
+  let personalCopy = readPersonal();
+  const personal = {
+    current: () => personalCopy,
+    reload: () => (personalCopy = readPersonal()),
+  };
   const startHost = async () => {
     try {
-      await host.start(personal(), settings.get());
+      await host.start(personal.reload(), settings.get(), router!.mainStatus());
       startedAt = Date.now();
       hostProblem = "";
-      if (host.view?.registry.activeZoneId === null) showPanel();
+      // First run opens the one window at its goal question; a login start otherwise stays at the circle.
+      if (firstStart && host.view?.registry.activeZoneId === null) void showWindow();
+      firstStart = false;
     } catch (err) {
-      hostProblem = `Dum's teaching host didn't start: ${(err as Error).message}`;
+      hostProblem = `Dum's host didn't start: ${(err as Error).message}`;
       scheduleRestart();
     }
     broadcast();
@@ -314,41 +510,36 @@ async function start(): Promise<void> {
     home: home(),
     claudeExecutable,
     credential: credentialSource(credentials, accessToken),
-    frame: (checkId) => observer.frame(checkId),
+    frame: () => observer.frame(),
   });
 
   const screenGranted = () => !MAC || systemPreferences.getMediaAccessStatus("screen") === "granted";
-  /** The display under the cursor, as a desktopCapturer screen source, `width` wide. */
-  const cursorScreen = async (width: number) => {
+  /** The display under the cursor, as a desktopCapturer screen source `width` wide, with its global bounds. */
+  const cursorScreen = async (width: number): Promise<Shot | null> => {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     const height = Math.max(1, Math.round((width * display.size.height) / Math.max(1, display.size.width)));
     const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width, height }, fetchWindowIcons: false });
     const hit = sources.find((s) => s.display_id === String(display.id)) ?? (sources.length === 1 ? sources[0] : undefined);
-    return hit && !hit.thumbnail.isEmpty() ? hit.thumbnail : null;
+    if (!hit || hit.thumbnail.isEmpty()) return null;
+    const size = hit.thumbnail.getSize();
+    return { displayId: String(display.id), display: display.bounds, bitmap: { ...size, data: hit.thumbnail.toBitmap() } };
   };
 
-  let asleep = false;
   const observer = new Observer({
     zone: () => {
       const view = host.view;
       return view?.zoneEpoch && view.activeZone ? { zoneId: view.activeZone.id, epoch: view.zoneEpoch } : null;
     },
-    blocked: () => (asleep ? "asleep or locked"
+    blocked: () => (asleep || locked ? "asleep or locked"
       : router?.recording ? "listening"
       : BrowserWindow.getFocusedWindow() !== null ? "a Dum window is in front"
       : host.running ? null : "the host isn't running"),
     frontmost: () => focus.frontmost(),
-    async thumbnail(): Promise<Bitmap | null> {
-      if (!screenGranted()) return null;
-      const image = await cursorScreen(LOOK.thumbWidth);
-      if (!image) return null;
-      const { width, height } = image.getSize();
-      return { width, height, data: image.toBitmap() };
-    },
-    async capture() {
-      if (!screenGranted()) return null;
-      return (await cursorScreen(LOOK.frameWidth))?.toPNG() ?? null;
-    },
+    thumbnail: async () => (screenGranted() ? cursorScreen(LOOK.thumbWidth) : null),
+    capture: async () => (screenGranted() ? cursorScreen(LOOK.frameWidth) : null),
+    encode: (f) => nativeImage.createFromBitmap(Buffer.from(f.data.buffer, f.data.byteOffset, f.data.byteLength), { width: f.width, height: f.height }).toPNG(),
+    // Dum's own surfaces, wherever they are now: the circle always, the window and bubble while shown.
+    own: () => windows.filter((w) => w.isVisible()).map((w) => w.getBounds()),
     send(tick) {
       // A tick for an epoch that's over is dropped here, never sent.
       const view = host.view;
@@ -370,8 +561,8 @@ async function start(): Promise<void> {
           return { id: s.id, name: s.name.slice(0, 200) || (kind === "screen" ? "Screen" : "Window"), kind };
         });
     },
-    async grab(source) {
-      // A whole screen shouldn't include Dum; hide its windows for the one frame, then bring them back without taking focus.
+    grab: (source) => held(async () => {
+      // A whole screen they chose to share shouldn't include Dum; hide its windows for the one frame, then bring them back without taking focus.
       const shown = source.kind === "screen" ? windows.filter((w) => w.isVisible()) : [];
       for (const w of shown) w.hide();
       try {
@@ -392,7 +583,7 @@ async function start(): Promise<void> {
       } finally {
         for (const w of shown) w.showInactive();
       }
-    },
+    }),
   };
 
   const dictation = new DictationHelper({
@@ -407,24 +598,32 @@ async function start(): Promise<void> {
   const sendDraft = () => {
     void router?.sendDraft().catch((err: unknown) => bubble.timed("reply", [(err as Error).message.slice(0, 300)], BUBBLE_TTL.error));
   };
-  const registered: Record<"hotkey" | "sendDraftHotkey", string> = { hotkey: "", sendDraftHotkey: "" };
-  const actions: Record<"hotkey" | "sendDraftHotkey", () => void> = { hotkey: summon, sendDraftHotkey: sendDraft };
+  type Key = "hotkey" | "sendDraftHotkey";
+  const registered: Record<Key, string> = { hotkey: "", sendDraftHotkey: "" };
+  const problems: Record<Key, ShortcutProblem | null> = { hotkey: null, sendDraftHotkey: null };
+  const actions: Record<Key, () => void> = { hotkey: summon, sendDraftHotkey: sendDraft };
   let hotkeyError = "";
-  const register = (accelerator: string, run: () => void): boolean => {
+  /** Null when registered; Electron throws for an accelerator it can't parse and returns false for one already taken. */
+  const register = (accelerator: string, run: () => void): ShortcutProblem | null => {
     try {
-      return globalShortcut.register(accelerator, run);
+      return globalShortcut.register(accelerator, run) ? null : "conflict";
     } catch {
-      return false;
+      return "invalid";
     }
   };
+  const startupConflicts: SanitizedMainEvent[] = [];
   for (const key of ["hotkey", "sendDraftHotkey"] as const) {
     const wanted = settings.get()[key];
-    if (register(wanted, actions[key])) registered[key] = wanted;
-    else hotkeyError = `${hotkeyError}${hotkeyError ? " " : ""}${wanted} is already used by another app or the system. Choose another shortcut in Settings.`;
+    problems[key] = register(wanted, actions[key]);
+    if (!problems[key]) registered[key] = wanted;
+    else {
+      hotkeyError = `${hotkeyError}${hotkeyError ? " " : ""}${wanted} is already used by another app or the system. Choose another shortcut in Settings.`;
+      startupConflicts.push(mainEvent("settings", "failed", "shortcut-conflict"));
+    }
   }
 
   const native: Native = {
-    async choosePath(kind, purpose) {
+    choosePath: (kind, purpose) => held(async () => {
       const options = {
         title: purpose === "follow" ? "Choose a folder for Dum to follow in this zone" : kind === "folder" ? "Share a folder with this request" : "Share a file with this request",
         buttonLabel: purpose === "follow" ? "Follow" : "Share",
@@ -433,13 +632,13 @@ async function start(): Promise<void> {
       const parent = BrowserWindow.getFocusedWindow();
       const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
       return picked.canceled ? null : picked.filePaths[0] ?? null;
-    },
-    async confirm(message, detail, yes) {
+    }),
+    confirm: (message, detail, yes) => held(async () => {
       const options = { type: "question" as const, message, detail, buttons: [yes, "Cancel"], defaultId: 1, cancelId: 1, noLink: true };
       const parent = BrowserWindow.getFocusedWindow();
       const answer = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
       return answer.response === 0;
-    },
+    }),
     async openPath(path) {
       const failed = await shell.openPath(path);
       if (failed) throw new Error(`Couldn't open it: ${failed}`);
@@ -449,10 +648,10 @@ async function start(): Promise<void> {
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("Dum only opens web pages");
       await shell.openExternal(parsed.href);
     },
-    async openScreenSettings() {
+    openScreenSettings: () => held(async () => {
       if (!MAC) throw new Error("Screen sharing permission is managed by your desktop on this system.");
       await shell.openExternal(SCREEN_SETTINGS);
-    },
+    }),
     screenPermission: () => (MAC ? systemPreferences.getMediaAccessStatus("screen") : "not-required"),
     apply(next: DesktopPreferences, previous: DesktopPreferences) {
       if (next.launchAtLogin !== previous.launchAtLogin && !MAC && process.platform !== "win32") {
@@ -462,7 +661,7 @@ async function start(): Promise<void> {
       for (const key of changed) if (registered[key]) globalShortcut.unregister(registered[key]);
       const done: typeof changed = [];
       for (const key of changed) {
-        if (!register(next[key], actions[key])) {
+        if (register(next[key], actions[key])) {
           // Roll every changed shortcut back to what was registered before.
           for (const k of done) globalShortcut.unregister(next[k]);
           for (const k of changed) if (registered[k]) register(registered[k], actions[k]);
@@ -470,23 +669,84 @@ async function start(): Promise<void> {
         }
         done.push(key);
       }
-      for (const key of changed) registered[key] = next[key];
+      for (const key of changed) {
+        registered[key] = next[key];
+        problems[key] = null;
+      }
       if (changed.length) hotkeyError = "";
       if (next.launchAtLogin !== previous.launchAtLogin) app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
     },
     hotkeyError: () => hotkeyError,
-    async showSurface(surface) {
-      if (surface === "panel") showPanel();
-      else await showCommand();
+    shortcuts: () => ({
+      open: problems.hotkey,
+      voice: dictation.status().available ? null : "unavailable",
+      sendDraft: problems.sendDraftHotkey,
+    }),
+    showWindow,
+    dismissWindow,
+    windowVisible: () => work.isVisible(),
+    openView(view) {
+      void showWindow();
+      void work.webContents.loadFile(INDEX, { query: { view: "window" }, hash: view });
     },
-    openPane(pane) {
-      showPanel();
-      void panel.webContents.loadFile(INDEX, { query: { view: "panel" }, hash: pane });
+    circleBegin() {
+      focusedAtPress = work.isVisible() && work.isFocused();
+      setIgnore(false);
+      return gesture.begin(screen.getCursorScreenPoint(), circleWindow.getBounds());
     },
-    async dismissSurface(surface) {
-      if (surface === "command") await dismissCommand();
-      else panel.hide();
+    async circleEnd(gestureId) {
+      const pointer = screen.getCursorScreenPoint();
+      const moved = gesture.move(gestureId, pointer);
+      const display = moved && nearestDisplay(pointer, screens);
+      if (moved && display) putCircle(moved, display);
+      const ended = gesture.end(gestureId, pointer);
+      if (ended === "drag") {
+        // Committed once, on a successful drag end; the window re-anchors beside it.
+        positioning = null;
+        remember();
+        anchor();
+        broadcast();
+      } else if (ended === "toggle") {
+        await toggle(focusedAtPress);
+      }
     },
+    circleCancel,
+    circleToggle: () => toggle(work.isVisible() && work.isFocused()),
+    circlePosition(action) {
+      if (action === "begin") {
+        if (!at) throw new Error("There's no display to put the circle on.");
+        positioning = { bounds: circleWindow.getBounds(), at: { ...at } };
+      } else if (positioning && action === "commit") {
+        positioning = null;
+        remember();
+        anchor();
+      } else if (positioning) {
+        const display = screens.find((d) => d.id === positioning!.at.displayId);
+        if (display) putCircle(positioning.bounds, display);
+        positioning = null;
+        anchor();
+      }
+      return displaysView();
+    },
+    circleNudge(dx, dy) {
+      const display = currentDisplay();
+      if (!positioning || !display) throw new Error("Start Move circle first.");
+      const bounds = circleWindow.getBounds();
+      putCircle({ ...bounds, x: bounds.x + dx, y: bounds.y + dy }, display);
+      return displaysView();
+    },
+    circleDisplay(displayId) {
+      const display = screens.find((d) => d.id === displayId);
+      if (!display) throw new Error("That display isn't connected any more.");
+      // That display's cached place, the user's choice from now on.
+      putCircle(placementOn(display), display);
+      remember();
+      if (positioning && at) positioning = { bounds: circleWindow.getBounds(), at: { ...at } };
+      anchor();
+      return displaysView();
+    },
+    displays: displaysView,
+    personalFiles: () => (personalCopy.path ? personalCopy.path.split(", ").filter((p) => isAbsolute(p)) : []),
     quit: () => setImmediate(() => app.quit()),
   };
 
@@ -512,6 +772,12 @@ async function start(): Promise<void> {
     dictation,
     observer,
     bubble,
+    personal,
+    async secrets() {
+      const values = await Promise.all(CREDENTIALS.map((kind) => credentials.get(kind).catch(() => null)));
+      return values.filter((v): v is string => typeof v === "string" && v !== "");
+    },
+    hostFailure: () => hostProblem,
     restart: startHost,
     keySaved: () => void reconcileModels(),
     changed: broadcast,
@@ -520,7 +786,7 @@ async function start(): Promise<void> {
   });
   dictation.onEvent((event) => router!.voiceEvent(event));
 
-  // Requests are honored only from the top frame of Dum's own panel and command bar, showing Dum's own page.
+  // Requests are honored only from the top frame of Dum's own page, and each surface only on its own channel.
   const trusted = (event: IpcMainInvokeEvent): Role | null => {
     const frame = event.senderFrame;
     const top = event.sender.mainFrame;
@@ -528,82 +794,36 @@ async function start(): Promise<void> {
     if (!role || !frame || frame.processId !== top.processId || frame.routingId !== top.routingId || !ownedPage(frame.url, INDEX_URL)) return null;
     return role;
   };
-  ipcMain.handle("dum:request", (event, raw: unknown) => {
-    const role = trusted(event);
-    return role ? router!.handle(raw, role) : { ok: false, error: "request refused" };
-  });
+  ipcMain.handle("dum:request", (event, raw: unknown) => (trusted(event) === "window" ? router!.handle(raw, "window") : { ok: false, error: "request refused" }));
+  ipcMain.handle("dum:circle", (event, raw: unknown) => (trusted(event) === "circle" ? router!.handle(raw, "circle") : { ok: false, error: "request refused" }));
 
-  // -- tray -----------------------------------------------------------------------
-
-  /** Tray items go through the same router as the windows' requests. */
-  const fromTray = (raw: unknown) => void router!.handle(raw, "tray");
-  function refreshTray(): void {
-    if (!tray || !router) return;
-    const snapshot = router.snapshot();
-    const zone = snapshot.activeZone;
-    const where = zone ? zone.breadcrumb.map((b) => b.name).join(" › ") : snapshot.zones.activeZoneId === null ? "No zone yet" : "Opening a zone…";
-    tray.setToolTip(`Dum · ${where}`);
-    const zones = snapshot.zones.zones.filter((z) => z.deletedAt === null).slice(0, 40);
-    const listening = snapshot.voice.phase === "recording" || snapshot.voice.phase === "transcribing";
-    const template: MenuItemConstructorOptions[] = [
-      { label: where, enabled: false },
-      ...(hostProblem ? [{ label: hostProblem.slice(0, 120), enabled: false }] : []),
-      { type: "separator" },
-      { label: "Ask Dum…", accelerator: registered.hotkey || undefined, click: () => void showCommand() },
-      {
-        label: "Open Panel",
-        submenu: [
-          { label: "Panel", click: showPanel },
-          { type: "separator" },
-          ...([["zones", "Zones"], ["history", "History"], ["tree", "Skills"], ["settings", "Settings"]] as [Panel, string][])
-            .map(([pane, label]) => ({ label, click: () => fromTray({ type: "panel", panel: pane }) })),
-        ],
-      },
-      {
-        label: "Switch Zone",
-        enabled: zones.length > 0,
-        submenu: zones.map((z) => ({
-          label: z.name,
-          type: "radio" as const,
-          checked: z.id === snapshot.zones.activeZoneId,
-          click: () => fromTray({ type: "zone-enter", id: z.id, expectedRevision: snapshot.zones.revision }),
-        })),
-      },
-      { type: "separator" },
-      listening && snapshot.voice.recordingId
-        ? { label: "Stop Voice", click: () => fromTray({ type: "voice-stop", recordingId: snapshot.voice.recordingId }) }
-        : { label: "Start Voice", enabled: dictation.status().available && snapshot.binding !== null, click: () => fromTray({ type: "voice-start", binding: snapshot.binding }) },
-      { label: "Send Draft", enabled: snapshot.binding?.zoneId != null && snapshot.draft.text.trim() !== "", click: sendDraft },
-      { label: snapshot.look.paused ? "Resume the Look" : "Pause the Look", click: () => fromTray({ type: "look-pause", paused: !snapshot.look.paused }) },
-      { type: "separator" },
-      { label: "Quit Dum", click: () => app.quit() },
-    ];
-    tray.setContextMenu(Menu.buildFromTemplate(template));
-  }
-
+  // Editing and Quit only: Cmd+W hides the window (its close is a dismissal), Cmd+Q is the controlled Quit.
   Menu.setApplicationMenu(MAC ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }]) : null);
-  tray = new Tray(trayIcon(dum));
-  tray.setToolTip("Dum");
-  if (!MAC) tray.on("click", showPanel);
 
   // -- sleep and lock -------------------------------------------------------------
 
   const away = () => {
-    asleep = true;
     router?.stopVoice();
     bubble.dismiss();
+    hideCircle();
+    router?.diagnose([mainEvent("native", "ok", "sleep")]);
   };
-  const back = () => { asleep = false; };
-  powerMonitor.on("suspend", away);
-  powerMonitor.on("lock-screen", away);
-  powerMonitor.on("resume", back);
-  powerMonitor.on("unlock-screen", back);
+  // Back without activation, once neither sleep nor the lock screen is in the way.
+  const back = () => {
+    showCircle();
+    router?.diagnose([mainEvent("native", "ok", "unlock")]);
+  };
+  powerMonitor.on("suspend", () => { asleep = true; away(); });
+  powerMonitor.on("lock-screen", () => { locked = true; away(); });
+  powerMonitor.on("resume", () => { asleep = false; back(); });
+  powerMonitor.on("unlock-screen", () => { locked = false; back(); });
 
   await Promise.all([
-    panel.loadFile(INDEX, { query: { view: "panel" } }),
-    command.loadFile(INDEX, { query: { view: "command" } }),
+    circleWindow.loadFile(INDEX, { query: { view: "circle" } }),
+    work.loadFile(INDEX, { query: { view: "window" } }),
     bubbleWindow.loadFile(INDEX, { query: { view: "bubble" } }),
   ]);
+  showCircle();
   if (settings.warning) void dialog.showMessageBox({ type: "warning", message: "Dum updated your settings", detail: settings.warning });
   const checked = agent.check().finally(broadcast);
   if (dictation.status().available) void dictation.configure(settings.get().voiceHotkey).catch(() => undefined).finally(broadcast);
@@ -612,17 +832,22 @@ async function start(): Promise<void> {
     void desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } }).catch(() => undefined);
   }
   await startHost();
+  if (startupConflicts.length) router.diagnose(startupConflicts);
   void checked.then(reconcileModels);
 
-  app.on("second-instance", showPanel);
-  app.on("activate", showPanel);
+  app.on("second-instance", () => void showWindow());
+  app.on("activate", () => void showWindow());
 
   let closing: Promise<void> | null = null;
   app.on("before-quit", (event) => {
     if (closing === null) {
       quitting = true;
+      clearImmediate(publish ?? undefined);
+      publish = null;
       event.preventDefault();
       clearTimeout(restartTimer ?? undefined);
+      clearInterval(frames ?? undefined);
+      frames = null;
       observer.close();
       captures.discard();
       agent.cancel();

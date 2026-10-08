@@ -63,8 +63,6 @@ const delta = (d: unknown) => ({ choices: [{ index: 0, delta: d }] });
 function options(actions: DumAction[], extra: Partial<OpenOptions> = {}): OpenOptions {
   return {
     cwd: "/tmp",
-    zone: { id: "z1", revision: 1, breadcrumb: [], goal: "", ancestorGoals: [], language: "", focusSkills: [], notes: [] },
-    binding: { zoneId: "z1", zoneEpoch: "e", inputToken: "t", requestId: "r" },
     systemPrompt: "You are Dum.",
     selector: { backend: "local", model: "m", effort: null },
     login: "none",

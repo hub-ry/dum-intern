@@ -1,7 +1,8 @@
-// The message box the panel and the command bar share. The draft lives in main, one per zone, so
-// typing here shows up in the other surface and voice fills the same text. Sending is always explicit.
+// The working window's one message box. The draft lives in main, one per zone, so voice fills the
+// same text and Do this consumes the same revision. Sending is always explicit.
 
 import type { CapturePreview, CaptureSource, Snapshot } from "../protocol.ts";
+import type { DirectionView } from "../../delegation-types.ts";
 import type { Prompt } from "../../store-types.ts";
 import { h, icon, iconButton, type Client } from "./dom.ts";
 import { nameFromGoal } from "./zones.ts";
@@ -13,6 +14,8 @@ export type ComposerOptions = {
   client: Client;
   /** The send needs a backend and none is chosen yet: show "Who powers Dum?". */
   needsAgent(): void;
+  /** First run created the root zone from your goal; this is its alignment. */
+  created(view: DirectionView): void;
 };
 
 export class Composer {
@@ -20,6 +23,7 @@ export class Composer {
   readonly textarea = h("textarea", { class: "input composer-input", rows: "2", "aria-label": "Message to Dum", "aria-describedby": "composer-keys" });
   private client: Client;
   private needsAgent: () => void;
+  private created: (view: DirectionView) => void;
   private dirty = false;
   private timer = 0;
   private flushing: Promise<void> = Promise.resolve();
@@ -30,8 +34,8 @@ export class Composer {
 
   private promptBox = h("div", { class: "prompt-box", hidden: true, tabindex: "-1" });
   private statusText = h("span", { class: "status-text" });
-  private stopBtn = h("button", { type: "button", class: "btn ghost small", title: "Stop (⌘.)", onclick: () => this.stop() }, icon("stop"), "Stop");
-  private statusLine = h("div", { class: "status-line", hidden: true, role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), this.statusText, h("span", { class: "spacer" }), this.stopBtn);
+  private stopBtn = h("button", { type: "button", class: "btn ghost small", title: "Stop (⌘.)", disabled: true, onclick: () => this.stop() }, icon("stop"), "Stop");
+  private statusLine = h("div", { class: "status-line", hidden: true, role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), this.statusText);
   private voiceText = h("span", { class: "voice-text" });
   private voiceLabel = h("span", {}, "Voice");
   private voiceBtn = h("button", { type: "button", class: "btn ghost small", onclick: () => void this.voice() }, icon("mic"), this.voiceLabel);
@@ -55,6 +59,7 @@ export class Composer {
   constructor(o: ComposerOptions) {
     this.client = o.client;
     this.needsAgent = o.needsAgent;
+    this.created = o.created;
     const form = h(
       "form",
       { class: "composer" },
@@ -62,9 +67,10 @@ export class Composer {
       h(
         "div",
         { class: "composer-row" },
+        this.shareBtn,
         this.voiceBtn,
         this.voiceCancel,
-        this.shareBtn,
+        this.stopBtn,
         h("span", { id: "composer-keys", class: "hint keys" }, "Return sends · Shift-Return new line"),
         h("span", { class: "spacer" }),
         this.sendBtn,
@@ -153,6 +159,7 @@ export class Composer {
     const state = s.state;
     this.statusLine.hidden = !state?.busy;
     this.statusText.textContent = state?.status || "working";
+    this.stopBtn.disabled = !state?.busy;
     this.sync();
   }
 
@@ -168,8 +175,8 @@ export class Composer {
       : prompt?.type === "question" ? (prompt.purpose ? "Or type a reply" : "Answer Dum") : blocked ? "Dum is working - Stop it to write" : "Ask Dum, or tell it what you built";
   }
 
-  /** Main's copy of the draft follows the box. Each write names the revision it replaces, so two surfaces can't clobber each other. */
-  private flush(): Promise<void> {
+  /** Main's copy of the draft follows the box; Do this calls it first so it names the revision it consumes. Each write names the revision it replaces. */
+  flush(): Promise<void> {
     clearTimeout(this.timer);
     this.flushing = this.flushing.then(async () => {
       const s = this.client.snap;
@@ -191,7 +198,8 @@ export class Composer {
     try {
       if (!s.activeZone) {
         await this.flush();
-        await this.client.call({ type: "zone-create", zone: { name: nameFromGoal(text), goal: text, parentId: null, language: null, focusSkills: [] }, enter: true });
+        const r = await this.client.call({ type: "zone-create", zone: { name: nameFromGoal(text), goal: text, parentId: null, language: null, focusSkills: [] }, enter: true });
+        if (r.ok && r.direction) this.created(r.direction);
         return;
       }
       if (!s.agent.chosen && !text.startsWith(":")) {

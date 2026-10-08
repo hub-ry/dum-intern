@@ -1,8 +1,6 @@
 // The agent contract (docs/llm-setup-design.md §8.1). Model-callable functions are actions, never tools.
 
 import type { z } from "zod";
-import type { ZoneContext } from "../zone-types.ts";
-import type { RequestBinding } from "../share-types.ts";
 
 export type BackendId = "claude" | "chatgpt" | "local" | "copilot";
 /** How a backend authenticates. Claude connects only with the user's own Anthropic API key. */
@@ -83,13 +81,13 @@ export type AgentEvent =
   | { type: "retry"; message: string }
   | { type: "end"; error: string | null; interrupted: boolean };
 
+/**
+ * Transport only. Zone, alignment and request bindings stay with the host and session owners, and
+ * the debug binding with DebugChat; no adapter or loop sees them.
+ */
 export type OpenOptions = {
-  /** The active zone's empty runtime/ directory. */
+  /** An empty runtime directory: the active zone's runtime/, or H/debug/runtime/ for debug chat. */
   cwd: string;
-  /** Immutable prompt/gate context for this request. */
-  zone: ZoneContext;
-  /** Epoch/token/request correlation. */
-  binding: RequestBinding;
   systemPrompt: string;
   selector: Selector;
   /** Provenance the session must prove. */

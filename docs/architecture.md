@@ -1,19 +1,21 @@
 # Dum architecture
 
-Dum is an always-on Mac app that follows your learning across a tree of zones and implements things on command, only for skills you've proven.
+Dum is an always-on Mac app that follows your learning across a tree of zones and implements things on command, only for skills you've proven. It shows up as one floating circle; clicking it opens one working window.
 
 ## Processes and the state each one owns
 
 ```mermaid
 flowchart LR
   subgraph MAIN["Electron main"]
-    settings[(settings.json)]
+    settings[(settings.json: preferences, circle placement)]
   end
   subgraph HOST["Desktop host"]
     tree[(skill tree)]
     zones[(zone state)]
+    records[(directions, handoffs, corrections, sessions, story)]
     weblink[(web link)]
     lock[(session lock)]
+    diag[[diagnostics ring, debug chat: memory only]]
   end
   subgraph RENDERER["Renderer"]
     none[no durable state]
@@ -40,7 +42,13 @@ flowchart LR
 | Zone state: conversation, memory, evidence, suggested projects, change history | Desktop host | "Let's actually fuck the repos, it's kinda annoying." Zones are the only scope. |
 | Web link (where your tree syncs) | Desktop host | "We are getting rid of the cli though." The CLI was the only writer. |
 | Session lock | Desktop host | "We are getting rid of the cli though." Only the desktop runs a conversation. |
-| Desktop settings (`settings.json`) | Electron main | Already its only writer. Not a choice you made. |
+| Desktop settings (`settings.json`): preferences and circle placement per display | Electron main | Already its only writer. The circle's placement sits in the same file; the renderer only reports a press and main moves the window. |
+| Directions: goal alignment attempts and agreed directions (`zones/<id>/direction/`) | Desktop host | Written under the host's writer lock with the rest of a zone's state. The zone registry stays the only owner of goal text; a direction keeps a fingerprint of the goal it was agreed for. |
+| Handoffs (`zones/<id>/delegations/`) | Desktop host | Selected, edited, run and reviewed through the host, which also runs the gate check before each write. |
+| Context corrections (`zones/<id>/context-corrections.json`) | Desktop host | Same writer as the context they correct. |
+| Sessions and trails (`zones/<id>/sessions/`) | Desktop host | The host sees every send, decision, handoff, change and look result that a trail records. |
+| Story cache (`zones/<id>/story/`) | Desktop host | A cache rebuilt from sessions, which stay authoritative. |
+| Diagnostics ring and debug chat | Desktop host, memory only | Nothing durable. Main sends its own sanitized events to the host; the ring and the debug transcript go when the host exits. |
 | Web-data (synced trees) | Web server | Already its only writer. Not a choice you made. |
 | Personal context files | You | Dum only reads them. |
 | Your files | You | "Tolerate it." Dum writes them only on command, under rule 7. |
@@ -57,6 +65,12 @@ flowchart LR
 - **Tool**: a skill that is one library, framework, API or command; recognize is enough for Dum to use it. Functions the model can call are "actions", never "tools". (You said "idk"; my choice.)
 - **Gate**: the check that decides what Dum may write from your tree.
 - **Boundary**: what Dum may do for you right now. Dum is "incredibly active": always on, it follows along, tracks your learning, and "implement[s] things on command assuming that you have the skill".
+- **Direction**: what you and Dum agreed a zone's goal means: the ability you're after, how you'll know it worked, assumptions, and the chosen learning project or decision. One per zone, revisable, and it gives Dum no permission to write.
+- **Handoff**: one task you chose to delegate, with its expected result and what you'll review. Choosing it writes nothing; Dum works on it only after you press Do this, and your review afterward is recorded but never counts as evidence.
+- **Session**: one continuous stretch of learning in one zone. It ends when you leave the zone, start a new session, change what Dum works from (mode, backend, goal, notes, personal context, direction, corrections), quit, or go 30 minutes without activity.
+- **Trail**: a session's ordered skill visits, with markers for agreed directions and handoff steps. A revisit is a new visit; an edge means "came next", never "is a prerequisite of".
+- **Story**: your sessions across time, read goal by goal. A cache over the sessions, rebuilt when it falls behind.
+- **Debug chat**: an independent chat in Settings that answers questions about Dum itself from read-only diagnostics. It never sees a zone and can't change anything.
 - **Change**: a file Dum writes on command, applied directly, with a diff shown after and one-click revert. Replaces "proposal".
 - **Practice**: "suggested projects that fit a skill's scope well". No guided practice.
 - **Track**: a curated ladder of skills with prerequisites.

@@ -1,16 +1,37 @@
-// Desktop preferences, version 2, in one private file under Electron's userData. Main is the only
-// writer; the host gets copies. Nothing secret goes in it: no tokens, keys, transcripts or captures.
+// Desktop preferences and the circle's placement, version 3, in one private file under Electron's
+// userData. Main is the only writer; the host gets copies of the preferences. Nothing secret goes in
+// it: no tokens, keys, transcripts or captures.
 
 import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { AgentChoiceSchema, CLAUDE_DEFAULTS, SelectorSchema } from "../agent/schema.ts";
 import { readState, writeState } from "../state-files.ts";
-import { accelerator, DEFAULT_PREFERENCES, DesktopPreferencesSchema, type DesktopPreferences } from "./protocol.ts";
+import { IsoSchema } from "../zone-types.ts";
+import { accelerator, DEFAULT_PREFERENCES, DesktopPreferencesSchema, DisplayIdSchema, type DesktopPreferences } from "./protocol.ts";
+import { CIRCLE } from "./surfaces.ts";
 
 const FILE = "settings.json";
 const MAX_FILE = 64 * 1024;
 
+/**
+ * Where the circle sits on one display: normalized top-left fractions over its travel range, and when
+ * the user last put it there. Electron display ids are matching hints, not hardware identities.
+ */
+export type CirclePlacement = { displayId: string; u: number; v: number; usedAt: string };
+export type CircleLayout = { lastChosenDisplayId: string | null; placements: CirclePlacement[] };
+
+const unit = z.number().finite().min(0).max(1);
+export const CircleLayoutSchema = z.object({
+  lastChosenDisplayId: DisplayIdSchema.nullable(),
+  placements: z.array(z.object({ displayId: DisplayIdSchema, u: unit, v: unit, usedAt: IsoSchema }).strict())
+    .max(CIRCLE.placements)
+    .refine((ps) => new Set(ps.map((p) => p.displayId)).size === ps.length, "one placement per display"),
+}).strict() satisfies z.ZodType<CircleLayout>;
+
+const EMPTY_LAYOUT: CircleLayout = { lastChosenDisplayId: null, placements: [] };
+
+const StoredV3 = z.object({ version: z.literal(3), settings: z.record(z.string(), z.unknown()), circle: z.unknown() }).strict();
 const StoredV2 = z.object({ version: z.literal(2), settings: z.record(z.string(), z.unknown()) }).strict();
 
 /** The version 1 file exactly as older builds wrote it; read only to migrate. */
@@ -28,6 +49,20 @@ const StoredV1 = z.object({
   recent: z.array(z.string().max(4096)).max(8),
   companion: z.object({ x: z.number(), y: z.number() }).strict().nullable(),
 }).strict();
+
+/**
+ * `layout` with the user's placement for one display put in, as the most recently chosen. Over the
+ * cap, the least recently user-chosen other placement goes.
+ */
+export function withPlacement(layout: CircleLayout, placement: CirclePlacement): CircleLayout {
+  const others = layout.placements.filter((p) => p.displayId !== placement.displayId);
+  while (others.length >= CIRCLE.placements) {
+    let oldest = 0;
+    for (let i = 1; i < others.length; i++) if (others[i]!.usedAt < others[oldest]!.usedAt) oldest = i;
+    others.splice(oldest, 1);
+  }
+  return { lastChosenDisplayId: placement.displayId, placements: [...others, { ...placement }] };
+}
 
 /**
  * A saved agent choice from before the look role and before Claude took only API keys: the
@@ -56,13 +91,16 @@ export class DesktopSettings {
   /** Why the saved file wasn't used as it was, if it wasn't; shown once, never fatal. */
   warning = "";
   private prefs: DesktopPreferences = structuredClone(DEFAULT_PREFERENCES);
+  private layout: CircleLayout = structuredClone(EMPTY_LAYOUT);
 
   private constructor(readonly dir: string) {}
 
   /**
-   * A missing file means defaults. A version 1 file is migrated and rewritten as version 2 once,
-   * and so is a saved agent choice of an older shape. An unreadable file is kept aside, never
-   * silently overwritten. A saved agent choice that still doesn't parse loads as null.
+   * A missing file means defaults. A version 1 or 2 file is migrated and rewritten as version 3 once,
+   * and so is a saved agent choice of an older shape; version 2 preferences carry over unchanged and
+   * the circle starts at its default. An unreadable file is kept aside, never silently overwritten.
+   * A saved agent choice that still doesn't parse loads as null and the file is left as it is; so is
+   * a circle layout that doesn't parse, which loads as none.
    */
   static load(dir: string): DesktopSettings {
     const out = new DesktopSettings(dir);
@@ -80,23 +118,29 @@ export class DesktopSettings {
       out.migrate(v1.data.settings);
       return out;
     }
-    const v2 = StoredV2.safeParse(raw);
-    if (!v2.success) {
+    const v3 = StoredV3.safeParse(raw);
+    const v2 = v3.success ? null : StoredV2.safeParse(raw);
+    const stored = v3.success ? v3.data : v2?.success ? v2.data : null;
+    if (!stored) {
       out.setAside();
       return out;
     }
-    const { agent: saved, ...rest } = v2.data.settings;
+    const { agent: saved, ...rest } = stored.settings;
     const prefs = DesktopPreferencesSchema.safeParse({ ...rest, agent: null });
     if (!prefs.success) {
       out.setAside();
       return out;
+    }
+    if (v3.success) {
+      const layout = CircleLayoutSchema.safeParse(v3.data.circle);
+      if (layout.success) out.layout = layout.data;
     }
     const { agent, notes } = migrateAgent(saved ?? null);
     const choice = AgentChoiceSchema.nullable().safeParse(agent);
     out.prefs = { ...prefs.data, agent: choice.success ? choice.data : null };
     if (!choice.success) {
       out.warning = "The saved choice of who powers Dum isn't valid any more. Choose again in Settings › Agent.";
-    } else if (notes.length) {
+    } else if (notes.length || !v3.success) {
       out.warning = notes.join("\n");
       out.save();
     }
@@ -107,15 +151,26 @@ export class DesktopSettings {
     return structuredClone(this.prefs);
   }
 
-  /** Validated and saved before it counts: a failed write leaves the previous preferences in force. */
+  /** Validated and saved before it counts: a failed write leaves the previous preferences in force. The circle's layout is kept. */
   set(p: DesktopPreferences): void {
     const next = DesktopPreferencesSchema.parse(p);
-    this.write(next);
+    this.write(next, this.layout);
     this.prefs = next;
   }
 
-  private write(prefs: DesktopPreferences): void {
-    writeState(this.dir, FILE, `${JSON.stringify({ version: 2, settings: prefs }, null, 2)}\n`);
+  circle(): CircleLayout {
+    return structuredClone(this.layout);
+  }
+
+  /** Validated and saved before it counts, like `set`. The preferences are kept. */
+  setCircle(layout: CircleLayout): void {
+    const next = CircleLayoutSchema.parse(layout);
+    this.write(this.prefs, next);
+    this.layout = next;
+  }
+
+  private write(prefs: DesktopPreferences, circle: CircleLayout): void {
+    writeState(this.dir, FILE, `${JSON.stringify({ version: 3, settings: prefs, circle }, null, 2)}\n`);
   }
 
   /** Window, workspace, recent-project and companion fields are dropped; screen advice becomes the look. */
@@ -137,7 +192,7 @@ export class DesktopSettings {
   /** A migration's result, written once; if that fails it still applies and is saved on the next change. */
   private save(): void {
     try {
-      this.write(this.prefs);
+      this.write(this.prefs, this.layout);
     } catch (err) {
       const why = `Upgraded desktop settings couldn't be saved (${(err as Error).message}); they apply for now and will be saved on the next change.`;
       this.warning = this.warning ? `${this.warning}\n${why}` : why;

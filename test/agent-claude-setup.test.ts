@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bundledCandidates, bundledExecutable, claudeSetup, type Probe } from "../src/agent/claude-setup.ts";
 import type { Credentials } from "../src/desktop/credentials.ts";
-import type { LoginMethod, LoginUi } from "../src/agent/types.ts";
+import type { LoginMethod } from "../src/agent/types.ts";
 
 process.env.DUM_CONTEXT = "off";
 
@@ -26,7 +26,6 @@ function probe(o: { runs?: boolean } = {}) {
   return { probe: p, calls };
 }
 
-const ui: LoginUi = { async openUrl() { assert.fail("Claude never opens a sign-in page"); }, changed() {} };
 
 test("bundled binary resolution finds the platform package, unpacks asar paths, and never falls back to PATH", () => {
   assert.deepEqual(bundledCandidates("darwin", "arm64", false), ["@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"]);
@@ -88,9 +87,9 @@ test("the key is shape-checked and write-only; sign-out removes only it", async 
 test("Claude has no sign-in: every login request is refused and nothing runs", async () => {
   const s = store("sk-ant-123");
   const setup = claudeSetup({ executable: "/opt/claude", credentials: s.credentials, probe: probe().probe });
-  await assert.rejects(setup.login("anthropic-key", ui), /API key/);
-  await assert.rejects(setup.login("chatgpt", ui), /doesn't sign in with chatgpt/);
-  await assert.rejects(setup.login("claude-subscription" as LoginMethod, ui), /doesn't sign in with claude-subscription/);
+  await assert.rejects(setup.login("anthropic-key"), /API key/);
+  await assert.rejects(setup.login("chatgpt"), /doesn't sign in with chatgpt/);
+  await assert.rejects(setup.login("claude-subscription" as LoginMethod), /doesn't sign in with claude-subscription/);
   await assert.rejects(setup.signOut("claude-subscription" as LoginMethod), /doesn't sign in with claude-subscription/);
   assert.equal(s.read(), "sk-ant-123", "a refused request changes no credential");
 });

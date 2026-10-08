@@ -1,6 +1,6 @@
-// "Who powers Dum?": pick a backend, sign in, then pick the intern, helper and look models.
-// The same view is Settings → Agent. The renderer never sees a key after sending it, and main checks
-// every choice again against the backend's sign-ins and the live catalog.
+// "Who powers Dum?": pick a released backend, save its API key or check the local server, then pick the
+// intern, helper and look models. The same view is Settings → Agent. The renderer never sees a key after
+// sending it, and main checks every choice again against the backend's sign-ins and the live catalog.
 
 import type { Snapshot } from "../protocol.ts";
 import { ROLES } from "../../agent/schema.ts";
@@ -14,9 +14,9 @@ import {
 type Catalog = { state: "loading" } | { state: "ready"; models: ModelOption[] } | { state: "error"; message: string };
 
 const ROLE_TEXT: Record<Role, { title: string; hint: string }> = {
-  intern: { title: "Dum's model", hint: "Holds the conversation and calls Dum's actions, so it needs function calling." },
-  helper: { title: "Helper model", hint: "Suggested projects, the Wizard and pictures you share. Shared pictures need a model that can see pictures." },
-  look: { title: "Look model", hint: "Sees one screen frame each time your screen changes while Dum is on, so it needs a model that takes pictures; a small fast model keeps it cheap." },
+  intern: { title: "Dum's model", hint: "Holds the conversation, runs handoffs you command with Do this and answers the debug chat, so it needs function calling." },
+  helper: { title: "Helper model", hint: "Composes the Wizard's options when you ask for help deciding, and reads pictures you share. Shared pictures need a model that can see pictures." },
+  look: { title: "Look model", hint: "Gets one fresh screen frame for each changed 3-second tick while looking is on, and notes what you're working on. It never teaches or advises. A small fast model keeps it cheap." },
 };
 
 export class AgentSheet {
@@ -35,13 +35,13 @@ export class AgentSheet {
     this.el = h(
       "section",
       { class: `agent-sheet agent-${mode}`, "aria-labelledby": `agent-title-${mode}` },
-      h(mode === "setup" ? "h2" : "h3", { id: `agent-title-${mode}`, tabindex: "-1" }, mode === "setup" ? "Who powers Dum?" : "Agent"),
+      h(mode === "setup" ? "h2" : "h3", { id: `agent-title-${mode}`, tabindex: "-1", class: mode === "setup" ? null : "visually-hidden" }, mode === "setup" ? "Who powers Dum?" : "Agent"),
       h(
         "p",
         { class: "hint" },
         mode === "setup"
           ? "Dum needs a model before it can answer. Pick who runs it. Nothing you've written is sent anywhere until this is done."
-          : "Who runs Dum and the Wizard. Changing it ends the open conversation, the way switching zones does. Signing out removes only that sign-in.",
+          : "Who runs Dum and the Wizard. Changing it ends the open conversation, the way switching zones does. Removing a key removes only that key.",
       ),
       this.body,
     );
@@ -75,7 +75,7 @@ export class AgentSheet {
     this.key = key;
     const inside = this.el.contains(document.activeElement) ? document.activeElement : null;
     const focusId = inside instanceof HTMLElement ? inside.dataset.focus : undefined;
-    this.draw(s, rows, row, login, catalog);
+    this.draw(rows, row, login, catalog);
     if (focusId) this.el.querySelector<HTMLElement>(`[data-focus="${focusId}"]`)?.focus();
   }
 
@@ -94,7 +94,7 @@ export class AgentSheet {
     });
   }
 
-  private draw(s: Snapshot, rows: BackendRow[], row: BackendRow | null, login: LoginMethod | null, catalog: Catalog | undefined) {
+  private draw(rows: BackendRow[], row: BackendRow | null, login: LoginMethod | null, catalog: Catalog | undefined) {
     const check = h("button", {
       type: "button", class: "btn ghost", "data-focus": "check",
       onclick: () => {
@@ -129,14 +129,14 @@ export class AgentSheet {
     );
     const parts: Node[] = [list];
     if (row) {
-      parts.push(this.signIn(s, row, login));
+      parts.push(this.signIn(row, login));
       if (login && row.ready === login) parts.push(this.models(row, login, catalog));
     }
     parts.push(h("div", { class: "actions" }, check));
     this.body.replaceChildren(...parts);
   }
 
-  private signIn(s: Snapshot, row: BackendRow, login: LoginMethod | null): HTMLElement {
+  private signIn(row: BackendRow, login: LoginMethod | null): HTMLElement {
     const box = h("div", { class: "sign-in", role: "group", "aria-label": `Sign in to ${row.label}` });
     if (row.methods.length > 1) {
       box.append(
@@ -162,10 +162,13 @@ export class AgentSheet {
       );
     }
     if (!login) return box;
-    const call = (request: Parameters<Client["call"]>[0]) => () => void this.client.call(request);
-    const signOut = (label: string) => h("button", { type: "button", class: "btn ghost", "data-focus": "signout", onclick: call({ type: "agent-signout", backend: row.id, method: login }) }, label);
     if (login === "anthropic-key") {
-      if (row.ready === login) box.append(h("p", { class: "hint" }, "An API key is saved. Dum never shows it again. Calls are billed to your Anthropic account."), h("div", { class: "actions" }, signOut("Remove key")));
+      if (row.ready === login) {
+        box.append(
+          h("p", { class: "hint" }, "An API key is saved. Dum never shows it again. Calls are billed to your Anthropic account."),
+          h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", "data-focus": "signout", onclick: () => void this.client.call({ type: "agent-signout", backend: row.id, method: login }) }, "Remove key")),
+        );
+      }
       const form = h(
         "form",
         { class: "inline-form" },
@@ -182,25 +185,7 @@ export class AgentSheet {
       box.append(form, h("p", { class: "hint" }, "The key goes to Dum's encrypted store on this Mac and is used only for Dum's own Claude sessions."));
       return box;
     }
-    if (login === "none") {
-      box.append(h("p", { class: "hint" }, row.ready ? "Running on this Mac. Nothing leaves it." : "Start Ollama or LM Studio on this Mac, then check again. Dum installs neither."));
-      return box;
-    }
-    if (row.ready === login) {
-      box.append(
-        h("p", { class: "hint" }, `Signed in. ${methodLabel(login)} again any time from here.`),
-        h("div", { class: "actions" }, signOut("Sign out")),
-      );
-      return box;
-    }
-    if (row.loginRunning) {
-      box.append(
-        h("p", { class: "hint" }, "Finish signing in in your browser. Dum picks it up here when you're done. It never sees your password."),
-        h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", onclick: call({ type: "agent-login-cancel" }) }, "Cancel")),
-      );
-      return box;
-    }
-    box.append(h("div", { class: "actions" }, h("button", { type: "button", class: "btn primary", "data-focus": "login", disabled: !row.installed, onclick: call({ type: "agent-login", backend: row.id, method: login }) }, methodLabel(login))));
+    box.append(h("p", { class: "hint" }, row.ready ? "Running on this Mac. Nothing leaves it." : "Start Ollama or LM Studio on this Mac, then check again. Dum installs neither."));
     return box;
   }
 

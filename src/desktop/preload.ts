@@ -1,4 +1,6 @@
-// The renderer's only bridge: one validated request channel and snapshot notifications.
+// The working window's only bridge: one validated request channel and snapshot notifications. The
+// circle has its own restricted `dum:circle` bridge and the bubble a receive-only one; main also
+// checks each sender's role, so this channel answers only the working window.
 // Sandboxed and context-isolated; nothing from Node or Electron is handed to the page.
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";

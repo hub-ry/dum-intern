@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { prepare, run, systemPrompt, type Ctx } from "../src/session.ts";
+import { prepare, run, systemPrompt, type Ctx, type SessionHooks } from "../src/session.ts";
 import { Store } from "../src/store.ts";
 import { Evidence } from "../src/evidence.ts";
 import { SharedFiles } from "../src/shared-files.ts";
@@ -16,12 +16,11 @@ import { createRegistry } from "../src/agent/registry.ts";
 import * as skills from "../src/skills.ts";
 import type { AgentBackend, AgentEvent, AgentSession, OpenOptions, UserTurn } from "../src/agent/types.ts";
 import type { RequestBinding } from "../src/share-types.ts";
-import type { ZoneContext } from "../src/zone-types.ts";
+import type { ChangeReceipt, SkillRef, ZoneContext } from "../src/zone-types.ts";
 
 process.env.DUM_CONTEXT = "off";
 
 const tick = () => new Promise((r) => setImmediate(r));
-const ACTIONS = ["ask", "change", "check_answer", "list_files", "read_file", "remember", "review_submission", "suggest_projects", "wizard_aside"];
 
 /** What one request's model does: events it yields, actions it calls through `act`. */
 type Script = (input: UserTurn, act: (name: string, args: unknown) => Promise<{ text: string; isError?: boolean }>, o: OpenOptions) => AsyncGenerator<AgentEvent>;
@@ -36,7 +35,7 @@ function fakeBackend() {
     id: "local",
     label: "Fake",
     models: async () => [],
-    capabilities: () => ({ images: false, interrupt: true, runtimeActionCheck: true }),
+    capabilities: async (selector) => ({ model: selector.model, images: false, noImages: "it can't see pictures", interrupt: true, runtimeActionCheck: true }),
     async open(o) {
       opened.push(o);
       const session: AgentSession = {
@@ -57,6 +56,7 @@ function fakeBackend() {
     login: "none",
     intern: { backend: "local", model: "fake-intern", effort: null },
     helper: { backend: "local", model: "fake-helper", effort: null },
+    look: { backend: "local", model: "fake-look", effort: null },
   });
   return { agent, opened, inputs, closes: () => closed, play: (s: Script) => { script = s; } };
 }
@@ -77,13 +77,24 @@ async function setup(files: Record<string, string> = {}) {
   const evidence = new Evidence(home);
   const fake = fakeBackend();
   const personal = { path: "", text: "", warning: "" };
+  /** What the request told the host's trail: every hook call, in order. */
+  const told = { reports: [] as unknown[], changes: [] as { receipt: ChangeReceipt; skills: readonly SkillRef[] }[], proofs: [] as SkillRef[], decided: [] as string[][] };
   /** One request: a fresh binding and share of the folder, prepared the way the host does it. */
-  const request = async () => {
+  const request = async (decide: SessionHooks["decide"] = null) => {
     const binding: RequestBinding = { zoneId: id, zoneEpoch: "epoch-1", inputToken: "token-1", requestId: randomUUID() };
     const shares = new SharedFiles(binding, null);
     const grant = await shares.grant(root, "folder");
     shares.activate();
-    const ctx = prepare(zone, "understand", store, personal, evidence, shares, fake.agent, binding);
+    const hooks: SessionHooks = {
+      report: (topics) => {
+        told.reports.push(topics);
+        return "noted on their trail";
+      },
+      changed: (receipt, named) => void told.changes.push({ receipt, skills: named }),
+      proved: (skill) => void told.proofs.push(skill),
+      decide,
+    };
+    const ctx = prepare(zone, "understand", store, personal, evidence, shares, fake.agent, binding, hooks);
     return { ctx, shares, grant, file: (rel: string) => `${grant.id}/${rel}` };
   };
   const done = () => {
@@ -91,7 +102,7 @@ async function setup(files: Record<string, string> = {}) {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   };
-  return { home, root, zone, store, evidence, fake, request, done };
+  return { home, root, zone, store, evidence, fake, request, done, told };
 }
 
 function built(name: string, lang: string) {
@@ -109,19 +120,21 @@ test("the zone's context and the request's shares reach the system prompt, and o
   const s = await setup({ "main.py": "print('hi')\n" });
   try {
     const { ctx, grant } = await s.request();
-    await run("what should I build next?", ctx);
+    assert.equal(await run("what should I build next?", ctx), "ok");
     const o = s.fake.opened[0]!;
     assert.match(o.systemPrompt, /Learn hash maps in python/);
     assert.match(o.systemPrompt, /they like small examples/);
     assert.ok(o.systemPrompt.includes(basename(s.root)), "the shared folder is in the boundary");
     assert.ok(o.systemPrompt.startsWith(systemPrompt(s.zone, "understand")));
-    assert.doesNotMatch(o.systemPrompt, /propose_plan|propose_change|create_file|run_command|course/);
-    assert.deepEqual(o.actions.map((a) => a.name).sort(), ACTIONS);
+    assert.doesNotMatch(o.systemPrompt, /propose_plan|propose_change|create_file|run_command|course|wizard_aside/);
+    assert.equal(o.actions.some((a) => a.name === "wizard_aside"), false, "no unprompted Wizard action");
+    assert.equal(o.actions.some((a) => a.name === "decision_help"), false, "decision help only in a decision turn the user opened");
     assert.deepEqual(o.selector, { backend: "local", model: "fake-intern", effort: null });
     assert.equal(o.login, "none");
     assert.equal(o.cwd, join(s.home, "zones", s.zone.id, "runtime"));
     assert.ok(existsSync(o.cwd), "the zone's empty runtime directory is the session's cwd");
-    assert.equal(o.binding, ctx.binding);
+    assert.equal("binding" in o || "zone" in o, false, "the backend gets transport options only");
+    assert.match(s.fake.inputs[0]!.text, /THE SKILLS YOU MAY REPORT[\s\S]*hash maps \(python\)/);
     assert.match(s.fake.inputs[0]!.text, /THEIR REQUEST:\nwhat should I build next\?$/);
     assert.equal(s.fake.closes(), 1, "one session per request, closed when it ends");
     assert.ok(grant.files.length === 1);
@@ -164,6 +177,8 @@ test("a locked concept is refused and nothing is written", async () => {
     assert.match(reply, /^Refused: .*recursion.*nothing written/);
     assert.equal(readFileSync(join(s.root, "walk.py"), "utf8"), "def walk(n):\n    return n\n");
     assert.deepEqual(listChanges(s.home, s.zone.id), []);
+    assert.equal(ctx.refused.length, 1, "the refusal is kept for whoever commanded it");
+    assert.deepEqual(s.told.changes, []);
     assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "tool" && e.name === "change" && e.outcome === "refused"));
     assert.ok(!s.store.getSnapshot().transcript.some((e) => e.kind === "diff"));
   } finally { s.done(); }
@@ -199,6 +214,8 @@ test("a held skill writes the change directly and returns the diff and receipt; 
     assert.equal(diffs.length, 2);
     const kept = listChanges(s.home, s.zone.id);
     assert.equal(kept.length, 2);
+    assert.deepEqual(s.told.changes.map((c) => c.receipt.id).sort(), kept.map((c) => c.id).sort(), "each landed change reaches the trail");
+    assert.deepEqual(s.told.changes[0]!.skills, [{ name: "printing", lang: "" }]);
     for (const d of diffs) {
       assert.ok(d.kind === "diff" && d.outcome === "applied" && kept.some((c) => c.id === d.changeId), "each diff carries the change to revert");
     }
@@ -255,7 +272,7 @@ test("Stop withdraws dum's question without answering it, and close ends the req
     const going = run("help me pick", stopped.ctx);
     await until(() => s.store.getSnapshot().prompt?.type === "question");
     s.store.onInterrupt!();
-    await going;
+    assert.equal(await going, "stopped");
     assert.match(answer, /Stopped by them - nothing was answered/);
     assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "question" && e.answer === null));
     assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "note" && /stopped - say what to do instead/.test(e.text)));
@@ -274,7 +291,7 @@ test("Stop withdraws dum's question without answering it, and close ends the req
     await until(() => s.store.getSnapshot().prompt?.type === "question");
     abort.abort();
     s.store.close();
-    await ending;
+    assert.equal(await ending, "closed");
     assert.match(answer, /Stopped by them/);
     assert.equal(s.fake.closes(), 2);
   } finally { s.done(); }
@@ -298,6 +315,7 @@ test("an explanation counts only when quoted from this request, and only as reco
     await run(`so: ${quote}`, (await s.request()).ctx);
     assert.doesNotMatch(verdicts[1]!, /Not recorded/);
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), "recognize", "an explanation is never a build");
+    assert.deepEqual(s.told.proofs, [{ name: "printing", lang: "python" }], "only the accepted explanation is linked");
     s.store.submit("not yet");
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), null);
   } finally { s.done(); }
@@ -325,6 +343,7 @@ test("a reviewed submission builds only on their own unaided yes, given by the a
     assert.match(replies[0]!, /^Not recorded/);
     assert.match(replies[1]!, /^Recorded/);
     assert.equal(skills.levelIn(skills.read(), "printing", "python"), "build");
+    assert.deepEqual(s.told.proofs, [{ name: "printing", lang: "python" }]);
   } finally { s.done(); }
 });
 
@@ -345,5 +364,51 @@ test("what they share with :inspect reaches dum with its next turn, once, and co
     assert.match(s.fake.inputs[0]!.text, /2  b = 2/);
     assert.deepEqual(ctx.shared, [], "shared once, not every turn");
     assert.equal(replied!.size, 1);
+  } finally { s.done(); }
+});
+
+test("report_context hands the model's topics to the host and grants nothing", async () => {
+  const s = await setup();
+  try {
+    const { ctx } = await s.request();
+    const replies: string[] = [];
+    s.fake.play(async function* (_input, act) {
+      replies.push((await act("report_context", { topics: [{ topic: "hash maps", skill: { name: "hash maps", lang: "python" }, confidence: 0.9, reason: "they asked about buckets" }] })).text);
+      replies.push((await act("report_context", { topics: "not a list" })).text);
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("how do buckets work?", ctx);
+    assert.equal(replies[0], "noted on their trail");
+    assert.match(replies[1]!, /^That didn't work/);
+    assert.equal(s.told.reports.length, 1);
+    assert.deepEqual(skills.read().skills, [], "a report is never evidence");
+  } finally { s.done(); }
+});
+
+test("decision_help is offered only in a decision turn, and recomposes with what they said", async () => {
+  const s = await setup();
+  try {
+    const { ctx } = await s.request(async (said) => {
+      s.told.decided.push([...said]);
+      return "two options are on their card";
+    });
+    let reply = "";
+    s.fake.play(async function* (_input, act, o) {
+      assert.ok(o.actions.some((a) => a.name === "decision_help"));
+      reply = (await act("decision_help", {})).text;
+      yield { type: "end", error: null, interrupted: false };
+    });
+    await run("the CSV has a header row", ctx);
+    assert.equal(reply, "two options are on their card");
+    assert.deepEqual(s.told.decided, [["the CSV has a header row"]]);
+  } finally { s.done(); }
+});
+
+test("a failed turn says so to whoever commanded it", async () => {
+  const s = await setup();
+  try {
+    const { ctx } = await s.request();
+    s.fake.play(async function* () { yield { type: "end", error: "provider unavailable", interrupted: false }; });
+    assert.equal(await run("do it", ctx), "failed");
   } finally { s.done(); }
 });

@@ -1,17 +1,31 @@
 // Main ↔ utility host. Every request carries {epoch, id, op}; both directions are strict and validated.
-// The host owns zones, sessions and every model call; main owns settings, credentials and native surfaces.
+// The host owns zones, sessions, directions, handoffs, trails and every model call; main owns
+// settings, credentials, circle placement and native surfaces.
 
 import { z } from "zod";
 import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema, ModelOptionSchema, PictureSchema } from "../agent/schema.ts";
-import { TickSchema } from "../observe-types.ts";
+import {
+  AlignmentAcceptInputSchema, AlignmentAnswerSchema, AlignmentMoveSchema, ContextUsePageSchema, ContextUseViewSchema, CursorSchema,
+  DecisionDismissInputSchema, DecisionHelpInputSchema, DecisionViewSchema, DirectionSchema, DirectionViewSchema, HandoffDismissInputSchema,
+  HandoffEditInputSchema, HandoffReviewInputSchema, HandoffSelectInputSchema, HandoffViewSchema, IgnoreObservationInputSchema,
+} from "../delegation-types.ts";
+import { DebugBindingSchema, DebugTextSchema, DebugViewSchema, MainStatusSchema, SanitizedMainEventsSchema } from "../diagnostic-types.ts";
+import { HostLookStatusSchema, TickSchema } from "../observe-types.ts";
 import { IdSchema, InputBindingSchema, RequestBindingSchema, ShareGrantSchema, TokenSchema } from "../share-types.ts";
+import {
+  SessionMetaSchema, StoryPageSchema, StoryQuerySchema, TrailMapInputSchema, TrailPageSchema, TrailQuerySchema, TrailSourceSchema, TrailViewSchema,
+} from "../trail-types.ts";
 import { ChangeReceiptSchema, FollowGrantSchema, ShaSchema, SkillRefSchema, ZoneContextSchema, ZoneRegistrySchema, ZoneSchema } from "../zone-types.ts";
 import {
-  CommandNameSchema, ModeSchema, PanelSchema, RecordSchema, RespondDecisionSchema, ShareKindSchema, SkillEditOpSchema,
-  TreeSyncSchema, ZoneContextTextSchema, ZoneCreateSchema, ZonePatchSchema, DesktopPreferencesSchema,
+  CommandNameSchema, ModeSchema, RecordSchema, RespondDecisionSchema, ShareKindSchema, SkillEditOpSchema, TreeSyncSchema, ViewNameSchema,
+  ZoneContextTextSchema, ZoneCreateSchema, ZonePatchSchema, DesktopPreferencesSchema,
 } from "./protocol.ts";
 import type { CredentialNeed, ModelOption } from "../agent/types.ts";
+import type { ContextUsePage, ContextUseView, DecisionView, Direction, DirectionView, HandoffView } from "../delegation-types.ts";
+import type { DebugView } from "../diagnostic-types.ts";
+import type { HostLookStatus } from "../observe-types.ts";
 import type { ShareGrant } from "../share-types.ts";
+import type { SessionMeta, StoryPage, TrailPage, TrailSource, TrailView } from "../trail-types.ts";
 import type { ChangeReceipt, FollowGrant, Zone, ZoneContext, ZoneId, ZoneRegistry } from "../zone-types.ts";
 import type { State } from "../store-types.ts";
 import type { View } from "../web/view.ts";
@@ -20,6 +34,7 @@ const text = z.string().max(48 * 1024);
 const revision = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const absolute = z.string().min(1).max(4096).refine((p) => p.startsWith("/") && !/[\u0000-\u001f]/.test(p), "not an absolute path");
 const base = { epoch: TokenSchema, id: TokenSchema };
+const op = <T extends string>(name: T) => ({ ...base, op: z.literal(name) });
 
 /** A picture the user chose to share with one request, captured and checked by main. */
 export const SharedImageSchema = z.object({
@@ -30,42 +45,77 @@ export const SharedImageSchema = z.object({
 
 export const PersonalSchema = z.object({ path: z.string().max(8192), text: z.string().max(64 * 1024), warning: z.string().max(8192) }).strict();
 
+const shares = z.array(ShareGrantSchema).max(64);
+
 export const HostRequestSchema = z.discriminatedUnion("op", [
   z.object({
-    ...base, op: z.literal("initialize"), home: absolute, claudeExecutable: absolute.nullable(),
-    personal: PersonalSchema, settings: DesktopPreferencesSchema,
+    ...op("initialize"), home: absolute, claudeExecutable: absolute.nullable(),
+    personal: PersonalSchema, settings: DesktopPreferencesSchema, main: MainStatusSchema,
   }).strict(),
-  z.object({ ...base, op: z.literal("zone-create"), zone: ZoneCreateSchema, enter: z.boolean() }).strict(),
-  z.object({ ...base, op: z.literal("zone-enter"), zoneId: IdSchema, expectedRevision: revision }).strict(),
-  z.object({ ...base, op: z.literal("zone-update"), zoneId: IdSchema, patch: ZonePatchSchema, expectedRevision: revision }).strict(),
-  z.object({ ...base, op: z.literal("zone-context"), zoneId: IdSchema, text: ZoneContextTextSchema, expectedRevision: revision }).strict(),
-  z.object({ ...base, op: z.literal("zone-delete"), zoneId: IdSchema, expectedRevision: revision }).strict(),
-  z.object({ ...base, op: z.literal("settings"), settings: DesktopPreferencesSchema }).strict(),
-  z.object({ ...base, op: z.literal("agent-select"), choice: AgentChoiceSchema.nullable() }).strict(),
-  z.object({ ...base, op: z.literal("agent-models"), backend: BackendIdSchema, login: LoginMethodSchema }).strict(),
+  z.object({ ...op("zone-create"), zone: ZoneCreateSchema, enter: z.boolean() }).strict(),
+  z.object({ ...op("zone-enter"), zoneId: IdSchema, expectedRevision: revision }).strict(),
+  z.object({ ...op("zone-update"), zoneId: IdSchema, patch: ZonePatchSchema, expectedRevision: revision }).strict(),
+  z.object({ ...op("zone-context"), zoneId: IdSchema, text: ZoneContextTextSchema, expectedRevision: revision }).strict(),
+  z.object({ ...op("zone-delete"), zoneId: IdSchema, expectedRevision: revision }).strict(),
+  z.object({ ...op("settings"), settings: DesktopPreferencesSchema }).strict(),
+  z.object({ ...op("agent-select"), choice: AgentChoiceSchema.nullable() }).strict(),
+  z.object({ ...op("agent-models"), backend: BackendIdSchema, login: LoginMethodSchema }).strict(),
   z.object({
-    ...base, op: z.literal("credential"), requestId: TokenSchema,
+    ...op("credential"), requestId: TokenSchema,
     value: z.object({ value: z.string().min(1).max(16 * 1024), expiresAt: z.number().int().nonnegative().nullable() }).strict().nullable(),
   }).strict(),
-  z.object({
-    ...base, op: z.literal("send"), binding: RequestBindingSchema, text, shares: z.array(ShareGrantSchema).max(64),
-    image: SharedImageSchema.optional(),
-  }).strict(),
-  z.object({ ...base, op: z.literal("respond"), binding: RequestBindingSchema, decision: RespondDecisionSchema }).strict(),
-  z.object({ ...base, op: z.literal("command"), name: CommandNameSchema, argument: z.string().max(4096), binding: RequestBindingSchema }).strict(),
-  z.object({ ...base, op: z.literal("panel"), panel: PanelSchema }).strict(),
-  z.object({ ...base, op: z.literal("share-add"), path: absolute, kind: ShareKindSchema, binding: RequestBindingSchema }).strict(),
-  z.object({ ...base, op: z.literal("share-remove"), shareId: IdSchema, binding: RequestBindingSchema }).strict(),
-  z.object({ ...base, op: z.literal("follow-add"), path: absolute }).strict(),
-  z.object({ ...base, op: z.literal("follow-remove"), followId: IdSchema }).strict(),
-  z.object({ ...base, op: z.literal("change-revert"), changeId: IdSchema, binding: InputBindingSchema }).strict(),
-  z.object({ ...base, op: z.literal("skill-edit"), edit: SkillEditOpSchema, skill: SkillRefSchema }).strict(),
-  z.object({ ...base, op: z.literal("tree-sync"), sync: TreeSyncSchema }).strict(),
-  z.object({ ...base, op: z.literal("open-record"), record: RecordSchema, recordId: IdSchema.optional() }).strict(),
-  z.object({ ...base, op: z.literal("observe-tick"), tick: TickSchema }).strict(),
-  z.object({ ...base, op: z.literal("observe-frame"), checkId: TokenSchema, image: PictureSchema.nullable() }).strict(),
-  z.object({ ...base, op: z.literal("interrupt") }).strict(),
-  z.object({ ...base, op: z.literal("close") }).strict(),
+  z.object({ ...op("send"), binding: RequestBindingSchema, text, shares, image: SharedImageSchema.optional() }).strict(),
+  z.object({ ...op("respond"), binding: RequestBindingSchema, decision: RespondDecisionSchema }).strict(),
+  z.object({ ...op("command"), name: CommandNameSchema, argument: z.string().max(4096), binding: RequestBindingSchema }).strict(),
+  z.object({ ...op("view"), view: ViewNameSchema }).strict(),
+  z.object({ ...op("share-add"), path: absolute, kind: ShareKindSchema, binding: RequestBindingSchema }).strict(),
+  z.object({ ...op("share-remove"), shareId: IdSchema, binding: RequestBindingSchema }).strict(),
+  z.object({ ...op("follow-add"), path: absolute }).strict(),
+  z.object({ ...op("follow-remove"), followId: IdSchema }).strict(),
+  z.object({ ...op("change-revert"), changeId: IdSchema, binding: InputBindingSchema }).strict(),
+  z.object({ ...op("skill-edit"), edit: SkillEditOpSchema, skill: SkillRefSchema }).strict(),
+  z.object({ ...op("tree-sync"), sync: TreeSyncSchema }).strict(),
+  z.discriminatedUnion("record", [
+    z.object({ ...op("open-record"), record: RecordSchema, recordId: IdSchema.optional() }).strict(),
+    /** The host names the personal file behind its ref; main opens it only if it is in main's named inventory. */
+    z.object({ ...op("open-record"), record: z.literal("personal"), sourceId: IdSchema }).strict(),
+  ]),
+  z.object({ ...op("observe-tick"), tick: TickSchema }).strict(),
+  z.object({ ...op("observe-frame"), checkId: TokenSchema, image: PictureSchema.nullable() }).strict(),
+  z.object({ ...op("interrupt") }).strict(),
+  z.object({ ...op("close") }).strict(),
+  // Goal alignment of any zone, bound to that zone's goal and revisions; no active-zone grants.
+  z.object({ ...op("alignment-read"), zoneId: IdSchema }).strict(),
+  z.discriminatedUnion("action", [AlignmentAnswerSchema.extend(op("alignment-step")).strict(), AlignmentMoveSchema.extend(op("alignment-step")).strict()]),
+  AlignmentAcceptInputSchema.extend(op("alignment-accept")).strict(),
+  z.object({ ...op("direction-read"), zoneId: IdSchema, directionId: IdSchema }).strict(),
+  // Decisions and handoffs. Only handoff-run carries grants, exactly as send does.
+  DecisionHelpInputSchema.extend(op("decision-help")).strict(),
+  DecisionDismissInputSchema.extend(op("decision-dismiss")).strict(),
+  HandoffSelectInputSchema.extend(op("handoff-select")).strict(),
+  HandoffEditInputSchema.extend(op("handoff-edit")).strict(),
+  HandoffDismissInputSchema.extend(op("handoff-dismiss")).strict(),
+  z.object({ ...op("handoff-run"), binding: RequestBindingSchema, handoffId: IdSchema, revision, shares, image: SharedImageSchema.optional() }).strict(),
+  z.object({ ...op("handoff-read"), zoneId: IdSchema, handoffId: IdSchema }).strict(),
+  HandoffReviewInputSchema.extend(op("handoff-review")).strict(),
+  // Current context.
+  z.object({ ...op("context-use-read"), binding: RequestBindingSchema, cursor: CursorSchema.nullable() }).strict(),
+  /** Main refreshed its opted-in personal-context copy first. */
+  z.object({ ...op("context-reload"), binding: RequestBindingSchema, personal: PersonalSchema }).strict(),
+  IgnoreObservationInputSchema.extend(op("context-ignore-observation")).strict(),
+  // Sessions, trail and story.
+  z.object({ ...op("session-new"), binding: RequestBindingSchema }).strict(),
+  TrailQuerySchema.extend(op("trail-read")).strict(),
+  z.object({ ...op("trail-source"), zoneId: IdSchema, sessionId: IdSchema, sourceId: IdSchema }).strict(),
+  TrailMapInputSchema.extend(op("trail-map")).strict(),
+  StoryQuerySchema.extend(op("story-read")).strict(),
+  // Debug chat: an independent binding and no zone field anywhere.
+  z.object({ ...op("debug-open") }).strict(),
+  z.object({ ...op("debug-send"), binding: DebugBindingSchema, text: DebugTextSchema }).strict(),
+  z.object({ ...op("debug-stop"), binding: DebugBindingSchema }).strict(),
+  z.object({ ...op("debug-reset") }).strict(),
+  /** Trusted main's sanitized events and, when they changed, its status; the host assigns sequence and time. */
+  z.object({ ...op("diagnostic-main"), events: SanitizedMainEventsSchema, status: MainStatusSchema.nullable() }).strict(),
 ]);
 export type HostRequest = z.infer<typeof HostRequestSchema>;
 
@@ -78,10 +128,20 @@ export type HostResult = {
   share?: ShareGrant;
   follow?: FollowGrant;
   change?: ChangeReceipt;
-  /** open-record: the validated app-owned file main may open. */
+  /** open-record: the validated app-owned (or named personal) file main may open. */
   path?: string;
   /** tree-sync link: the page's URL. */
   url?: string;
+  /** The named zone's alignment: alignment-*, and the target zone of zone-create/zone-update. */
+  direction?: DirectionView;
+  directionRecord?: Direction;
+  decision?: DecisionView;
+  handoff?: HandoffView;
+  contextUse?: ContextUsePage;
+  trail?: TrailPage;
+  trailSource?: TrailSource;
+  story?: StoryPage;
+  debug?: DebugView;
 };
 
 export type HostEvent =
@@ -89,8 +149,12 @@ export type HostEvent =
   | {
     type: "state"; epoch: string; zoneEpoch: string | null; state: State | null; tree: View | null; registry: ZoneRegistry; activeZone: ZoneContext | null;
     inputToken: string; canAttach: boolean; shares: ShareGrant[]; follows: FollowGrant[]; changes: ChangeReceipt[];
-    look: { status: string };
+    look: HostLookStatus;
+    direction: DirectionView | null; decision: DecisionView | null; handoff: HandoffView | null; contextUse: ContextUseView;
+    session: SessionMeta | null; trail: TrailView | null;
   }
+  /** Debug chat's own state, separate from any zone's. */
+  | { type: "debug-state"; epoch: string; view: DebugView | null }
   | { type: "reply"; epoch: string; id: string; ok: boolean; error?: string; result?: HostResult }
   | { type: "fatal"; epoch: string; message: string }
   | { type: "credential-request"; epoch: string; requestId: string; need: CredentialNeed }
@@ -173,6 +237,15 @@ export const HostResultSchema = z.object({
   change: ChangeReceiptSchema.optional(),
   path: z.string().min(1).max(4096).optional(),
   url: z.url().max(2048).optional(),
+  direction: DirectionViewSchema.optional(),
+  directionRecord: DirectionSchema.optional(),
+  decision: DecisionViewSchema.optional(),
+  handoff: HandoffViewSchema.optional(),
+  contextUse: ContextUsePageSchema.optional(),
+  trail: TrailPageSchema.optional(),
+  trailSource: TrailSourceSchema.optional(),
+  story: StoryPageSchema.optional(),
+  debug: DebugViewSchema.optional(),
 }).strict() satisfies z.ZodType<HostResult>;
 
 export const HostEventSchema = z.discriminatedUnion("type", [
@@ -180,8 +253,14 @@ export const HostEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("state"), epoch: TokenSchema, zoneEpoch: TokenSchema.nullable(), state: StateSchema.nullable(), tree: ViewSchema.nullable(), registry: ZoneRegistrySchema,
     activeZone: ZoneContextSchema.nullable(), inputToken: TokenSchema, canAttach: z.boolean(), shares: z.array(ShareGrantSchema).max(64),
-    follows: z.array(FollowGrantSchema).max(64), changes: z.array(ChangeReceiptSchema).max(200), look: z.object({ status: line }).strict(),
-  }).strict(),
+    follows: z.array(FollowGrantSchema).max(64), changes: z.array(ChangeReceiptSchema).max(200), look: HostLookStatusSchema,
+    direction: DirectionViewSchema.nullable(), decision: DecisionViewSchema.nullable(), handoff: HandoffViewSchema.nullable(),
+    contextUse: ContextUseViewSchema, session: SessionMetaSchema.nullable(), trail: TrailViewSchema.nullable(),
+  }).strict()
+    .refine((e) => e.direction === null || e.direction.zoneId === e.activeZone?.id, "state carries only the active zone's alignment")
+    .refine((e) => e.session === null || e.session.zoneId === e.activeZone?.id, "state carries only the active zone's session")
+    .refine((e) => e.handoff === null || e.handoff.handoff.zoneId === e.activeZone?.id, "state carries only the active zone's handoff"),
+  z.object({ type: z.literal("debug-state"), epoch: TokenSchema, view: DebugViewSchema.nullable() }).strict(),
   z.object({
     type: z.literal("reply"), epoch: TokenSchema, id: TokenSchema, ok: z.boolean(), error: line.optional(), result: HostResultSchema.optional(),
   }).strict(),
