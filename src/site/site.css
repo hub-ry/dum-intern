@@ -82,7 +82,7 @@ hr.section-divider { height: 0; margin: 34px 0; border: 0; border-top: 1px solid
 .copy-button:hover { border-color: var(--text); color: var(--text); }
 
 /* Dum's jumping game: a wide, shallow strip in front of the mountains. */
-.game-section { position: relative; width: min(100%, 760px); height: 120px; margin: 0 auto; overflow: hidden; border: 1px solid #56526e; }
+.game-section { position: relative; flex: none; width: min(100%, 760px); height: 120px; margin: 0 auto; overflow: hidden; border: 1px solid #56526e; }
 #game-canvas { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; height: 100%; }
 .game-section .sprite-wizard { position: absolute; z-index: 1; right: 16%; bottom: 17%; width: 27px; height: 24px; }
 .game-controls { position: absolute; z-index: 3; right: 10px; bottom: 9px; display: flex; align-items: center; gap: 9px; pointer-events: none; }
@@ -93,12 +93,13 @@ hr.section-divider { height: 0; margin: 34px 0; border: 0; border-top: 1px solid
 canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-rendering: crisp-edges; }
 
 /* Homepage */
-.home-page { --home-ink: #e0def4; --home-muted: #c1bdd0; --home-faint: #a19cb4; font-size: 15px; }
+.home-page { --home-ink: #e0def4; --home-muted: #c1bdd0; --home-faint: #a19cb4; display: flex; flex-direction: column; min-height: 100vh; min-height: 100svh; font-size: 15px; }
 .home-page .home-nav { width: min(1120px, calc(100% - 48px)); }
 .home-page .nav-logo { font-size: 15px; }
 .home-page .nav-links a { font-size: 12px; }
-.home-main { width: min(1120px, calc(100% - 48px)); max-width: 1120px; padding: 0 0 28px; }
-.hero { display: grid; grid-template-columns: .93fr 1.07fr; align-items: center; gap: 54px; padding: 64px 0 48px; }
+/* Fills the viewport: the hero takes the spare height and stays centred in it; the footer sits on the bottom edge. */
+.home-main { display: flex; flex: 1; flex-direction: column; width: min(1120px, calc(100% - 48px)); max-width: 1120px; padding: 0; }
+.hero { display: grid; flex: 1 0 auto; grid-template-columns: .93fr 1.07fr; align-items: center; align-content: center; gap: 54px; padding: 64px 0 48px; }
 .hero h1 { max-width: 540px; margin: 0 0 19px; font-size: clamp(34px, 4.2vw, 52px); font-weight: 560; letter-spacing: -.045em; line-height: 1.08; }
 .hero-lede { max-width: 44ch; margin: 0 0 26px; color: var(--home-muted); font-size: 15px; line-height: 1.7; }
 .button-primary { display: inline-block; padding: 10px 14px; border: 1px solid var(--text); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; }
@@ -115,7 +116,7 @@ canvas[data-wizard-state], .sprite-wizard { image-rendering: pixelated; image-re
 .world-star-two { top: 39%; right: 27%; width: 3px; height: 3px; background: #9ccfd8; }
 .world-star-three { top: 17%; right: 12%; width: 5px; height: 5px; background: #c4a7e7; }
 .video-note { margin: 0; color: var(--muted); font-size: 12px; }
-.home-footer { display: flex; align-items: center; gap: 24px; margin-top: 40px; padding: 20px 0 26px; border-top: 1px solid var(--overlay); }
+.home-footer { display: flex; align-items: center; gap: 24px; margin-top: clamp(40px, 9vh, 110px); padding: 20px 0 26px; border-top: 1px solid var(--overlay); }
 .footer-brand { margin-right: auto; color: var(--text); font-size: 14px; font-weight: 650; letter-spacing: -.04em; text-decoration: none; }
 .home-footer > a:not(.footer-brand) { color: var(--muted); font-size: 11px; text-decoration: none; }
 .home-footer a:hover { color: var(--text); }
