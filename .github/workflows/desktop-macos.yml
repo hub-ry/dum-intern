@@ -45,8 +45,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - name: Build ad-hoc signed, non-notarized test app
+      - name: Build ad-hoc signed, non-notarized public-flavor test app
         run: npm run desktop:mac -- --${{ matrix.arch }}
+      - name: Verify the public flavor
+        run: node -e 'process.exit(JSON.parse(require("fs").readFileSync("dist/desktop/build-info.json","utf8")).flavor==="public"?0:1)'
       - name: Verify native bundle, runtime architecture and distributables
         env:
           APP: release/${{ matrix.appdir }}/Dum.app
@@ -61,6 +63,7 @@ jobs:
           test "$(lipo -archs "$APP/Contents/MacOS/Dum")" = "$MACHINE"
           test "$(lipo -archs "$claude")" = "$MACHINE"
           test "$("$claude" --version | awk '{print $1}')" = "$expected"
+          lipo "$APP/Contents/Resources/dum-focus" -verify_arch arm64 x86_64
           if [ "$ARCH" = "arm64" ]; then
             osw="$APP/Contents/Resources/OpenSuperWhisper.app"
             test -x "$osw/Contents/MacOS/OpenSuperWhisper"

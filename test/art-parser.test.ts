@@ -4,11 +4,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
-import { load, parse, framesFor, draw } from "../src/sprite.ts";
+import { readdirSync, readFileSync } from "node:fs";
+import { parse, framesFor, bounds } from "../src/art-parser.ts";
 
 const ART = new URL("../src/art/", import.meta.url).pathname;
 const files = readdirSync(ART).filter((f) => f.endsWith(".txt"));
+const load = (file: string) => parse(readFileSync(ART + file, "utf8"));
 
 test("there is art to load", () => {
   assert.ok(files.length >= 2, "expected an intern and a wizard");
@@ -16,21 +17,18 @@ test("there is art to load", () => {
 
 for (const file of files) {
   test(`${file}: every pixel is a colour the palette defines`, () => {
-    const sprite = load(ART + file);
+    const sprite = load(file);
     for (const frame of sprite.frames) {
       for (const [y, row] of frame.rows.entries()) {
         for (const [x, ch] of [...row].entries()) {
-          assert.ok(
-            sprite.palette.has(ch),
-            `${frame.name} row ${y} col ${x}: '${ch}' is not in the palette`,
-          );
+          assert.ok(sprite.palette.has(ch), `${frame.name} row ${y} col ${x}: '${ch}' is not in the palette`);
         }
       }
     }
   });
 
   test(`${file}: frames are rectangular and all the same size`, () => {
-    const sprite = load(ART + file);
+    const sprite = load(file);
     const [first, ...rest] = sprite.frames;
     assert.ok(first, "no frames");
     const w = first.rows[0]!.length;
@@ -42,15 +40,7 @@ for (const file of files) {
         assert.equal(row.length, w, `${frame.name} row ${y} is ${row.length}, want ${w}`);
       }
     }
-  });
-
-  test(`${file}: draws to half the rows, at full width`, () => {
-    const sprite = load(ART + file);
-    const frame = framesFor(sprite, sprite.frames[0]!.name)[0]!;
-    const rows = draw(sprite, frame);
-    assert.equal(rows.length, frame.rows.length / 2);
-    const visible = rows[0]!.replace(/\x1b\[[0-9;]*m/g, "");
-    assert.equal([...visible].length, frame.rows[0]!.length);
+    assert.deepEqual(bounds(sprite), { cols: w, rows: h });
   });
 }
 

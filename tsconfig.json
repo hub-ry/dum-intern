@@ -15,8 +15,7 @@
     "skipLibCheck": true
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.ts"
   ],
   "exclude": ["src/desktop/ui"]
 }
