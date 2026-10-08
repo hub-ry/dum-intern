@@ -71,10 +71,11 @@ flowchart LR
 5. Model calls may run in the desktop host and in Electron main ("allow both").
 6. On command, when you hold the skills, Dum writes the change directly. There is no yes/no step. It shows the diff after and offers a one-click revert.
 7. Your editor is a writer Dum tolerates. Dum writes a file only if it hasn't changed since Dum last read it.
-8. Dum is always on. It follows along and tracks your learning.
+8. Dum is always on. It follows along and tracks your learning. It looks every 3 seconds and calls a model only when something changed.
 9. Practice means suggested projects that fit a skill's scope. No guided practices.
 10. Voice and keyboard are both first-class. Voice goes through OpenSuperWhisper, and everything works from the keyboard without the mouse.
-11. Dum may run on agents other than Claude.
+11. Dum may run on agents other than Claude, and you pick the backend and model.
+12. Public builds follow each provider's rules: "for public i want to follow rules". A public build never offers Claude subscription sign-in; Claude connects with your own API key. Subscription sign-in is for local builds only.
 
 ## Known limitations
 
