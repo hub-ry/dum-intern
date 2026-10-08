@@ -755,7 +755,6 @@ async function whoPowersDum(flavor) {
   const { panel } = active;
   await step('"Who powers Dum?" appears at the first model-backed request; nothing is sent', async () => {
     const before = await snapshot();
-    console.error(`DIAG-TEMP before: ${JSON.stringify(await panel.evaluate(() => ({ chatHidden: document.querySelector('.chat')?.hidden, pane: document.querySelector('#pane-title')?.textContent, active: document.activeElement?.outerHTML.slice(0, 120), draft: document.querySelector('textarea.composer-input')?.value })))} backends ${JSON.stringify(before.agent.backends.map((b) => [b.id, b.installed, b.ready, b.message]))}`);
     // The Zones steps leave the Zones pane open over the conversation; a message is typed there.
     // (On Linux the command bar steps already brought the conversation back.)
     await panel.focus('#tab-chat');
@@ -763,10 +762,8 @@ async function whoPowersDum(flavor) {
     await panel.waitForFunction(() => !document.querySelector('.chat')?.hidden && document.activeElement?.matches('textarea.composer-input'), { timeout: 10_000 });
     if (before.draft.text !== DRAFT) await panel.keyboard.type(DRAFT);
     await panel.waitForFunction((t) => document.querySelector('textarea.composer-input')?.value === t, { timeout: 10_000 }, DRAFT);
-    const t0 = Date.now();
     await panel.keyboard.press('Enter');
     await panel.waitForSelector('.agent-setup:not([hidden]) h2', { timeout: 10_000 });
-    console.error(`DIAG-TEMP sheet after ${Date.now() - t0} ms; rows ${await panel.$$eval('.agent-setup .backend-row', (els) => els.length)}`);
     assert.equal(await panel.$eval('.agent-setup h2', (el) => el.textContent), 'Who powers Dum?');
     assert.match(await panel.$eval('.agent-note', (el) => (el.hidden ? '' : el.textContent)), /Choose who powers Dum first/);
     const s = await snapshot();
