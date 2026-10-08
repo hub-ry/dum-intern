@@ -18,6 +18,7 @@
     "practice": "bash tools/practice.sh",
     "replay": "tsx tools/replay.ts",
     "web": "tsx src/web/server.ts",
+    "site:favicon": "tsx tools/site-favicon.mjs",
     "test": "node --import tsx --test test/*.test.ts",
     "desktop:build": "node tools/desktop-build.mjs",
     "desktop": "npm run desktop:build && electron .",

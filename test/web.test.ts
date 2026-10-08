@@ -127,6 +127,9 @@ test("public docs serve typed assets without making private trees cacheable or e
     const font = await fetch(`${s.base}/site/hack-regular.woff2`);
     assert.equal(font.headers.get("content-type"), "font/woff2");
     assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString("ascii"), "wOF2", "the browser receives binary font bytes, not JSON");
+    const icon = await fetch(`${s.base}/site/favicon.png`);
+    assert.equal(icon.headers.get("content-type"), "image/png");
+    assert.equal(Buffer.from(await icon.arrayBuffer()).subarray(1, 4).toString("ascii"), "PNG", "the browser receives binary image bytes");
     for (const asset of ["/site/game.js", "/site/wizard.js", "/site/setup.js"]) {
       const script = await fetch(`${s.base}${asset}`);
       assert.equal(script.status, 200);

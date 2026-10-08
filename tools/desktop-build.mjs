@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
-import { deflateSync } from 'node:zlib';
+import { appIconPng } from './app-icon.mjs';
 
 await rm('dist', { recursive: true, force: true });
 execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.desktop.json'], { stdio: 'inherit' });
@@ -15,51 +15,9 @@ await Promise.all([
 ]);
 await rm('dist/desktop/preload.js', { force: true });
 
-// Reuse Dum's original portrait for the app icon. PNG generation needs no image tooling.
+// Reuse Dum's original portrait for the app icon.
 const { parse } = await import('../dist/sprite.js');
-const sprite = parse(await readFile('src/art/intern.txt', 'utf8'));
-const frame = sprite.frames.find(frame => frame.name === 'idle');
-if (!frame) throw new Error('Dum has no idle portrait');
-const colors = Object.fromEntries([...sprite.palette].map(([key, hex]) => [key, hex ? [0, 2, 4].map(at => Number.parseInt(hex.slice(at, at + 2), 16)) : null]));
-const size = 1024;
-const pixels = Buffer.alloc((size * 4 + 1) * size);
-for (let y = 0; y < size; y++) {
-  for (let x = 0; x < size; x++) {
-    const cornerX = Math.max(200 - x, x - 823, 0);
-    const cornerY = Math.max(200 - y, y - 823, 0);
-    const at = y * (size * 4 + 1) + 1 + x * 4;
-    if (cornerX * cornerX + cornerY * cornerY > 200 * 200) continue;
-    const row = Math.floor((y - 176) / 80);
-    const col = Math.floor((x - 232) / 80);
-    const color = colors[frame.rows[row]?.[col]];
-    pixels[at] = color?.[0] ?? 25;
-    pixels[at + 1] = color?.[1] ?? 23;
-    pixels[at + 2] = color?.[2] ?? 33;
-    pixels[at + 3] = 255;
-  }
-}
-const crcTable = new Uint32Array(256);
-for (let i = 0; i < 256; i++) {
-  let crc = i;
-  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-  crcTable[i] = crc;
-}
-function chunk(type, bytes) {
-  const out = Buffer.alloc(bytes.length + 12);
-  out.writeUInt32BE(bytes.length);
-  out.write(type, 4, 4, 'ascii');
-  bytes.copy(out, 8);
-  let crc = 0xffffffff;
-  for (let at = 4; at < out.length - 4; at++) crc = (crc >>> 8) ^ crcTable[(crc ^ out[at]) & 255];
-  out.writeUInt32BE((crc ^ 0xffffffff) >>> 0, out.length - 4);
-  return out;
-}
-const header = Buffer.alloc(13);
-header.writeUInt32BE(size);
-header.writeUInt32BE(size, 4);
-header[8] = 8;
-header[9] = 6;
-const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
+const png = appIconPng(parse(await readFile('src/art/intern.txt', 'utf8')));
 await mkdir('build', { recursive: true });
 await writeFile('build/icon.png', png);
 await writeFile('dist/desktop/icon.png', png);
