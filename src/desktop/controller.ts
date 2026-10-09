@@ -697,7 +697,8 @@ export class DesktopController {
     if (!decision || decision.view.id !== decisionId || decision.view.revision !== revision) throw new Error("that card is already gone");
     live.deciding?.abort();
     live.decision = null;
-    if (live.summon) live.summon.queued = null;
+    const requestId = live.running?.binding.requestId ?? live.next?.binding.requestId ?? live.summon?.requestId;
+    if (requestId) live.summon = { requestId, queued: null };
     this.changed();
   }
 

@@ -46,7 +46,8 @@
   <pre><code>git clone https://github.com/hub-ry/dum-intern
 cd dum-intern
 npm install &amp;&amp; npm run desktop:mac</code></pre>
-  <p>The app lands at <code>release/mac-arm64/Dum.app</code>, with a DMG beside it. If
+  <p>The app lands at <code>release/mac-arm64/Dum.app</code> on Apple Silicon or
+     <code>release/mac/Dum.app</code> on Intel, with a DMG beside it. If
      <code>prepare-dictation</code> stops, its message names the missing tool from step 1. Every build
      connects Claude with your own API key only.</p>
 
@@ -153,8 +154,8 @@ Work one step at a time. Check the result before continuing. Ask me before:
 2. If this is an Apple Silicon Mac on macOS 14 or later, voice can be built too. Check for the full Xcode (`xcodebuild -version`), `cmake`, and `rustup` with the `aarch64-apple-darwin` target. Tell me what's missing and ask me before installing any of it. Homebrew's `rust` package won't do; it has to be rustup.
 3. Ask where I want the repository. Clone it there if it is not already present.
 4. In the repository, run `npm install`.
-5. Run `npm run desktop:mac`. If `prepare-dictation` stops, show me its message; it names the missing tool. When it finishes, confirm `release/mac-arm64/Dum.app` exists.
-6. Copy `release/mac-arm64/Dum.app` to `/Applications` only if I say so. Do not open it yourself.
+5. Run `npm run desktop:mac`. If `prepare-dictation` stops, show me its message; it names the missing tool. When it finishes, confirm `release/mac-arm64/Dum.app` exists on Apple Silicon or `release/mac/Dum.app` on Intel.
+6. Copy the built `Dum.app` from that architecture's release folder to `/Applications` only if I say so. Do not open it yourself.
 7. Tell me what's left for me to do, then stop: right-click Dum.app and choose Open the first time; answer the Screen Recording prompt; answer "What are you trying to learn?"; click "Who powers Dum?" and pick a backend; in Settings → Set up voice, allow the microphone and download a speech model. Never ask for, type, store, or relay my Anthropic API key or any one-time code. I enter those in Dum myself.
 8. If a step fails, stop and show the exact error and the next command.</code></pre>
     <p class="note">The prompt asks the agent to stop before sudo, the Xcode license, sign-in, 2FA, or writing outside the folder you choose. Never give an agent your password, API key, one-time code, recovery code, or security key. Review its commands like any other shell command.</p>

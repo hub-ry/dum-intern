@@ -450,18 +450,20 @@ export function windowView() {
       contextBtn.focus();
       return true;
     };
-    // Innermost first: a form or detail inside the expanded strip, then a chooser or form in Chat, then the
-    // strip itself (it stays open above a view), then the view, then the window.
-    if (strip.contains(document.activeElement) && (zones.escape() || closeManaging() || context.escape())) return;
-    if (!aux && (composer.escape() || decisions.escape())) return;
+    if (zones.el.contains(document.activeElement) && (zones.escape() || closeManaging())) return;
+    if (context.el.contains(document.activeElement) && context.escape()) return;
+    if (!aux && composer.el.contains(document.activeElement) && composer.escape()) return;
+    if (!aux && decisions.el.contains(document.activeElement) && decisions.escape()) return;
+    if (auxEl.contains(document.activeElement)) {
+      if (aux === "settings" && settings.escape()) return;
+      if (aux === "story" && story.escape()) return;
+    }
     if (contextOpen) {
       openContext(false);
       return contextBtn.focus();
     }
     if (aux) {
       // An open view hides Chat: its forms wait behind it and never take this Esc.
-      if (aux === "settings" && settings.escape()) return;
-      if (aux === "story" && story.escape()) return;
       return closeAux(true);
     }
     void client.call({ type: "dismiss-surface", surface: "window" });

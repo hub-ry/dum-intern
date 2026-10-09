@@ -48,13 +48,13 @@ npm test
 npm run typecheck
 ```
 
-Desktop, from the repo root:
+Desktop, from the repo root. Build the packaged Mac app first:
 
 ```sh
-npm run desktop            # build, then launch from the checkout
+npm run desktop:mac        # packaged Mac app with native helpers, plus DMG and ZIP
+npm run desktop            # development loop from the checkout, without voice
 npm run desktop:build      # build only
 npm run desktop:pack       # unpacked app for this OS, in release/
-npm run desktop:mac        # DMG and ZIP; only on a Mac
 npm run desktop:smoke      # drive a built app; see below
 ```
 

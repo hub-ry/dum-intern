@@ -51,11 +51,8 @@ export const WINDOW_MIN: Size = { width: 360, height: 480 };
 /** Gap between the circle and the working window beside it. */
 export const WINDOW_GAP = 12;
 
-/**
- * A ready voice draft stays 20 s. A reply is read, not heard, so it stays 15 s; one cut short stays
- * 25 s, long enough to decide to open Dum.
- */
-export const BUBBLE_TTL = { ready: 20_000, reply: 15_000, replyCut: 25_000, error: 8_000 } as const;
+/** A ready voice draft stays 20 s. A reply is read, not heard, so it stays 15 s. */
+export const BUBBLE_TTL = { ready: 20_000, reply: 15_000, error: 8_000 } as const;
 /** Recording has a two-minute ceiling; nothing in the bubble outlives it. */
 const RECORDING_MS = 2 * 60_000;
 export const BUBBLE_LINES = 8;

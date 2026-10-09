@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { crc32, inflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { setImmediate } from "node:timers/promises";
@@ -441,6 +442,22 @@ test("Verify for pictures sends one tiny picture, records the model the session 
     const sent = seen.inputs[0]!.message.content;
     assert.ok(Array.isArray(sent));
     assert.deepEqual(sent, [{ type: "image", source: { type: "base64", media_type: "image/png", data: PROBE_PNG } }, { type: "text", text: PROBE_TEXT }]);
+    const image = sent[0];
+    assert.equal(image.type, "image");
+    if (image.type !== "image" || image.source.type !== "base64") throw new Error("expected a base64 image");
+    const png = Buffer.from(image.source.data, "base64");
+    assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20), png[24], png[25]], [2, 2, 8, 6]);
+    const pixels: Buffer[] = [];
+    for (let at = 8; at < png.length;) {
+      const length = png.readUInt32BE(at);
+      assert.equal(crc32(png.subarray(at + 4, at + 8 + length)), png.readUInt32BE(at + 8 + length));
+      if (png.toString("ascii", at + 4, at + 8) === "IDAT") pixels.push(png.subarray(at + 8, at + 8 + length));
+      at += length + 12;
+    }
+    const rows = inflateSync(Buffer.concat(pixels));
+    assert.equal(rows.length, 18);
+    assert.ok(rows[0]! <= 4 && rows[9]! <= 4);
     assert.deepEqual(seen.options.at(-1)!.model, "haiku");
     assert.deepEqual(seen.options.at(-1)!.mcpServers, {}, "a verify call has no actions");
     assert.equal(seen.closed, 2);
@@ -452,6 +469,25 @@ test("Verify for pictures sends one tiny picture, records the model the session 
     const session = await backend.open(openOptions({ selector: CLAUDE_DEFAULTS.look, actions: [] }));
     assert.deepEqual((await drain(session.turn({ text: "look", images: [picture] })))[0], { type: "model", model: "claude-haiku-5-5", effort: "low" });
     session.close();
+  } finally {
+    rmSync(h, { recursive: true, force: true });
+  }
+});
+
+test("a verify persistence failure leaves pictures disabled in memory and later catalogs", async () => {
+  const h = home();
+  try {
+    const { sdk } = fakeSdk({ replies: () => [lookInit, { type: "assistant", message: { content: [{ type: "text", text: "OK" }] } }, { type: "result", subtype: "success" }] });
+    const backend = claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }), home: h });
+    mkdirSync(`${h}/${VERIFIED_FILE}`);
+    await assert.rejects(backend.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal));
+    assert.equal((await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal)).images, false);
+    assert.equal((await backend.models("anthropic-key", signal)).find((m) => m.id === "haiku")?.verified, false);
+    assert.deepEqual(readVerified(h), new Set());
+    rmSync(`${h}/${VERIFIED_FILE}`, { recursive: true });
+    await backend.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal);
+    assert.equal((await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal)).images, true);
+    assert.deepEqual(readVerified(h), new Set(["claude-haiku-5-5"]));
   } finally {
     rmSync(h, { recursive: true, force: true });
   }

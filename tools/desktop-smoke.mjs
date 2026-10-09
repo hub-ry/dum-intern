@@ -756,6 +756,11 @@ async function otherZone() {
     await win.click('[role=treeitem]');
     await press(win, '.zone-tools', 'Inside');
     await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Name');
+    await win.click('.context .section-head button[aria-controls="context-details"]');
+    await win.keyboard.press('Escape');
+    assert.equal(await win.$$eval('.zone-form', els => els.length), 1, 'Esc in Current context canceled the zone form');
+    assert.equal(await win.$eval('.context .section-head button[aria-controls="context-details"]', b => b.getAttribute('aria-expanded')), 'false');
+    await win.focus('.zone-form input[aria-label=Name]');
     await win.keyboard.type(CHILD.name);
     await win.focus('.zone-form textarea[aria-label=Goal]');
     await win.keyboard.type(CHILD.goal);
@@ -1182,6 +1187,19 @@ async function settings() {
   await step('disclosures start collapsed except the needed recovery (no agent chosen opens Agent)', async () => {
     const open = await win.$$eval('.aux .settings > details', (els) => els.map((d) => `${d.querySelector('summary').innerText.trim()}:${d.open}`));
     assert.deepEqual(open, ['Agent:true', 'Look:false', 'Shortcuts:false', 'Debug chat:false']);
+  });
+  await step('Esc closes the focused Settings disclosure before the expanded Context panel', async () => {
+    await win.evaluate(() => {
+      const box = document.querySelector('.aux .settings > details:nth-of-type(2)');
+      box.open = true;
+      box.querySelector('summary').focus();
+    });
+    await win.keyboard.press('Escape');
+    const after = await win.evaluate(() => {
+      const box = document.querySelector('.aux .settings > details:nth-of-type(2)');
+      return { open: box.open, focus: document.activeElement === box.querySelector('summary'), context: !document.getElementById('context-panel').hidden, settings: !document.querySelector('.aux').hidden };
+    });
+    assert.deepEqual(after, { open: false, focus: true, context: true, settings: true });
   });
   await step('Look explains the 3-second look with its status and permission; Shortcuts shows the three defaults', async () => {
     await win.evaluate(() => { for (const d of document.querySelectorAll('.aux .settings > details')) if (/Look|Shortcuts/.test(d.querySelector('summary').innerText)) d.open = true; });

@@ -116,9 +116,10 @@ function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend 
           const summons = /THEIR REQUEST:\nASK WIZARD ?(\w*)$/.exec(input.text);
           if (summons) {
             const ask = () => act("decision_help", { outcome: "make hello.py say hello", why: "you're weighing two greetings" });
-            yield { type: "text", text: await ask() };
+            if (summons[1] !== "BEFORE") yield { type: "text", text: await ask() };
             if (summons[1] === "TWICE") yield { type: "text", text: await ask() };
-            if (summons[1] === "HOLD") {
+            if (summons[1] === "HOLD" || summons[1] === "BEFORE") {
+              yield { type: "text", text: "waiting to finish" };
               // The turn stays open until the test drops a release file beside the work folder, so a dismissal lands mid-turn.
               const dir = join(process.env.DUM_TEST_WORK!, "..");
               const { promise, resolve } = Promise.withResolvers<void>();
@@ -128,6 +129,7 @@ function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend 
               await promise;
               watcher.close();
             }
+            if (summons[1] === "BEFORE") yield { type: "text", text: await ask() };
             yield { type: "text", text: "asked" };
             yield end;
             return;
@@ -742,6 +744,31 @@ if (process.env.DUM_FAKE_HOST === "1") {
     s = await host.until((e) => e.decision !== null && e.decision.id !== card.id);
     assert.equal(s.decision!.outcome, "make hello.py say hello");
     assert.equal(quips(s).length, 3);
+  }));
+
+  test("dismissing an old card before this request asks the Wizard suppresses its later summons", { timeout: 90_000 }, () => withHosts(async (f, launch) => {
+    built(f, ["printing", "variables"]);
+    const host = launch();
+    await host.start(f);
+    const z = await host.zone("Python", null);
+    await host.ready(z.id);
+    let s = await host.until((e) => e.state?.prompt?.type === "next");
+    await host.ok({ op: "send", binding: binding(s), text: "ASK WIZARD", shares: [] });
+    s = await host.until((e) => e.decision !== null);
+    const card = s.decision!;
+    await host.ok({ op: "send", binding: binding(s), text: "ASK WIZARD BEFORE", shares: [] });
+    s = await host.until((e) => !!e.state?.transcript.some((x) => x.kind === "say" && x.text === "waiting to finish"));
+    await host.ok({ op: "decision-dismiss", binding: binding(s), decisionId: card.id, revision: card.revision });
+    const dismissed = host.events.length;
+    writeFileSync(join(f.dir, "release"), "");
+    s = await host.until((e) => e.state?.prompt?.type === "next" && e.state.transcript.filter((x) => x.kind === "say" && x.text === "asked").length === 2);
+    assert.equal(s.state!.transcript.filter((x) => x.kind === "quip" && x.text.startsWith("Dum asked the Wizard:")).length, 1);
+    await host.ok({ op: "send", binding: binding(s), text: "hello", shares: [] });
+    s = await host.until((e) => e.state?.prompt?.type === "next" && e.state.transcript.some((x) => x.kind === "say" && x.text === "from claude"));
+    assert.equal(host.events.slice(dismissed).some((e) => e.type === "state" && e.decision !== null), false);
+    await host.ok({ op: "send", binding: binding(s), text: "ASK WIZARD", shares: [] });
+    s = await host.until((e) => e.decision !== null && e.decision.id !== card.id);
+    assert.equal(s.decision!.outcome, "make hello.py say hello");
   }));
 
   test("Do this runs once through the direct change path, records receipts and markers, and review grants nothing", { timeout: 90_000 }, () => withHosts(async (f, launch) => {

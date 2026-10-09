@@ -809,7 +809,33 @@ async function typed(router: Router, live: RequestBinding) {
   ok(await router.handle({ type: "send", binding: live, draftRevision: router.snapshot().draft.revision }, "window"));
 }
 
-test("a typed request's reply shows in the bubble too, with the Wizard's aside and a longer stay", async () => {
+test("replies resume after question answers when the user switches away from Dum", async () => {
+  for (const start of ["typed", "voice", "handoff"] as const) {
+    for (const answer of ["attest", "share", "text"] as const) {
+      const d = desktop();
+      const live = d.live();
+      if (start === "handoff") {
+        ok(await d.router.handle({ type: "handoff-run", binding: live, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
+      } else if (start === "voice") {
+        d.router.voiceEvent({ op: "transcript", recordingId: "r", binding: live, text: "explain" });
+        ok(await d.router.handle({ type: "send", binding: live, draftRevision: d.router.snapshot().draft.revision }, "window"));
+      } else await typed(d.router, live);
+      d.show(true);
+      d.focus(true);
+      d.update({ state: state({ prompt: { type: "question", question: "Ready?", why: "", ...(answer === "text" ? { intern: true } : { purpose: answer }) } }), inputToken: "q1" });
+      if (answer === "text") await typed(d.router, d.live());
+      else ok(await d.router.handle({ type: "respond", binding: d.live(), decision: { kind: answer, value: true } }, "window"));
+      d.focus(false);
+      d.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "Continuing." }] }), inputToken: "idle" });
+      assert.deepEqual(d.bubbles.at(-1)?.lines, ["Continuing."], `${start}/${answer}`);
+      d.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Continuing." }, { kind: "say", id: 2, text: "Finished." }] }), inputToken: "t7" });
+      assert.equal(d.bubbles.at(-1)?.kind, "reply");
+      assert.deepEqual(d.bubbles.at(-1)?.lines, ["Continuing.", "Finished."]);
+    }
+  }
+});
+
+test("a typed request's reply shows in the bubble too, with the Wizard's aside and one reply lifetime", async () => {
   const d = desktop();
   await typed(d.router, d.live());
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
@@ -823,13 +849,12 @@ test("a typed request's reply shows in the bubble too, with the Wizard's aside a
   assert.equal(reply.expiresAt - NOW, BUBBLE_TTL.reply);
   assert.ok(BUBBLE_TTL.reply > 8_000, "a reply is read, not heard: it outlasts the old 8 s");
 
-  // A cut reply ends by pointing at Dum, and stays longer.
+  // A cut reply ends by pointing at Dum.
   const long = desktop();
   await typed(long.router, long.live());
   long.update({ state: state({ transcript: [{ kind: "say", id: 1, text: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n") }] }), inputToken: "t7" });
   assert.equal(long.bubbles.at(-1)!.lines.at(-1), BUBBLE_OPEN);
-  assert.equal(long.bubbles.at(-1)!.expiresAt - NOW, BUBBLE_TTL.replyCut);
-  assert.ok(BUBBLE_TTL.replyCut > BUBBLE_TTL.reply);
+  assert.equal(long.bubbles.at(-1)!.expiresAt - NOW, BUBBLE_TTL.reply);
 
   // A question Dum asks is shown, with where it waits.
   const q = desktop();

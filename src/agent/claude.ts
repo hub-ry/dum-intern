@@ -80,7 +80,7 @@ export function writeVerified(home: string, proven: ReadonlySet<string>): void {
 }
 
 /** The picture a verify call sends: a 2×2 solid-colour PNG, small enough to cost almost nothing. */
-export const PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAD0lEQVR4nGP4z8DwHwYBFx8H+9nA6pwAAAAASUVORK5CYII=";
+export const PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=";
 export const PROBE_TEXT = "Reply with the single word OK.";
 const PROBE_MS = 60_000;
 
@@ -550,8 +550,8 @@ export function claudeBackend(o: { executable: string; credential: CredentialSou
       if (!resolved) throw new Error(`${selector.model} never reported which model ran`);
       if (!answered) throw new Error(`${resolved} saw the picture but sent no text back`);
       // The record is by the id the session ran, exactly what `noImages` is asked about later.
+      writeVerified(home, new Set([...proven, resolved]));
       proven.add(resolved);
-      writeVerified(home, proven);
       if (listed) listed = listed.map((m) => (m.resolved === resolved ? { ...m, verified: true } : m));
       return { resolved };
     },

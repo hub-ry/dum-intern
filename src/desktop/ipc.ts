@@ -16,7 +16,7 @@ import { z } from "zod";
 import { DesktopPreferencesSchema, parseRequest } from "./protocol.ts";
 import { DIAGNOSTIC_LIMITS } from "../diagnostic-types.ts";
 import { sameBinding, type Drafts } from "./draft.ts";
-import { BUBBLE_OPEN, BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
+import { BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
 import type { AgentSetup } from "./agent-setup.ts";
 import type { Captures } from "./capture.ts";
 import type { DictationHelper } from "./dictation.ts";
@@ -499,7 +499,7 @@ export class Router {
     const done = this.running?.requestId !== sent.requestId;
     const prompt = state.prompt;
     const asking = prompt?.type === "question";
-    if (done || asking) this.following = null;
+    if (done) this.following = null;
     // The working window is in front of them: the reply is already on screen.
     if (native.windowVisible() && native.windowFocused()) {
       bubble.dismiss();
@@ -521,7 +521,7 @@ export class Router {
   }
 
   private reply(lines: string[]): void {
-    this.o.bubble.timed("reply", lines, lines.includes(BUBBLE_OPEN) ? BUBBLE_TTL.replyCut : BUBBLE_TTL.reply);
+    this.o.bubble.timed("reply", lines, BUBBLE_TTL.reply);
   }
 
   private requestBinding(binding: RequestBinding): RequestBinding {
