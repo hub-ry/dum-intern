@@ -11,11 +11,12 @@
  * Off macOS it only creates the output directory, so electron-builder's extraResources entry resolves.
  * Each helper is rebuilt only when its sources change (digests in build/native-stamps/).
  *
- * Voice build prerequisites (Apple Silicon): Xcode, cmake, and Rust with the aarch64-apple-darwin
- * target. whisper.cpp builds without OpenMP (vendor/OpenSuperWhisper/libwhisper/CMakeLists.txt), so
- * no Homebrew runtime is linked or shipped. The two upstream git submodules are fetched at the
- * commits pinned in vendor/OpenSuperWhisper/DUM-VENDOR.json; Swift packages resolve from the vendored
- * Package.resolved with automatic resolution disabled.
+ * Voice build prerequisites (Apple Silicon): Xcode (not just the Command Line Tools), cmake, Rust with
+ * the aarch64-apple-darwin target, git, and network access: the two upstream git submodules are fetched
+ * at the commits pinned in vendor/OpenSuperWhisper/DUM-VENDOR.json and the Swift packages are cloned at
+ * the vendored Package.resolved versions (automatic resolution disabled). whisper.cpp builds without
+ * OpenMP (vendor/OpenSuperWhisper/libwhisper/CMakeLists.txt), so no Homebrew runtime is linked or
+ * shipped. No speech model is bundled: the helper downloads one in Dum's voice setup on first use.
  *
  * Run as: node tools/prepare-dictation.mjs
  */
@@ -109,9 +110,12 @@ async function buildVoice() {
     return;
   }
 
-  requireTool('/usr/bin/xcodebuild', ['-version'], 'Xcode is required to build the voice helper.');
+  requireTool('/usr/bin/xcodebuild', ['-version'],
+    'Xcode is required to build the voice helper (the Command Line Tools alone are not enough): install Xcode, then `sudo xcode-select -s /Applications/Xcode.app`.');
+  requireTool('git', ['--version'], 'git is required to fetch the pinned whisper.cpp and autocorrect sources.');
   requireTool('cmake', ['--version'], 'cmake is required to build the voice helper (brew install cmake).');
   requireTool('cargo', ['--version'], 'Rust is required to build the voice helper (https://rustup.rs).');
+  requireTool('rustup', ['--version'], 'rustup is required to build the voice helper (install Rust from https://rustup.rs, not Homebrew\'s rust).');
   if (!output('rustup', ['target', 'list', '--installed'], ROOT).split('\n').includes('aarch64-apple-darwin')) {
     throw new Error('prepare-dictation: run `rustup target add aarch64-apple-darwin` first.');
   }
@@ -159,12 +163,16 @@ async function buildVoice() {
     'CODE_SIGNING_ALLOWED=NO',
     'CODE_SIGNING_REQUIRED=NO',
     'CODE_SIGN_IDENTITY=',
-    'INFOPLIST_OUTPUT_FORMAT=xml',
+    // Dum's runtime check (src/desktop/dictation.ts) reads only an XML Info.plist; "XML" is the setting's enum value.
+    'INFOPLIST_OUTPUT_FORMAT=XML',
     'build',
   ], work);
 
   const product = join(work, 'build', 'Build', 'Products', 'Release', 'OpenSuperWhisper.app');
   const info = await readFile(join(product, 'Contents', 'Info.plist'), 'utf8');
+  if (!info.trimStart().startsWith('<?xml')) {
+    throw new Error('prepare-dictation: the built helper\'s Info.plist is not XML; Dum refuses a binary plist. Check INFOPLIST_OUTPUT_FORMAT.');
+  }
   const expect = {
     CFBundleIdentifier: manifest.bundleId,
     CFBundleShortVersionString: manifest.release,

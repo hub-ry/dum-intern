@@ -4,7 +4,7 @@
 // circle only sends gestures, toggles and reads its own small view, and the bubble asks for nothing.
 
 import { z } from "zod";
-import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema } from "../agent/schema.ts";
+import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema, SelectorSchema } from "../agent/schema.ts";
 import {
   AlignmentAcceptInputSchema, AlignmentAnswerSchema, AlignmentMoveSchema, CursorSchema, DecisionDismissInputSchema,
   DecisionHelpInputSchema, HandoffDismissInputSchema, HandoffEditInputSchema, HandoffReviewInputSchema, HandoffSelectInputSchema,
@@ -15,7 +15,7 @@ import { LookPrefsSchema } from "../observe-types.ts";
 import { IdSchema, InputBindingSchema, RequestBindingSchema, TokenSchema } from "../share-types.ts";
 import { StoryQuerySchema, TrailMapInputSchema, TrailQuerySchema } from "../trail-types.ts";
 import { FocusSkillsSchema, LanguageSchema, SkillRefSchema, ZONE_LIMITS, ZoneGoalSchema, ZoneNameSchema } from "../zone-types.ts";
-import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption } from "../agent/types.ts";
+import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption, Selector } from "../agent/types.ts";
 import type {
   AlignmentAcceptInput, AlignmentStepInput, ContextUsePage, ContextUseView, DecisionDismissInput, DecisionHelpInput, DecisionView,
   Direction, DirectionView, HandoffDismissInput, HandoffEditInput, HandoffReviewInput, HandoffSelectInput, HandoffView,
@@ -214,6 +214,8 @@ export type Request =
   | { type: "agent-key"; backend: "claude"; key: string }
   | { type: "agent-signout"; backend: BackendId; method: LoginMethod }
   | { type: "agent-models"; backend: BackendId; login: LoginMethod }
+  /** Verify for pictures: one small real picture call; on success the catalog's row reads `verified: true`. */
+  | { type: "agent-verify-images"; backend: "claude"; selector: Selector }
   | { type: "agent-select"; choice: AgentChoice }
   // Goal alignment: any zone, by its own alignment binding; never the active zone's grants.
   | { type: "alignment-read"; zoneId: ZoneId }
@@ -335,6 +337,7 @@ export const RequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent-key"), backend: z.literal("claude"), key: z.string().min(1).max(512).regex(/^[\x21-\x7e]+$/, "not an API key") }).strict(),
   z.object({ type: z.literal("agent-signout"), backend: BackendIdSchema, method: LoginMethodSchema }).strict(),
   z.object({ type: z.literal("agent-models"), backend: BackendIdSchema, login: LoginMethodSchema }).strict(),
+  z.object({ type: z.literal("agent-verify-images"), backend: z.literal("claude"), selector: SelectorSchema.extend({ backend: z.literal("claude") }).strict() }).strict(),
   z.object({ type: z.literal("agent-select"), choice: AgentChoiceSchema }).strict(),
   z.object({ type: z.literal("alignment-read"), zoneId: IdSchema }).strict(),
   z.discriminatedUnion("action", [AlignmentAnswerSchema.extend(type("alignment-step")).strict(), AlignmentMoveSchema.extend(type("alignment-step")).strict()]),

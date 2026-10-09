@@ -295,6 +295,11 @@ export class Store {
     this.append({ kind: "note", text });
   }
 
+  /** A line in the Wizard's voice: the transcript, memory and the bubble attribute it to the Wizard, not dum. */
+  quip(text: string) {
+    this.append({ kind: "quip", text });
+  }
+
   /** Busy on something that isn't a person. A prompt someone is answering stays up. */
   working(status: string) {
     if (this.waits.length) this.patch({ status });

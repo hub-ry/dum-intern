@@ -78,7 +78,7 @@ async function setup(files: Record<string, string> = {}) {
   const fake = fakeBackend();
   const personal = { path: "", text: "", warning: "" };
   /** What the request told the host's trail: every hook call, in order. */
-  const told = { reports: [] as unknown[], changes: [] as { receipt: ChangeReceipt; skills: readonly SkillRef[] }[], proofs: [] as SkillRef[], decided: [] as string[][] };
+  const told = { reports: [] as unknown[], changes: [] as { receipt: ChangeReceipt; skills: readonly SkillRef[] }[], proofs: [] as SkillRef[] };
   /** One request: a fresh binding and share of the folder, prepared the way the host does it. */
   const request = async (decide: SessionHooks["decide"] = null) => {
     const binding: RequestBinding = { zoneId: id, zoneEpoch: "epoch-1", inputToken: "token-1", requestId: randomUUID() };
@@ -128,7 +128,7 @@ test("the zone's context and the request's shares reach the system prompt, and o
     assert.ok(o.systemPrompt.startsWith(systemPrompt(s.zone, "understand")));
     assert.doesNotMatch(o.systemPrompt, /propose_plan|propose_change|create_file|run_command|course|wizard_aside/);
     assert.equal(o.actions.some((a) => a.name === "wizard_aside"), false, "no unprompted Wizard action");
-    assert.equal(o.actions.some((a) => a.name === "decision_help"), false, "decision help only in a decision turn the user opened");
+    assert.equal(o.actions.some((a) => a.name === "decision_help"), false, "no Wizard action while the host offers no decide hook");
     assert.deepEqual(o.selector, { backend: "local", model: "fake-intern", effort: null });
     assert.equal(o.login, "none");
     assert.equal(o.cwd, join(s.home, "zones", s.zone.id, "runtime"));
@@ -385,22 +385,47 @@ test("report_context hands the model's topics to the host and grants nothing", a
   } finally { s.done(); }
 });
 
-test("decision_help is offered only in a decision turn, and recomposes with what they said", async () => {
+test("decision_help hands a choice to the host's Wizard hook without a waiting card, and reports a refusal", async () => {
   const s = await setup();
   try {
-    const { ctx } = await s.request(async (said) => {
-      s.told.decided.push([...said]);
-      return "two options are on their card";
+    const asked: { outcome: string; why: string; said: string[] }[] = [];
+    const { ctx } = await s.request({
+      waiting: null,
+      ask: (outcome, why, said) => {
+        if (asked.length) throw new Error("the Wizard was already asked this turn - wait for their next message");
+        asked.push({ outcome, why, said: [...said] });
+        return "The Wizard is laying out options in Dum.";
+      },
     });
-    let reply = "";
+    const replies: string[] = [];
     s.fake.play(async function* (_input, act, o) {
-      assert.ok(o.actions.some((a) => a.name === "decision_help"));
-      reply = (await act("decision_help", {})).text;
+      const action = o.actions.find((a) => a.name === "decision_help")!;
+      assert.ok(action, "offered with no card open");
+      assert.doesNotMatch(action.description, /open card asked/);
+      assert.match(action.description, /weighing two or more approaches/);
+      replies.push((await act("decision_help", { outcome: "parse the CSV", why: " You're weighing a parser against split. " })).text);
+      replies.push((await act("decision_help", { outcome: "parse the CSV", why: "again" })).text);
+      replies.push((await act("decision_help", { outcome: "", why: "x" })).text);
       yield { type: "end", error: null, interrupted: false };
     });
-    await run("the CSV has a header row", ctx);
-    assert.equal(reply, "two options are on their card");
-    assert.deepEqual(s.told.decided, [["the CSV has a header row"]]);
+    await run("csv.reader or split(',')?", ctx);
+    assert.deepEqual(asked, [{ outcome: "parse the CSV", why: "You're weighing a parser against split.", said: ["csv.reader or split(',')?"] }]);
+    assert.equal(replies[0], "The Wizard is laying out options in Dum.");
+    assert.match(replies[1]!, /^That didn't work: the Wizard was already asked this turn/);
+    assert.match(replies[2]!, /^That didn't work: outcome/);
+    assert.ok(s.store.getSnapshot().transcript.some((e) => e.kind === "tool" && e.name === "decision_help" && e.outcome === "refused"));
+  } finally { s.done(); }
+});
+
+test("decision_help names the open card's outcome when that card is waiting on them", async () => {
+  const s = await setup();
+  try {
+    const { ctx } = await s.request({ waiting: "make hello.py say hello", ask: () => "The Wizard is laying out options in Dum." });
+    s.fake.play(async function* (_input, _act, o) {
+      assert.match(o.actions.find((a) => a.name === "decision_help")!.description, /pass its outcome back: "make hello.py say hello"/);
+      yield { type: "end", error: null, interrupted: false };
+    });
+    assert.equal(await run("the CSV has a header row", ctx), "ok");
   } finally { s.done(); }
 });
 

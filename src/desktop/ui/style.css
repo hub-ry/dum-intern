@@ -1197,26 +1197,25 @@ html[data-view="window"] body {
   line-height: 1.55;
 }
 
-/* Zones header 40 + tree ≤96, Current context ≤200, Chat gets the rest with at least 220 to read and write. */
+/* Status strip 40 (+ expanded panel ≤45vh), Chat gets the rest with at least 220 to read and write. */
 .window {
   height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(220px, 1fr);
   overflow-y: auto;
 }
 
 /* Pinned rows, so an empty (hidden) error list never shifts Chat out of the flexible row. */
-.window > .zones-section { grid-row: 1; }
+.window > .strip { grid-row: 1; }
 .window > .errors { grid-row: 2; }
-.window > .context { grid-row: 3; }
-.window > .chat { grid-row: 4; }
+.window > .chat { grid-row: 3; }
 
-.zones-section {
+.strip {
   border-bottom: 1px solid var(--line);
 }
 
-.zones-head {
+.strip-head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1224,20 +1223,48 @@ html[data-view="window"] body {
   padding: 4px 10px;
 }
 
-.zone-tree-box {
-  max-height: 96px;
+.strip-look {
+  flex: none;
+}
+
+.strip-goal {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.strip-toggle {
+  flex: none;
+}
+
+.strip-toggle .icon {
+  transform: rotate(-90deg);
+  transition: transform 120ms;
+}
+
+.strip-toggle[aria-expanded="true"] .icon {
+  transform: none;
+}
+
+/* One scroll for the tree and Current context together. */
+.strip-panel {
+  max-height: 45vh;
   overflow-y: auto;
-  padding: 0 10px 6px;
+  border-top: 1px solid var(--line);
+}
+
+.zone-tree-box {
+  padding: 4px 10px 6px;
 }
 
 .zone-tree-box .zone-tools,
 .zone-tree-box .zone-form-box,
 .zone-tree-box .zone-keys {
   display: none;
-}
-
-.zone-tree-box.managing {
-  max-height: 40vh;
 }
 
 .zone-tree-box.managing .zone-tools,
@@ -1268,7 +1295,7 @@ html[data-view="window"] body {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 60%;
+  max-width: 40%;
   padding: 5px 6px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -1309,17 +1336,11 @@ html[data-view="window"] body {
 /* Current context */
 
 .context {
-  max-height: 200px;
-  overflow-y: auto;
   padding: 6px 12px 8px;
-  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
   display: grid;
   gap: 4px;
   font-size: 13px;
-}
-
-.context:has([aria-expanded="true"]) {
-  max-height: 45vh;
 }
 
 .context-body {
@@ -1860,14 +1881,10 @@ html[data-view="window"] body {
   border-color: var(--amber);
 }
 
-/* Short displays: tree to breadcrumb, trail to its latest step; goal, direction and Using / Correct stay. */
+/* Short displays: the expanded panel shows the trail's latest step; goal, direction and Using / Correct stay. */
 @media (max-height: 600px) {
   .zone-tree-box:not(.managing) {
     display: none;
-  }
-
-  .context {
-    max-height: 132px;
   }
 
   .trail-step:not(:last-child),
@@ -1877,7 +1894,7 @@ html[data-view="window"] body {
   }
 
   .window {
-    grid-template-rows: auto auto auto minmax(180px, 1fr);
+    grid-template-rows: auto auto minmax(180px, 1fr);
   }
 }
 
@@ -2126,6 +2143,13 @@ html[data-view="window"] body {
   min-width: 0;
 }
 
+.role-verify {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
 /* ---------------------------------------------------------------- ⌘K zone switcher */
 
 .switcher {
@@ -2211,7 +2235,7 @@ html[data-view="bubble"] body {
 }
 
 @media (max-width: 340px) {
-  .zones-head {
+  .strip-head {
     gap: 3px;
     padding: 4px 8px;
   }

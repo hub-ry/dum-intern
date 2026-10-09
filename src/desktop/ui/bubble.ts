@@ -1,5 +1,5 @@
-// The reply bubble near the cursor: voice status and the answer, with a small Dum or Wizard. Read-only
-// and click-through; it can't invoke anything and goes away on its own.
+// The reply bubble near the cursor: voice status and every reply, typed or spoken, with a small Dum or
+// Wizard per line. Read-only and click-through; it can't invoke anything and goes away on its own.
 
 import type { BubbleView } from "../protocol.ts";
 import { h } from "./dom.ts";

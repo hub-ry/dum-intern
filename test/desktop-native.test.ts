@@ -14,7 +14,7 @@ import { Captures, type Capturer } from "../src/desktop/capture.ts";
 import { Drafts } from "../src/desktop/draft.ts";
 import { Router, circleView, ownedPage, type Host, type Native } from "../src/desktop/ipc.ts";
 import { DesktopSettings } from "../src/desktop/settings.ts";
-import { Bubble } from "../src/desktop/surfaces.ts";
+import { BUBBLE_OPEN, BUBBLE_TTL, Bubble } from "../src/desktop/surfaces.ts";
 import type { HostView } from "../src/desktop/host-client.ts";
 import type { Context } from "../src/context.ts";
 import type {
@@ -30,6 +30,8 @@ import type { StoryQuery, TrailQuery } from "../src/trail-types.ts";
 import type { Zone, ZoneContext } from "../src/zone-types.ts";
 
 const temp = () => mkdtempSync(join(tmpdir(), "dum-native-"));
+/** The bubble's fixed clock, so TTLs show up as exact `expiresAt` offsets. */
+const NOW = 1_000_000;
 const PNG = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("IHDR-pretend-frame")]);
 const SOURCES: CaptureSource[] = [
   { id: "screen:1:0", name: "Built-in display", kind: "screen" },
@@ -199,6 +201,7 @@ class FakeHost {
   async settings(p: DesktopPreferences) { this.calls.push(`settings ${p.hotkey}`); }
   async agentSelect() {}
   async agentModels() { return []; }
+  async agentVerifyImages() {}
   async send(binding: RequestBinding, text: string, shares: ShareGrant[], image?: SharedImage) { this.sent.push({ binding, text, shares, ...(image ? { image } : {}) }); }
   async respond(binding: RequestBinding) { this.bindings.push(binding); this.calls.push("respond"); }
   async command(name: string) { this.calls.push(`command ${name}`); }
@@ -260,6 +263,7 @@ function desktop() {
   let picked: string | null = null;
   let confirmed = true;
   let visible = false;
+  let focused = false;
   let failure = "";
   let personal: Context = { path: "", text: "", warning: "" };
   const reloads: string[] = [];
@@ -281,6 +285,7 @@ function desktop() {
     showWindow: async () => void calls.push("show window"),
     dismissWindow: async () => void calls.push("dismiss window"),
     windowVisible: () => visible,
+    windowFocused: () => focused,
     openView: (v) => void calls.push(`open view ${v}`),
     circleBegin: () => { calls.push("circle begin"); return "g1"; },
     circleEnd: async (g) => void calls.push(`circle end ${g}`),
@@ -303,7 +308,7 @@ function desktop() {
     cancel: async (id?: string) => void voice.push(`cancel ${id ?? ""}`.trim()),
   };
   const bubbles: (BubbleView | null)[] = [];
-  const bubble = new Bubble({ publish: (v) => bubbles.push(v), after: () => () => {} });
+  const bubble = new Bubble({ publish: (v) => bubbles.push(v), now: () => NOW, after: () => () => {} });
   const look: string[] = [];
   const router = new Router({
     host: host as unknown as Host, captures, drafts: new Drafts(), settings,
@@ -322,6 +327,7 @@ function desktop() {
     answer: (yes: boolean) => { confirmed = yes; },
     conflictOn: (k: string) => { conflict = k; },
     show: (v: boolean) => { visible = v; },
+    focus: (f: boolean) => { focused = f; },
     fail: (message: string) => { failure = message; },
     personal: (c: Context) => { personal = c; },
     live: () => router.snapshot().binding! as RequestBinding,
@@ -795,6 +801,90 @@ test("a voice request's reply shows in the bubble; a decision stays in the windo
   v.update({ state: state({ prompt: { type: "question", question: "Share src?", why: "", purpose: "share" } }), inputToken: "q1" });
   assert.equal(v.bubbles.at(-1)?.lines.at(-1), "Decision waiting - answer it in Dum");
   assert.ok(!v.bubbles.at(-1)!.lines.some((l) => l.includes("Share src?")), "the decision itself is never in the bubble");
+});
+
+/** Type `explain` into the live draft and send it. */
+async function typed(router: Router, live: RequestBinding) {
+  ok(await router.handle({ type: "draft-set", text: "explain", expectedDraftRevision: router.snapshot().draft.revision, binding: live }, "window"));
+  ok(await router.handle({ type: "send", binding: live, draftRevision: router.snapshot().draft.revision }, "window"));
+}
+
+test("a typed request's reply shows in the bubble too, with the Wizard's aside and a longer stay", async () => {
+  const d = desktop();
+  await typed(d.router, d.live());
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
+  d.update({
+    state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }, { kind: "quip", id: 2, text: "Nice question." }] }),
+    inputToken: "t7",
+  });
+  const reply = d.bubbles.at(-1)!;
+  assert.equal(reply.kind, "reply");
+  assert.deepEqual(reply.lines, ["A rotation keeps order.", "Wizard: Nice question."]);
+  assert.equal(reply.expiresAt - NOW, BUBBLE_TTL.reply);
+  assert.ok(BUBBLE_TTL.reply > 8_000, "a reply is read, not heard: it outlasts the old 8 s");
+
+  // A cut reply ends by pointing at Dum, and stays longer.
+  const long = desktop();
+  await typed(long.router, long.live());
+  long.update({ state: state({ transcript: [{ kind: "say", id: 1, text: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n") }] }), inputToken: "t7" });
+  assert.equal(long.bubbles.at(-1)!.lines.at(-1), BUBBLE_OPEN);
+  assert.equal(long.bubbles.at(-1)!.expiresAt - NOW, BUBBLE_TTL.replyCut);
+  assert.ok(BUBBLE_TTL.replyCut > BUBBLE_TTL.reply);
+
+  // A question Dum asks is shown, with where it waits.
+  const q = desktop();
+  await typed(q.router, q.live());
+  q.update({
+    state: state({ prompt: { type: "question", question: "Which file?", why: "", intern: true }, transcript: [{ kind: "question", id: 1, question: "Which file?", why: "", answer: null }] }),
+    inputToken: "q1",
+  });
+  assert.deepEqual(q.bubbles.at(-1)!.lines, ["Which file?", "Dum is waiting for your answer in Dum"]);
+});
+
+test("no bubble while the working window is visible and focused: the reply is already on screen", async () => {
+  const f = desktop();
+  f.show(true);
+  f.focus(true);
+  await typed(f.router, f.live());
+  assert.equal(f.bubbles.at(-1) ?? null, null);
+  f.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "On screen." }] }), inputToken: "t7" });
+  assert.equal(f.bubbles.at(-1) ?? null, null);
+
+  // Visible but not focused: they looked away, so the bubble shows.
+  const g = desktop();
+  g.show(true);
+  await typed(g.router, g.live());
+  g.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Off to the side." }] }), inputToken: "t7" });
+  assert.deepEqual(g.bubbles.at(-1)?.lines, ["Off to the side."]);
+
+  // Focus taken mid-request, then released: the reply still arrives in the bubble.
+  const h = desktop();
+  await typed(h.router, h.live());
+  h.show(true);
+  h.focus(true);
+  h.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "Half." }] }), inputToken: "idle" });
+  assert.equal(h.bubbles.at(-1) ?? null, null, "a status bubble is dismissed once they're looking at the window");
+  h.focus(false);
+  h.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Half." }, { kind: "say", id: 2, text: "Whole." }] }), inputToken: "t7" });
+  assert.deepEqual(h.bubbles.at(-1)?.lines, ["Half.", "Whole."]);
+});
+
+test("Do this: the finished handoff's summary bubbles like a typed reply, under the same focus rule", async () => {
+  const d = desktop();
+  const live = d.live();
+  ok(await d.router.handle({ type: "handoff-run", binding: live, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
+  assert.equal(d.host.runs.length, 1);
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
+  d.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Done: renamed the helper." }] }), inputToken: "t7" });
+  assert.equal(d.bubbles.at(-1)?.kind, "reply");
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Done: renamed the helper."]);
+
+  const f = desktop();
+  f.show(true);
+  f.focus(true);
+  ok(await f.router.handle({ type: "handoff-run", binding: f.live(), handoffId: randomUUID(), revision: 1, draftRevision: f.router.snapshot().draft.revision }, "window"));
+  f.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Done." }] }), inputToken: "t7" });
+  assert.equal(f.bubbles.at(-1) ?? null, null, "no bubble while they're looking at the window");
 });
 
 // -- settings, records, look, diagnostics -----------------------------------------------------------

@@ -125,6 +125,12 @@ export interface AgentBackend {
   capabilities(selector: Selector, login: LoginMethod, signal: AbortSignal): Promise<Capabilities>;
   /** Resolves only after provenance passes; never falls back. */
   open(o: OpenOptions): Promise<AgentSession>;
+  /**
+   * One real picture call to `selector`, then its resolved id counts as verified on this install.
+   * Records nothing when the model refuses the picture or sends no text back. Backends that key
+   * verification on nothing don't have it.
+   */
+  verifyImages?(selector: Selector, login: LoginMethod, signal: AbortSignal): Promise<{ resolved: string }>;
 }
 
 /** Host asks main; main answers from its encrypted store. Values never enter env, settings or logs. */

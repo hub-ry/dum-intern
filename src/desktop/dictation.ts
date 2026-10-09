@@ -232,7 +232,8 @@ export class DictationHelper {
 
   private readiness(ready: Ready): string {
     if (ready.microphoneStatus === "denied" || ready.microphoneStatus === "restricted") {
-      return "Microphone access is off for Dum's voice helper. Turn it on in System Settings > Privacy & Security > Microphone.";
+      // macOS may list the helper's permission under Dum (its parent process) rather than under the helper.
+      return "Microphone access is off for Dum's voice helper. Turn it on for Dum in System Settings > Privacy & Security > Microphone.";
     }
     if (ready.microphoneStatus === "no-device") return "No microphone is connected.";
     if (ready.microphoneStatus !== "granted") return "Open voice setup to allow the microphone.";

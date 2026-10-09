@@ -3,7 +3,7 @@
 // settings, credentials, circle placement and native surfaces.
 
 import { z } from "zod";
-import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema, ModelOptionSchema, PictureSchema } from "../agent/schema.ts";
+import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema, ModelOptionSchema, PictureSchema, SelectorSchema } from "../agent/schema.ts";
 import {
   AlignmentAcceptInputSchema, AlignmentAnswerSchema, AlignmentMoveSchema, ContextUsePageSchema, ContextUseViewSchema, CursorSchema,
   DecisionDismissInputSchema, DecisionHelpInputSchema, DecisionViewSchema, DirectionSchema, DirectionViewSchema, HandoffDismissInputSchema,
@@ -60,6 +60,8 @@ export const HostRequestSchema = z.discriminatedUnion("op", [
   z.object({ ...op("settings"), settings: DesktopPreferencesSchema }).strict(),
   z.object({ ...op("agent-select"), choice: AgentChoiceSchema.nullable() }).strict(),
   z.object({ ...op("agent-models"), backend: BackendIdSchema, login: LoginMethodSchema }).strict(),
+  /** One real picture call that marks the selector's resolved model verified on this install. */
+  z.object({ ...op("agent-verify-images"), selector: SelectorSchema, login: LoginMethodSchema }).strict(),
   z.object({
     ...op("credential"), requestId: TokenSchema,
     value: z.object({ value: z.string().min(1).max(16 * 1024), expiresAt: z.number().int().nonnegative().nullable() }).strict().nullable(),

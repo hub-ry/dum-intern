@@ -685,6 +685,7 @@ async function start(): Promise<void> {
     showWindow,
     dismissWindow,
     windowVisible: () => work.isVisible(),
+    windowFocused: () => work.isFocused(),
     openView(view) {
       void showWindow();
       void work.webContents.loadFile(INDEX, { query: { view: "window" }, hash: view });

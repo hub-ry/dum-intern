@@ -3,8 +3,11 @@
 // the user's own Anthropic API key; every session proves it before any user content reaches
 // Claude, and nothing falls back.
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createSdkMcpServer, query, resolveSettings, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import type {
   AccountInfo,
   CanUseTool,
@@ -17,6 +20,8 @@ import type {
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { AUTO_MEMORY_OFF, FLAGS, authStatus, providerFreeEnv, type AuthStatus } from "./claude-cli.ts";
+import { ModelOptionSchema } from "./schema.ts";
+import { readState, writeState } from "../state-files.ts";
 import type {
   AgentBackend,
   AgentEvent,
@@ -33,17 +38,51 @@ import type {
 
 /**
  * Models proven with real calls through Dum's own Claude backend, by the id a catalog row resolves
- * to and the session reports at `system/init`; never by alias. Only these are sent pictures.
+ * to and the session reports at `system/init`; never by alias. Only these, and the ids this install
+ * proved itself (`VERIFIED_FILE`), are sent pictures.
  */
 export const CLAUDE_VERIFIED: Readonly<Record<string, true>> = { "claude-opus-5-5": true, "claude-fable-5-1": true };
 
+const NONE: ReadonlySet<string> = new Set();
+
+/** `resolved` is proven for pictures: shipped in `CLAUDE_VERIFIED` or proven on this install. */
+export function verified(resolved: string, proven: ReadonlySet<string> = NONE): boolean {
+  return Object.hasOwn(CLAUDE_VERIFIED, resolved) || proven.has(resolved);
+}
+
 /** Why `selector`, running `resolved` today, may not be sent pictures; "" when it may. */
-export function noImages(selector: Selector, resolved: string): string {
-  if (Object.hasOwn(CLAUDE_VERIFIED, resolved)) return "";
+export function noImages(selector: Selector, resolved: string, proven: ReadonlySet<string> = NONE): string {
+  if (verified(resolved, proven)) return "";
   return selector.model === resolved
     ? `${resolved} isn't verified for pictures yet`
     : `${selector.model} changed to ${resolved}, which isn't verified for pictures yet`;
 }
+
+/** Host-owned record of resolved ids this install proved with "Verify for pictures". */
+export const VERIFIED_FILE = "verified-models.json";
+const VerifiedFileSchema = z.object({ claude: z.array(ModelOptionSchema.shape.resolved).max(256) }).strict();
+
+/** The ids recorded in `<home>/verified-models.json`; an unreadable or malformed file counts as none. */
+export function readVerified(home: string): Set<string> {
+  try {
+    const raw = readState(home, VERIFIED_FILE, 64 * 1024);
+    if (raw === null) return new Set();
+    const parsed = VerifiedFileSchema.safeParse(JSON.parse(raw));
+    return new Set(parsed.success ? parsed.data.claude : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Atomically replace the record with `proven`, sorted so the file is stable. */
+export function writeVerified(home: string, proven: ReadonlySet<string>): void {
+  writeState(home, VERIFIED_FILE, `${JSON.stringify({ claude: [...proven].sort() }, null, 2)}\n`);
+}
+
+/** The picture a verify call sends: a 2×2 solid-colour PNG, small enough to cost almost nothing. */
+export const PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAD0lEQVR4nGP4z8DwHwYBFx8H+9nA6pwAAAAASUVORK5CYII=";
+export const PROBE_TEXT = "Reply with the single word OK.";
+const PROBE_MS = 60_000;
 
 /** The one Claude child's environment: no inherited routes or keys, auto-memory off, and the user's key. */
 export function claudeEnv(base: NodeJS.ProcessEnv, key: string): NodeJS.ProcessEnv {
@@ -182,9 +221,9 @@ export async function assertProvider(q: { accountInfo(): Promise<AccountInfo> },
 
 /**
  * The live catalog as the picker shows it. Every Claude model takes pictures; Dum sends them only to
- * a row whose resolved model is in `CLAUDE_VERIFIED`, and `verified` says which rows those are.
+ * a row whose resolved model is verified (shipped or proven on this install), and `verified` says which rows those are.
  */
-export function catalog(models: readonly ModelInfo[]): ModelOption[] {
+export function catalog(models: readonly ModelInfo[], proven: ReadonlySet<string> = NONE): ModelOption[] {
   return models.map((m) => {
     const resolved = m.resolvedModel || m.value;
     return {
@@ -194,7 +233,7 @@ export function catalog(models: readonly ModelInfo[]): ModelOption[] {
       efforts: m.supportsEffort ? [...(m.supportedEffortLevels ?? [])] : [],
       images: true,
       actions: true,
-      verified: Object.hasOwn(CLAUDE_VERIFIED, resolved),
+      verified: verified(resolved, proven),
     };
   });
 }
@@ -223,6 +262,8 @@ export async function start(
     login: LoginMethod; selector: Selector | null; auth: () => Promise<AuthStatus>; sdk?: Sdk;
     /** The catalog this handshake read, before the selector is checked against it. */
     seen?: (options: ModelOption[]) => void;
+    /** Resolved ids this install proved for pictures. */
+    proven?: ReadonlySet<string>;
   },
 ): Promise<Query> {
   const sdk = o.sdk ?? SDK;
@@ -247,7 +288,7 @@ export async function start(
     if (signal?.aborted) throw stopped();
     await Promise.race([assertProvider(session, o.auth), aborted]);
     if (o.selector) {
-      const options = catalog(await Promise.race([session.supportedModels(), aborted]));
+      const options = catalog(await Promise.race([session.supportedModels(), aborted]), o.proven);
       o.seen?.(options);
       assertListed(options, o.selector);
     }
@@ -321,7 +362,8 @@ function userMessage(input: UserTurn): SDKUserMessage {
   };
 }
 
-export function claudeBackend(o: { executable: string; credential: CredentialSource; sdk?: Sdk }): AgentBackend {
+/** `home` is H, where this install's proven ids live; without it nothing is persisted and verifying is refused. */
+export function claudeBackend(o: { executable: string; credential: CredentialSource; sdk?: Sdk; home?: string }): AgentBackend {
   /** The user's key, fetched from main for this one query. */
   async function keyFor(login: LoginMethod, signal: AbortSignal): Promise<string> {
     assertKey(login);
@@ -332,12 +374,114 @@ export function claudeBackend(o: { executable: string; credential: CredentialSou
 
   /** The last catalog Claude listed for the key: every catalog read and session handshake refreshes it. */
   let listed: readonly ModelOption[] | null = null;
+  /** Resolved ids this install proved; the host is the only writer, so the file is read once. */
+  const proven = o.home ? readVerified(o.home) : new Set<string>();
 
   function judge(selector: Selector, options: readonly ModelOption[]): Capabilities {
     const row = options.find((m) => m.id === selector.model);
     const model = row?.resolved ?? selector.model;
-    const why = row ? noImages(selector, model) : `${selector.model} isn't in Claude's model list for your key`;
+    const why = row ? noImages(selector, model, proven) : `${selector.model} isn't in Claude's model list for your key`;
     return { model, images: why === "", noImages: why, interrupt: true, runtimeActionCheck: true };
+  }
+
+  /**
+   * A session on `open.selector`. `probe` is the verify call: it carries a picture to a model that
+   * isn't verified yet and records the model `system/init` reports instead of checking it.
+   */
+  async function connect(open: OpenOptions, probe: boolean): Promise<AgentSession> {
+    if (open.selector.backend !== "claude") throw new Error(`${open.selector.backend} isn't a Claude model`);
+    const env = claudeEnv(process.env, await keyFor(open.login, open.signal));
+    const abortController = new AbortController();
+    const onAbort = () => abortController.abort();
+    open.signal.addEventListener("abort", onAbort, { once: true });
+    if (open.signal.aborted) abortController.abort();
+    const inbox = new Inbox();
+    const names = open.actions.map((a) => a.name);
+    const options = closed({
+      executable: o.executable, cwd: open.cwd, systemPrompt: open.systemPrompt, selector: open.selector,
+      env, actions: open.actions, abortController, maxTurns: open.maxTurns,
+    });
+    let session: Query;
+    // Pictures are judged on the model the selector resolves to in this very handshake's catalog.
+    let caps: Capabilities | null = null;
+    try {
+      session = await start(inbox.messages(), options, {
+        login: open.login, selector: open.selector, auth: () => authStatus(o.executable, env), sdk: o.sdk, proven,
+        seen: (options) => {
+          listed = options;
+          caps = judge(open.selector, options);
+        },
+      });
+    } catch (err) {
+      open.signal.removeEventListener("abort", onAbort);
+      throw err;
+    }
+    const replies = session[Symbol.asyncIterator]();
+    const { model, images, noImages: why } = caps ?? judge(open.selector, []);
+    let shut = false;
+    let busy = false;
+    let interrupted = false;
+    const close = () => {
+      if (shut) return;
+      shut = true;
+      inbox.end();
+      open.signal.removeEventListener("abort", onAbort);
+      abortController.abort();
+      session.close();
+    };
+
+    async function* turn(input: UserTurn): AsyncGenerator<AgentEvent> {
+      if (shut) throw new Error("this Claude session is closed");
+      if (busy) throw new Error("Claude is still answering the last turn");
+      if (input.images?.length && !images && !probe) throw new Error(why);
+      busy = true;
+      interrupted = false;
+      try {
+        inbox.push(userMessage(input));
+        for (;;) {
+          const next = await replies.next();
+          if (next.done) throw new Error("Claude stopped without finishing the turn");
+          const msg = next.value;
+          if (msg.type === "system" && msg.subtype === "api_retry") {
+            yield { type: "retry", message: retryStatus(msg) };
+          } else if (msg.type === "system" && msg.subtype === "init") {
+            assertInit(msg, names);
+            // Verification is by the model the session runs; pictures sent for one model must not reach another.
+            if (input.images?.length && !probe && msg.model !== model) throw new Error(`Claude ran ${msg.model}, not ${model} - stopped`);
+            yield { type: "model", model: msg.model, effort: open.selector.effort };
+          } else if (msg.type === "assistant") {
+            for (const b of msg.message.content) {
+              if ("name" in b && b.type.endsWith("tool_use")) {
+                // Only Dum's actions: anything else, built-in or server-side, ends the session.
+                const bare = b.name.startsWith(PREFIX) ? b.name.slice(PREFIX.length) : "";
+                if (!names.includes(bare)) throw new Error(`Claude tried to use ${b.name}, which Dum doesn't allow - stopped`);
+                yield { type: "action", name: bare };
+              } else if (b.type === "text" && b.text.trim()) {
+                yield { type: "text", text: b.text.trim() };
+              }
+            }
+          } else if (msg.type === "result") {
+            yield { type: "end", error: interrupted ? null : failure(msg), interrupted };
+            return;
+          }
+        }
+      } catch (err) {
+        close();
+        throw err;
+      } finally {
+        busy = false;
+      }
+    }
+
+    return {
+      turn,
+      async interrupt() {
+        if (shut || !busy) return;
+        interrupted = true;
+        await session.interrupt();
+      },
+      close,
+    };
   }
 
   const backend: AgentBackend = {
@@ -359,7 +503,7 @@ export function claudeBackend(o: { executable: string; credential: CredentialSou
         const options = closed({ executable: o.executable, cwd: process.cwd(), systemPrompt: "", selector: null, env, actions: [], abortController });
         const session = await start(inbox.messages(), options, { login, selector: null, auth: () => authStatus(o.executable, env), sdk: o.sdk });
         try {
-          const options = catalog(await session.supportedModels());
+          const options = catalog(await session.supportedModels(), proven);
           listed = options;
           return options;
         } finally {
@@ -371,100 +515,45 @@ export function claudeBackend(o: { executable: string; credential: CredentialSou
       }
     },
 
-    async open(open: OpenOptions): Promise<AgentSession> {
-      if (open.selector.backend !== "claude") throw new Error(`${open.selector.backend} isn't a Claude model`);
-      const env = claudeEnv(process.env, await keyFor(open.login, open.signal));
-      const abortController = new AbortController();
-      const onAbort = () => abortController.abort();
-      open.signal.addEventListener("abort", onAbort, { once: true });
-      if (open.signal.aborted) abortController.abort();
-      const inbox = new Inbox();
-      const names = open.actions.map((a) => a.name);
-      const options = closed({
-        executable: o.executable, cwd: open.cwd, systemPrompt: open.systemPrompt, selector: open.selector,
-        env, actions: open.actions, abortController, maxTurns: open.maxTurns,
-      });
-      let session: Query;
-      // Pictures are judged on the model the selector resolves to in this very handshake's catalog.
-      let caps: Capabilities | null = null;
+    open(open) {
+      return connect(open, false);
+    },
+
+    async verifyImages(selector, login, signal) {
+      if (!o.home) throw new Error("this Dum has nowhere to record a verified model");
+      const home = o.home;
+      const cwd = join(home, "verify", "runtime");
+      mkdirSync(cwd, { recursive: true, mode: 0o700 });
+      const late = AbortSignal.timeout(PROBE_MS);
+      const session = await connect({
+        cwd, systemPrompt: "Answer the prompt you're given directly. You have no tools, files or web access in this conversation.",
+        selector, login, actions: [], signal: AbortSignal.any([signal, late]), maxTurns: 1,
+      }, true);
+      let resolved = "";
+      let answered = false;
       try {
-        session = await start(inbox.messages(), options, {
-          login: open.login, selector: open.selector, auth: () => authStatus(o.executable, env), sdk: o.sdk,
-          seen: (options) => {
-            listed = options;
-            caps = judge(open.selector, options);
-          },
-        });
-      } catch (err) {
-        open.signal.removeEventListener("abort", onAbort);
-        throw err;
-      }
-      const replies = session[Symbol.asyncIterator]();
-      const { model, images, noImages: why } = caps ?? judge(open.selector, []);
-      let shut = false;
-      let busy = false;
-      let interrupted = false;
-      const close = () => {
-        if (shut) return;
-        shut = true;
-        inbox.end();
-        open.signal.removeEventListener("abort", onAbort);
-        abortController.abort();
-        session.close();
-      };
-
-      async function* turn(input: UserTurn): AsyncGenerator<AgentEvent> {
-        if (shut) throw new Error("this Claude session is closed");
-        if (busy) throw new Error("Claude is still answering the last turn");
-        if (input.images?.length && !images) throw new Error(why);
-        busy = true;
-        interrupted = false;
-        try {
-          inbox.push(userMessage(input));
-          for (;;) {
-            const next = await replies.next();
-            if (next.done) throw new Error("Claude stopped without finishing the turn");
-            const msg = next.value;
-            if (msg.type === "system" && msg.subtype === "api_retry") {
-              yield { type: "retry", message: retryStatus(msg) };
-            } else if (msg.type === "system" && msg.subtype === "init") {
-              assertInit(msg, names);
-              // Verification is by the model the session runs; pictures sent for one model must not reach another.
-              if (input.images?.length && msg.model !== model) throw new Error(`Claude ran ${msg.model}, not ${model} - stopped`);
-              yield { type: "model", model: msg.model, effort: open.selector.effort };
-            } else if (msg.type === "assistant") {
-              for (const b of msg.message.content) {
-                if ("name" in b && b.type.endsWith("tool_use")) {
-                  // Only Dum's actions: anything else, built-in or server-side, ends the session.
-                  const bare = b.name.startsWith(PREFIX) ? b.name.slice(PREFIX.length) : "";
-                  if (!names.includes(bare)) throw new Error(`Claude tried to use ${b.name}, which Dum doesn't allow - stopped`);
-                  yield { type: "action", name: bare };
-                } else if (b.type === "text" && b.text.trim()) {
-                  yield { type: "text", text: b.text.trim() };
-                }
-              }
-            } else if (msg.type === "result") {
-              yield { type: "end", error: interrupted ? null : failure(msg), interrupted };
-              return;
-            }
+        for await (const event of session.turn({ text: PROBE_TEXT, images: [{ mimeType: "image/png", data: PROBE_PNG }] })) {
+          if (event.type === "model") resolved = event.model;
+          else if (event.type === "text") answered = true;
+          else if (event.type === "action") throw new Error(`it tried to use ${event.name}, and a verify call has no actions`);
+          else if (event.type === "end") {
+            if (event.interrupted || signal.aborted) throw new Error("stopped");
+            if (event.error) throw new Error(event.error);
           }
-        } catch (err) {
-          close();
-          throw err;
-        } finally {
-          busy = false;
         }
+      } catch (err) {
+        if (late.aborted) throw new Error(`${selector.model} didn't answer the picture within ${PROBE_MS / 1000} s`);
+        throw err;
+      } finally {
+        session.close();
       }
-
-      return {
-        turn,
-        async interrupt() {
-          if (shut || !busy) return;
-          interrupted = true;
-          await session.interrupt();
-        },
-        close,
-      };
+      if (!resolved) throw new Error(`${selector.model} never reported which model ran`);
+      if (!answered) throw new Error(`${resolved} saw the picture but sent no text back`);
+      // The record is by the id the session ran, exactly what `noImages` is asked about later.
+      proven.add(resolved);
+      writeVerified(home, proven);
+      if (listed) listed = listed.map((m) => (m.resolved === resolved ? { ...m, verified: true } : m));
+      return { resolved };
     },
   };
   return backend;

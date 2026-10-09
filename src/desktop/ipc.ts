@@ -16,7 +16,7 @@ import { z } from "zod";
 import { DesktopPreferencesSchema, parseRequest } from "./protocol.ts";
 import { DIAGNOSTIC_LIMITS } from "../diagnostic-types.ts";
 import { sameBinding, type Drafts } from "./draft.ts";
-import { BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
+import { BUBBLE_OPEN, BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
 import type { AgentSetup } from "./agent-setup.ts";
 import type { Captures } from "./capture.ts";
 import type { DictationHelper } from "./dictation.ts";
@@ -50,7 +50,7 @@ export function ownedPage(url: string, index: string): boolean {
 /** The host operations main routes; HostController fits. */
 export type Host = Pick<HostController,
   | "view" | "debug" | "running" | "createZone" | "openZone" | "updateZone" | "zoneContext" | "deleteZone" | "settings" | "agentSelect"
-  | "agentModels" | "send" | "respond" | "command" | "selectView" | "shareAdd" | "shareRemove" | "followAdd" | "followRemove"
+  | "agentModels" | "agentVerifyImages" | "send" | "respond" | "command" | "selectView" | "shareAdd" | "shareRemove" | "followAdd" | "followRemove"
   | "changeRevert" | "skillEdit" | "treeSync" | "openRecord" | "openPersonal" | "interrupt"
   | "alignmentRead" | "alignmentStep" | "alignmentAccept" | "directionRead"
   | "decisionHelp" | "decisionDismiss" | "selectHandoff" | "editHandoff" | "dismissHandoff" | "runHandoff" | "readHandoff" | "reviewHandoff"
@@ -78,6 +78,8 @@ export type Native = {
   /** Hide and FocusReturn.dismiss() once. */
   dismissWindow(): Promise<void>;
   windowVisible(): boolean;
+  /** Whether the working window has keyboard focus: a reply there is already in front of them. */
+  windowFocused(): boolean;
   /** Show the working window on one in-window view. */
   openView(view: ViewName): void;
   /** Main samples the cursor and bounds; returns the gesture id. */
@@ -221,8 +223,8 @@ export class Router {
   private goalEpoch = randomUUID();
   private last: InputBinding | null = null;
   private voice: VoiceState = IDLE_VOICE;
-  /** A voice-originated request whose reply goes to the bubble: entries after `after` are its reply. */
-  private spoken: { requestId: string; after: number } | null = null;
+  /** The request whose reply goes to the bubble: transcript entries after `after` are its reply. */
+  private following: { requestId: string; after: number } | null = null;
   private paused = false;
   /** The last Anthropic key they pasted was refused; cleared by a saved key, a sign-out or a new choice. */
   private keyRejected = false;
@@ -245,7 +247,7 @@ export class Router {
     return null;
   }
 
-  /** The host's state changed: retire what the old binding allowed and follow a voice request's reply. */
+  /** The host's state changed: retire what the old binding allowed and follow the sent request's reply. */
   changed(): void {
     const view = this.o.host.view;
     if (!view) this.reported = "";
@@ -259,7 +261,7 @@ export class Router {
       void this.o.dictation.cancel().catch(() => undefined);
       this.voice = IDLE_VOICE;
       this.running = null;
-      this.spoken = null;
+      this.following = null;
       this.next = randomUUID();
       this.o.bubble.dismiss();
     }
@@ -483,29 +485,43 @@ export class Router {
     }
   }
 
-  /** The bubble follows a voice-originated request: status while it works, then what Dum said. */
+  /** The bubble follows the request they sent, typed or spoken: status while it works, then what Dum said. */
   private follow(view: HostView | null): void {
-    const spoken = this.spoken;
-    if (!spoken) return;
+    const sent = this.following;
     const state = view?.state;
-    if (!state) return;
-    const fresh = state.transcript.filter((e) => e.id > spoken.after);
-    const dum = fresh.flatMap((e) => (e.kind === "say" ? [e.text] : e.kind === "question" ? [e.question] : []));
-    const done = this.running?.requestId !== spoken.requestId;
-    const deciding = state.prompt?.type === "question" && state.prompt.purpose !== undefined;
-    if (deciding) {
-      // The decision itself stays in the window; the bubble only says where it is.
-      this.o.bubble.timed("reply", [...bubbleLines(dum, null), "Decision waiting - answer it in Dum"], BUBBLE_TTL.reply);
-      this.spoken = null;
+    if (!sent || !state) return;
+    const { bubble, native } = this.o;
+    const fresh = state.transcript.filter((e) => e.id > sent.after);
+    const said = fresh.flatMap((e) => (e.kind === "say" ? [e.text] : []));
+    const asked = fresh.flatMap((e) => (e.kind === "question" ? [e.question] : []));
+    const quips = fresh.flatMap((e) => (e.kind === "quip" ? [e.text] : []));
+    const wizard = quips.length ? quips.join(" ") : null;
+    const done = this.running?.requestId !== sent.requestId;
+    const prompt = state.prompt;
+    const asking = prompt?.type === "question";
+    if (done || asking) this.following = null;
+    // The working window is in front of them: the reply is already on screen.
+    if (native.windowVisible() && native.windowFocused()) {
+      bubble.dismiss();
+      return;
+    }
+    if (asking) {
+      // A decision itself stays in the window; a plain question is shown. Both say where the answer goes.
+      const deciding = prompt.purpose !== undefined;
+      const lines = bubbleLines(deciding ? said : [...said, ...asked], wizard);
+      this.reply([...lines, deciding ? "Decision waiting - answer it in Dum" : "Dum is waiting for your answer in Dum"]);
       return;
     }
     if (done) {
-      this.spoken = null;
-      if (dum.length) this.o.bubble.timed("reply", bubbleLines(dum, null), BUBBLE_TTL.reply);
-      else this.o.bubble.dismiss();
+      if (said.length || wizard) this.reply(bubbleLines(said, wizard));
+      else bubble.dismiss();
       return;
     }
-    this.o.bubble.voice(dum.length ? bubbleLines(dum, null) : [state.status.slice(0, 200) || "Dum is working…"]);
+    bubble.voice(said.length ? bubbleLines(said, wizard) : [state.status.slice(0, 200) || "Dum is working…"]);
+  }
+
+  private reply(lines: string[]): void {
+    this.o.bubble.timed("reply", lines, lines.includes(BUBBLE_OPEN) ? BUBBLE_TTL.replyCut : BUBBLE_TTL.reply);
   }
 
   private requestBinding(binding: RequestBinding): RequestBinding {
@@ -566,10 +582,14 @@ export class Router {
     const bound = live as RequestBinding;
     const after = this.o.host.view?.state?.transcript.at(-1)?.id ?? -1;
     await this.submit(bound, draft, (shares, image) => this.o.host.send(bound, draft.text, shares, image));
-    if (draft.source === "voice") {
-      this.spoken = { requestId: this.running?.requestId ?? bound.requestId, after };
-      this.o.bubble.voice(["Dum is working…"]);
-    }
+    this.watch(bound, after);
+  }
+
+  /** The bubble follows the request just submitted under `bound`; entries up to `after` are not its reply. */
+  private watch(bound: RequestBinding, after: number): void {
+    this.following = { requestId: this.running?.requestId ?? bound.requestId, after };
+    const { native, bubble } = this.o;
+    if (!(native.windowVisible() && native.windowFocused())) bubble.voice(["Dum is working…"]);
   }
 
   /**
@@ -580,8 +600,10 @@ export class Router {
     const binding = this.requestBinding(r.binding);
     const draft = this.o.drafts.ready(binding, r.draftRevision, this.live());
     if (draft.text.trim()) throw new Error("Your draft has text that isn't part of this handoff - send it or clear it first; nothing ran");
+    const after = this.o.host.view?.state?.transcript.at(-1)?.id ?? -1;
     await this.submit(binding, draft, (shares, image) =>
       this.o.host.runHandoff({ binding, handoffId: r.handoffId, revision: r.revision, shares, ...(image ? { image } : {}) }));
+    this.watch(binding, after);
   }
 
   /** A decision turn: the host composes one card for their outcome, then that request ID is retired. */
@@ -846,6 +868,11 @@ export class Router {
         return {};
       case "agent-models":
         return { models: await agent.models(r.backend, r.login, { models: (b, l) => host.agentModels(b, l) }) };
+      case "agent-verify-images":
+        // Claude's one sign-in is the API key; the probe is refused while a request runs, like decision help.
+        if (this.running) throw new Error("Wait for Dum to finish, or Stop it - nothing was verified");
+        await host.agentVerifyImages(r.selector, "anthropic-key");
+        return {};
       case "agent-select":
         await agent.select(r.choice, {
           models: (b, l) => host.agentModels(b, l),
