@@ -255,6 +255,8 @@ a { color: var(--ink); }
     pendingLink: null,
     // Unsaved typing survives every re-render and every poll. Keys carry the goal id.
     drafts: new Map(),
+    // Which study disclosures (<details>) are open, by explicit key. Read from the DOM before each rebuild.
+    disclosures: new Map(),
     // Editable server-backed fields: a dirty value wins over the server until it is saved.
     dirty: { goalBase: new Map(), schedule: new Map(), globalBase: null },
     // Only the latest request for the currently selected goal may write state.
@@ -310,6 +312,19 @@ a { color: var(--ink); }
     if (!a) return;
     a.focus({ preventScroll: true });
     if (f.start !== null && typeof a.setSelectionRange === "function") { try { a.setSelectionRange(f.start, f.end); } catch {} }
+  }
+  // Disclosures: a study <details> keeps its open state across rebuilds under an explicit key.
+  // Keys are scoped by goal plus material id and fence ordinal, exercise id, or concept, so a
+  // different goal, material or exercise never inherits another's expanded controls.
+  const disclosureKey = (kind, id) => kind + ":" + (state.goalId || "") + ":" + id;
+  function bindDisclosure(details, key) {
+    details.dataset.disclosure = key;
+    if (state.disclosures.has(key)) details.open = state.disclosures.get(key);
+    return details;
+  }
+  /** Record the actual open state of every keyed disclosure still in the DOM. */
+  function captureDisclosures(root) {
+    for (const d of root.querySelectorAll("details[data-disclosure]")) state.disclosures.set(d.dataset.disclosure, d.open);
   }
   // Static inputs keep one draft per goal; switching goals swaps them.
   const STATIC_DRAFTS = [["teachConcept", "teachConcept"], ["teachText", "teachText"], ["correction", "correction"]];
@@ -532,11 +547,12 @@ a { color: var(--ink); }
   }
 
   // --- Material bodies: prose as text, fenced code behind a labelled details ------------------
-  function renderBody(text) {
+  function renderBody(text, materialId) {
     const root = el("div", { class: "prose" });
     const lines = String(text).split("\n");
     let i = 0;
     let para = [];
+    let fence = 0;
     const flush = () => { if (para.length) { root.append(el("p", { text: para.join(" ") })); para = []; } };
     while (i < lines.length) {
       const line = lines[i];
@@ -547,7 +563,8 @@ a { color: var(--ink); }
         while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
         i++;
         const label = /^```\s*js/.test(line) ? "Optional: the JavaScript for this" : "Optional: expected output";
-        root.append(el("details", { class: "code" }, [el("summary", { text: label }), el("pre", { text: code.join("\n") })]));
+        const block = el("details", { class: "code" }, [el("summary", { text: label }), el("pre", { text: code.join("\n") })]);
+        root.append(bindDisclosure(block, disclosureKey("mcode", materialId + ":" + fence++)));
         continue;
       }
       if (/^#+\s/.test(line)) { flush(); root.append(el("h4", { text: line.replace(/^#+\s*/, "") })); i++; continue; }
@@ -586,6 +603,7 @@ a { color: var(--ink); }
   }
   function renderStudy() {
     const focus = captureFocus();
+    captureDisclosures($("study"));
     renderStudyInner();
     restoreFocus(focus);
   }
@@ -616,7 +634,7 @@ a { color: var(--ink); }
       if (typeof m.url === "string" && /^https:\/\//.test(m.url)) row.append(el("a", { href: m.url, target: "_blank", rel: "noopener noreferrer", text: "reference" }));
       if (p) row.append(el("span", { class: "muted", text: "studied " + p.counts.introduced + ", reports " + p.learnerReports.length + ", revisit " + p.counts.needsRevisiting }));
       box.append(row);
-      if (open) box.append(renderBody(m.body));
+      if (open) box.append(renderBody(m.body, m.id));
       root.append(box);
     }
 
@@ -659,13 +677,13 @@ a { color: var(--ink); }
       if (fam.variants.length < 2) change.disabled = true;
       const nextRule = el("button", { text: "Next rule", onclick: () => { state.familyIndex[group.id] = (fi + 1) % fams.length; renderStudy(); } });
       box.append(el("div", { class: "row" }, [input, check, change, nextRule]), fb);
-      if (ex.code) box.append(el("details", { class: "code" }, [el("summary", { text: "Optional: the JavaScript for this rule" }), el("pre", { text: ex.code })]));
+      if (ex.code) box.append(bindDisclosure(el("details", { class: "code" }, [el("summary", { text: "Optional: the JavaScript for this rule" }), el("pre", { text: ex.code })]), disclosureKey("xcode", ex.id)));
       root.append(box);
     }
 
     // Self report in your own words, and a revisit mark. Recorded as stated, under the material's concept.
     const concept = group.materials.length ? group.materials[0].concept : group.id;
-    const report = el("details", { class: "sub" });
+    const report = bindDisclosure(el("details", { class: "sub" }), disclosureKey("report", concept));
     report.append(el("summary", { text: "Report an attempt or ask to revisit (" + concept + ")" }));
     const textKey = draftKey("report", concept), helpedKey = draftKey("helped", concept), noteKey = draftKey("revisit", concept);
     const text = bindDraft(el("textarea", { class: "short", maxlength: "12000", placeholder: "What you tried, in your own words" }), textKey);
