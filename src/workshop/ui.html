@@ -244,6 +244,15 @@ a { color: var(--ink); }
     panelIndex: 0,
     pollTimer: null,
     positionSaves: new Map(),
+    // Last panel shown per job in this page; it outranks the server page until the queued save lands.
+    panelPositions: new Map(),
+    // Goal whose material has not been applied yet; refreshGoal fetches it alongside context and jobs.
+    materialFor: null,
+    materialLoad: null,
+    // Goal whose newest refresh failed; schedulePoll keeps retrying it until a refresh succeeds.
+    retryGoal: null,
+    // A valid linked job waiting for its goal's initial refresh to recover.
+    pendingLink: null,
     // Unsaved typing survives every re-render and every poll. Keys carry the goal id.
     drafts: new Map(),
     // Editable server-backed fields: a dirty value wins over the server until it is saved.
@@ -454,29 +463,48 @@ a { color: var(--ink); }
 
   /** opts.keepHash: set only by openDeepLink, which is switching to the linked job's own goal. */
   async function selectGoal(id, opts) {
-    const seq = ++state.selectSeq;
+    // A new selection (even A -> B -> A) invalidates every refresh, retry and material load still in flight.
+    ++state.selectSeq;
     if (!(opts && opts.keepHash)) { ++state.openSeq; clearJobHash(); }
+    state.pendingLink = null;
     clearTimeout(state.pollTimer);
+    state.retryGoal = null; state.materialFor = id; state.materialLoad = null;
     state.goalId = id; state.showJob = null; state.openMaterial = null; $("showCard").classList.add("hidden");
     state.groups = []; state.attempts = []; state.teachings = []; state.jobs = []; state.progress = null;
     restoreStaticDrafts();
     renderGoals();
     if (!id) { state.conceptId = null; renderStudy(); renderTeachings(); renderJobs(); renderContext(null); return; }
     renderStudy(); renderTeachings(); renderJobs(); renderContext(null);
-    const mat = await api("GET", "/api/material?goalId=" + encodeURIComponent(id));
-    if (seq !== state.selectSeq || state.goalId !== id) return;
-    state.groups = mat.groups || [];
-    if (!state.groups.some((g) => g.id === state.conceptId)) state.conceptId = state.groups.length ? state.groups[0].id : null;
     await refreshGoal();
+  }
+  /** One material request per goal at a time; a failed one is forgotten so the next refresh asks again. */
+  function loadMaterial(goalId) {
+    if (state.materialLoad && state.materialLoad.goalId === goalId) return state.materialLoad.promise;
+    const promise = api("GET", "/api/material?goalId=" + encodeURIComponent(goalId));
+    state.materialLoad = { goalId, promise };
+    promise.catch(() => { if (state.materialLoad && state.materialLoad.promise === promise) state.materialLoad = null; });
+    return promise;
   }
   async function refreshGoal() {
     const goalId = state.goalId;
     if (!goalId) return;
-    const seq = ++state.refreshSeq;
+    const seq = ++state.refreshSeq, selectSeq = state.selectSeq;
+    // Only the newest refresh of the current selection may write state, arm retries or touch the poll timer.
+    const current = () => seq === state.refreshSeq && selectSeq === state.selectSeq && state.goalId === goalId;
+    let ok = false;
     try {
-      const [ctx, jobs] = await Promise.all([api("GET", goalPath("context")), api("GET", "/api/jobs?goalId=" + encodeURIComponent(goalId))]);
-      // Only the newest response for the goal that is still selected may write; older or foreign ones are dropped.
-      if (seq !== state.refreshSeq || state.goalId !== goalId || ctx.goal.id !== goalId) return;
+      const [ctx, jobs, mat] = await Promise.all([
+        api("GET", goalPath("context")),
+        api("GET", "/api/jobs?goalId=" + encodeURIComponent(goalId)),
+        state.materialFor === goalId ? loadMaterial(goalId) : null,
+      ]);
+      // Older or foreign responses are dropped.
+      if (!current() || ctx.goal.id !== goalId) return;
+      if (mat) {
+        state.groups = mat.groups || [];
+        if (!state.groups.some((g) => g.id === state.conceptId)) state.conceptId = state.groups.length ? state.groups[0].id : null;
+        state.materialFor = null; state.materialLoad = null;
+      }
       state.attempts = ctx.attempts || []; state.teachings = ctx.teachings || []; state.jobs = jobs.jobs || []; state.progress = ctx.progress || null;
       const i = state.goals.findIndex((g) => g.id === ctx.goal.id); if (i >= 0) state.goals[i] = ctx.goal;
       const selected = state.showJob && state.jobs.find((j) => j.id === state.showJob.id);
@@ -486,8 +514,12 @@ a { color: var(--ink); }
       renderGoals(); renderStudy(); renderTeachings(); renderJobs(); renderContext(ctx);
       if (changed) renderShow();
       restoreFocus(focus);
+      ok = true;
+      const pending = state.pendingLink;
+      if (pending && pending.seq === state.openSeq && pending.goalId === goalId) await openDeepLink(pending.id);
     } finally {
-      if (state.goalId === goalId) schedulePoll();
+      // A failed newest refresh keeps polling until one succeeds, whatever the cached jobs and schedule say.
+      if (current()) { state.retryGoal = ok ? null : goalId; schedulePoll(); }
     }
   }
   async function refreshGlobal() {
@@ -773,7 +805,9 @@ a { color: var(--ink); }
     clearTimeout(state.pollTimer);
     const busy = state.jobs.some((j) => j.state === "queued" || j.state === "running");
     const scheduled = state.goals.find((g) => g.id === state.goalId)?.schedule;
-    if (state.goalId && (busy || scheduled)) state.pollTimer = setTimeout(() => refreshGoal().catch(() => {}), 4000);
+    const retry = state.retryGoal !== null && state.retryGoal === state.goalId;
+    const loggedOut = !$("login").classList.contains("hidden");
+    if (state.goalId && !loggedOut && (busy || scheduled || retry)) state.pollTimer = setTimeout(() => refreshGoal().catch(() => {}), 4000);
   }
 
   // --- Presentation -----------------------------------------------------------------------
@@ -788,19 +822,26 @@ a { color: var(--ink); }
     const summary = state.jobs.find((j) => j.id === id);
     if (!summary) return;
     const seq = ++state.openSeq, goalId = state.goalId;
+    state.pendingLink = null;
+    // A newer open or a goal switch during any fetch wins; this open is dropped.
+    const current = () => seq === state.openSeq && state.goalId === goalId;
     let job = summary;
     try { job = (await api("GET", "/api/jobs/" + encodeURIComponent(id))).job; } catch (err) { toast(err.message); }
-    // A newer open or a goal switch during the fetch wins; this response is dropped.
-    if (seq !== state.openSeq || state.goalId !== goalId) return;
-    state.showJob = job; state.panelIndex = 0;
+    if (!current()) return;
+    let panel = 0;
     if (job.state === "ready" && job.result) {
-      try {
-        const p = await api("GET", "/api/jobs/" + encodeURIComponent(id) + "/position");
-        if (seq !== state.openSeq) return;
-        if (Number.isInteger(p.panel)) state.panelIndex = p.panel;
-      } catch {}
-      if (seq !== state.openSeq) return;
+      // The page last shown here outranks the server, whose copy may still be waiting on a queued save.
+      if (!state.panelPositions.has(id)) {
+        try {
+          const p = await api("GET", "/api/jobs/" + encodeURIComponent(id) + "/position");
+          if (current() && Number.isInteger(p.panel)) panel = p.panel;
+        } catch {}
+        if (!current()) return;
+      }
+      if (state.panelPositions.has(id)) panel = state.panelPositions.get(id);
     }
+    // The reader switches jobs only once the position is settled, so controls never act on the wrong job.
+    state.showJob = job; state.panelIndex = panel;
     setJobHash(id);
     renderJobs(); renderShow();
     $("showCard").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -812,6 +853,7 @@ a { color: var(--ink); }
    */
   async function openDeepLink(id) {
     const seq = ++state.openSeq;
+    state.pendingLink = null;
     const fail = (msg) => { if (seq !== state.openSeq) return true; toast(msg); clearJobHash(); return false; };
     if (state.jobs.some((j) => j.id === id)) { await openJob(id); return true; }
     let job;
@@ -821,7 +863,15 @@ a { color: var(--ink); }
     const goalId = job && job.id === id && typeof job.goalId === "string" ? job.goalId : null;
     if (!goalId || !state.goals.some((g) => g.id === goalId)) return fail("The linked build does not belong to any goal here.");
     if (goalId !== state.goalId) {
-      await selectGoal(goalId, { keepHash: true });
+      try {
+        await selectGoal(goalId, { keepHash: true });
+      } catch (err) {
+        if (seq === state.openSeq && state.goalId === goalId) {
+          state.pendingLink = { id, goalId, seq };
+          toast("Couldn't load this build yet. Retrying.");
+        }
+        return true;
+      }
       if (seq !== state.openSeq || state.goalId !== goalId) return true;
     }
     if (!state.jobs.some((j) => j.id === id)) return fail("The linked build is not in this goal's build list.");
@@ -881,7 +931,7 @@ a { color: var(--ink); }
     const job = state.showJob; if (!job || job.state !== "ready" || !job.result || !job.result.panels) return;
     const n = job.result.panels.length; const next = Math.max(0, Math.min(state.panelIndex + delta, n - 1));
     if (next === state.panelIndex) return;
-    state.panelIndex = next; renderShow();
+    state.panelIndex = next; state.panelPositions.set(job.id, next); renderShow();
     const previous = state.positionSaves.get(job.id) || Promise.resolve();
     const save = previous.then(() => api("PUT", "/api/jobs/" + encodeURIComponent(job.id) + "/position", { panel: next })).catch(() => {});
     state.positionSaves.set(job.id, save);

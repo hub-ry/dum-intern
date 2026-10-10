@@ -11,7 +11,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { WorkshopError } from "./errors.ts";
 import { WorkshopStore } from "./runtime.ts";
-import { NotesProjectionError, PublicNotes, noteUrl, topicSlug, validateNotePayload } from "./public-notes.ts";
+import { MAX_NOTES_LISTED, MAX_REVISIONS_PER_NOTE, NotesProjectionError, PublicNotes, noteUrl, topicSlug, validateNotePayload } from "./public-notes.ts";
 import { startWorkshopServer } from "./server.ts";
 
 const dirs: string[] = [];
@@ -63,6 +63,41 @@ function openNotes(): { notes: PublicNotes; home: string; pub: string } {
   const pub = fresh("dum-notes-public-");
   return { notes: new PublicNotes({ home, publicRoot: pub }), home, pub };
 }
+
+test("rejecting a new note at collection capacity preserves readable records and public pages", () => {
+  const { notes, home, pub } = openNotes();
+  const original = notes.create(payload());
+  const privateRoot = join(home, "public-notes");
+  for (let n = 0; n < MAX_NOTES_LISTED - 1; n++) {
+    mkdirSync(join(privateRoot, `00000000-0000-0000-0000-${n.toString(16).padStart(12, "0")}`), { mode: 0o700 });
+  }
+  const publicBefore = snapshot(pub);
+  const originalSource = readFileSync(join(privateRoot, original.id, "revision-1.json"), "utf8");
+  assert.throws(() => notes.create(payload({ title: "Beyond capacity" })), status(409));
+  assert.equal(readdirSync(privateRoot).filter((name) => /^[0-9a-f-]{36}$/.test(name)).length, MAX_NOTES_LISTED);
+  assert.deepEqual(notes.get(original.id), original);
+  assert.deepEqual(notes.list().map((note) => note.id), [original.id]);
+  assert.equal(readFileSync(join(privateRoot, original.id, "revision-1.json"), "utf8"), originalSource);
+  notes.rebuild();
+  assert.deepEqual(snapshot(pub), publicBefore);
+});
+
+test("rejecting a revision beyond readable capacity preserves the latest revision and projection", () => {
+  const { notes, home, pub } = openNotes();
+  const original = notes.create(payload());
+  const noteDir = join(home, "public-notes", original.id);
+  const revision = { ...JSON.parse(readFileSync(join(noteDir, "revision-1.json"), "utf8")), revision: MAX_REVISIONS_PER_NOTE };
+  writeFileSync(join(noteDir, `revision-${MAX_REVISIONS_PER_NOTE}.json`), JSON.stringify(revision), { mode: 0o600 });
+  notes.rebuild();
+  const latest = notes.get(original.id);
+  const privateBefore = snapshot(noteDir);
+  const publicBefore = snapshot(pub);
+  assert.throws(() => notes.revise(original.id, payload({ title: "Beyond revision capacity" })), status(409));
+  assert.deepEqual(notes.get(original.id), latest);
+  assert.deepEqual(snapshot(noteDir), privateBefore);
+  notes.rebuild();
+  assert.deepEqual(snapshot(pub), publicBefore);
+});
 
 // ---------------------------------------------------------------------------------------------
 

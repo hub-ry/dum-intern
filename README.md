@@ -18,7 +18,7 @@ Teaching affects Dum's persistent context and creation choices. It does not retr
 
 ## Run the workshop
 
-Use Node 24, Docker, and a logged-in Claude Code CLI with access to the selected model. The service user needs Docker access. Builds use your CLI authentication; no separate model API key is required by this implementation.
+Use Linux with `/proc`, Node 24, util-linux `flock` on PATH, Docker, and a logged-in Claude Code CLI with access to the selected model. The service user needs Docker access. Builds use your CLI authentication; no separate model API key is required by this implementation.
 
 Generation sends the queued goal and global context, teaching records, and any correction text to the configured CLI provider. Corrections also send the verified parent HTML and presentation. Generation requires provider access; verification runs offline in Docker. The private reader can run the finished demo in a sandboxed frame on the separate artifact origin. Generated JavaScript never runs in the host's Node process.
 
@@ -46,6 +46,8 @@ For access over a trusted private network, set `DUM_WORKSHOP_HOST` to the host's
 | `DUM_WORKSHOP_BROWSER_IMAGE` | `dum-workshop-browser:1` |
 
 Persisted state belongs outside the checkout. Only one process may own a workshop home. Stop the existing service before starting a second instance against the same home. Interrupted jobs are requeued using a fresh artifact directory after restart.
+
+Owner acquisition, stale-owner recovery, and release are serialized with an OS lock on a stable private guard file. Never unlink or replace that guard while the workshop is running. Durable writes enforce the 256 MiB state ceiling and reserve space for bounded job failures; a result that cannot fit becomes a visible failed job without replacing earlier history.
 
 ## Run on hub
 
@@ -93,6 +95,8 @@ npm run note -- list
 The notes service reuses the same static server on loopback port 8071. Cloudflare's `notes.ryhub.dev` ingress points there, not to the private API. Public GET/HEAD requests can read pages; public mutations are rejected.
 
 `pages.json` is an object with `pages`, an array of `{ "heading": "...", "text": "...", "code": "optional" }`, and optional `links`, an array of `{ "label": "...", "url": "https://..." }`. The CLI reads the private environment file literally, authenticates to the workshop, and never writes public files directly. Public content is explicitly selected; no context, attempts, or teaching history is automatically exported. Private note revisions are immutable; only their escaped HTML projection is served publicly.
+
+Publication is bounded at 5,000 notes and 100,000 revisions per note. A capacity rejection writes no new revision and leaves the existing records and public projection readable.
 
 The reusable [dum-publish skill](.claude/skills/dum-publish/SKILL.md) documents the complete payload, API, hosting, and privacy rules.
 

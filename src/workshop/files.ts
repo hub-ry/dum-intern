@@ -2,12 +2,22 @@
 // never follow a symlink, and replacements that are complete and synced before they get their
 // name. One process owns a home at a time; the owner lock carries the pid and a random token so
 // a stale lock from a dead process is recovered and a live one is never removed by someone else.
+//
+// The owner lock's read-check-unlink-create sequence runs under a kernel advisory lock on a stable
+// private guard file next to it (`owner.lock.guard`), so two starters that both see a stale owner
+// can't both "recover" it. Node has no flock(2), so the short critical section runs in a child:
+// util-linux flock(1) takes the guard through an inherited descriptor and runs owner-lock-helper.ts,
+// which calls back into ownerLockOperation below. The guard is created once and never unlinked or
+// replaced; whoever holds its lock exits, cleanly or not, and the kernel drops the lock.
 
+import { spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -20,11 +30,23 @@ import {
   writeSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const CREATE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 const LOCK_MAX_BYTES = 4096;
 const LOCK_ATTEMPTS = 4;
+/** Flags for the guard: never through a symlink, never blocking on a FIFO put in its place. */
+const GUARD_FLAGS = constants.O_RDONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+/** The descriptor number the guard is pinned to in the flock child; flock reopens it by that path. */
+const GUARD_FD = 3;
+/** How long flock(1) waits for the guard before giving up; a critical section takes milliseconds. */
+const GUARD_WAIT_SECONDS = 5;
+/** flock's exit status when it could not take the guard in time (its own choice, not the helper's). */
+const GUARD_BUSY_EXIT = 75;
+/** Backstop on the whole child, well past flock's wait plus a helper start. */
+const GUARD_CHILD_TIMEOUT_MS = 30_000;
+const GUARD_CHILD_MAX_OUTPUT = 64 * 1024;
 
 function code(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException)?.code;
@@ -214,45 +236,221 @@ export class LockHeldError extends Error {
   }
 }
 
+/** What one guarded owner-lock operation found; the helper prints it, the parent acts on it. */
+export type OwnerLockOutcome =
+  | { ok: true; outcome: "acquired" | "released" | "absent" | "kept" }
+  | { ok: false; kind: "live"; pid: number; message: string }
+  | { ok: false; kind: "malformed" | "operational"; message: string };
+
+export type OwnerLockOperation = "acquire" | "release";
+
+/**
+ * The owner-lock critical section. Runs only while the caller holds the guard lock (the helper is
+ * the one caller), so between reading `path` and changing it nothing else does the same.
+ *
+ * acquire: create the owner record for `pid`/`token`; recover one whose process is gone; report
+ * a live one (including one already carrying this very pid and token, which is idempotent).
+ * release: unlink the record only when it carries both `pid` and `token`; anything else is kept.
+ */
+export function ownerLockOperation(operation: OwnerLockOperation, path: string, pid: number, token: string): OwnerLockOutcome {
+  if (operation !== "acquire" && operation !== "release") return { ok: false, kind: "operational", message: `unknown owner-lock operation ${String(operation)}` };
+  if (!Number.isSafeInteger(pid) || pid <= 0 || typeof token !== "string" || !token) {
+    return { ok: false, kind: "operational", message: "owner-lock operation needs a positive pid and a token" };
+  }
+  let holder: LockHolder | null;
+  let raw: string | null;
+  try {
+    if (operation === "release") {
+      raw = readPrivateFile(path, LOCK_MAX_BYTES);
+      if (raw === null) return { ok: true, outcome: "absent" };
+      holder = parseHolder(raw);
+      if (holder === null || holder.pid !== pid || holder.token !== token) return { ok: true, outcome: "kept" };
+      try {
+        unlinkSync(path);
+      } catch (err) {
+        if (code(err) !== "ENOENT") throw err;
+      }
+      syncDir(dirname(path));
+      return { ok: true, outcome: "released" };
+    }
+
+    const body = `${JSON.stringify({ pid, token, createdAt: new Date().toISOString() })}\n`;
+    for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt++) {
+      if (createExclusive(path, body)) return { ok: true, outcome: "acquired" };
+      raw = readPrivateFile(path, LOCK_MAX_BYTES);
+      if (raw === null) continue; // gone between the create and the read: something outside the guard; try again
+      holder = parseHolder(raw);
+      if (holder === null) {
+        return { ok: false, kind: "malformed", message: `${path} isn't a workshop lock the store can read - if no workshop is running, delete it and try again` };
+      }
+      if (holder.pid === pid && holder.token === token) return { ok: true, outcome: "acquired" };
+      if (processAlive(holder.pid)) {
+        return { ok: false, kind: "live", pid: holder.pid, message: `another workshop process (pid ${holder.pid}) owns ${path} - close it there first` };
+      }
+      // Stale: its process is gone on this machine. Under the guard, nobody else removes it with us.
+      try {
+        unlinkSync(path);
+      } catch (err) {
+        if (code(err) !== "ENOENT") throw err;
+      }
+    }
+    return { ok: false, kind: "operational", message: `${path} keeps reappearing - another program is writing there` };
+  } catch (err) {
+    return { ok: false, kind: "operational", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The guard that serializes owner-lock operations on `path`: a sibling file that is never removed. */
+export function ownerGuardPath(path: string): string {
+  return `${path}.guard`;
+}
+
+/**
+ * Open the guard for `path`, creating it privately the first time, and refuse anything that isn't
+ * our own private regular file with a single name: a symlink (O_NOFOLLOW), a directory or FIFO, a
+ * file someone else owns, or one whose directory entry no longer points at what we opened.
+ */
+function openGuard(path: string): number {
+  const guard = ownerGuardPath(path);
+  let fd: number;
+  try {
+    fd = openSync(guard, GUARD_FLAGS, 0o600);
+  } catch (err) {
+    if (code(err) === "ELOOP") throw new Error(`${guard} is a symlink - the workshop won't use it as the owner guard`);
+    if (code(err) === "EISDIR") throw new Error(`${guard} is a directory - the workshop won't use it as the owner guard`);
+    throw err;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error(`${guard} isn't a regular file - the workshop won't use it as the owner guard`);
+    const uid = process.getuid?.();
+    if (uid !== undefined && st.uid !== uid) throw new Error(`${guard} belongs to uid ${st.uid}, not this user - the workshop won't use it as the owner guard`);
+    if (st.nlink !== 1) throw new Error(`${guard} has ${st.nlink} names - the workshop won't use it as the owner guard`);
+    if ((st.mode & 0o077) !== 0) fchmodSync(fd, 0o600); // ours; the umask at creation may have been loose
+    const named = lstatSync(guard);
+    if (named.ino !== st.ino || named.dev !== st.dev) throw new Error(`${guard} changed while the workshop opened it - try again`);
+    return fd;
+  } catch (err) {
+    closeSync(fd);
+    throw err;
+  }
+}
+
+const HELPER_PATH = fileURLToPath(new URL("./owner-lock-helper.ts", import.meta.url));
+
+/** The tsx loader this process can reach, as a URL node's --import accepts, independent of cwd. */
+function tsxImport(): string {
+  try {
+    return import.meta.resolve("tsx");
+  } catch (err) {
+    throw new Error(`the owner-lock helper needs tsx, which can't be resolved from ${import.meta.url}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Error for a guard that stayed busy or a helper that could not run: operational, retryable. */
+export class OwnerLockBusyError extends Error {
+  constructor(path: string, detail: string) {
+    super(`${path} is busy - ${detail}`);
+    this.name = "OwnerLockBusyError";
+  }
+}
+
+/**
+ * Run one owner-lock operation under the guard's kernel lock, in a child:
+ * flock --exclusive --timeout N --conflict-exit-code 75 /proc/self/fd/3 node --import tsx helper ...
+ * flock opens /proc/self/fd/3 itself, so the lock lives on its own open file description and goes
+ * away when the child exits however it exits; the parent's descriptor never holds the lock.
+ */
+function runGuarded(operation: OwnerLockOperation, path: string, pid: number, token: string): OwnerLockOutcome {
+  const loader = tsxImport();
+  const fd = openGuard(path);
+  let result: SpawnSyncReturns<string>;
+  try {
+    result = spawnSync(
+      "flock",
+      [
+        "--exclusive",
+        "--timeout", String(GUARD_WAIT_SECONDS),
+        "--conflict-exit-code", String(GUARD_BUSY_EXIT),
+        `/proc/self/fd/${GUARD_FD}`,
+        process.execPath, "--import", loader, HELPER_PATH, operation, path, String(pid), token,
+      ],
+      {
+        stdio: ["ignore", "pipe", "pipe", fd],
+        encoding: "utf8",
+        timeout: GUARD_CHILD_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+        maxBuffer: GUARD_CHILD_MAX_OUTPUT,
+        windowsHide: true,
+      },
+    );
+  } finally {
+    closeSync(fd);
+  }
+  if (result.error) {
+    const why = code(result.error) === "ENOENT" ? "flock (util-linux) isn't installed or isn't on PATH" : result.error.message;
+    throw new OwnerLockBusyError(path, `the owner-lock helper couldn't run: ${why}`);
+  }
+  const printed = parseOutcome(result.stdout);
+  if (printed) return printed;
+  if (result.status === GUARD_BUSY_EXIT) {
+    throw new OwnerLockBusyError(path, `another workshop process held its guard for over ${GUARD_WAIT_SECONDS} seconds - try again`);
+  }
+  const stderr = (result.stderr ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
+  const how = result.signal ? `was stopped by ${result.signal}` : `exited ${result.status}`;
+  throw new OwnerLockBusyError(path, `the owner-lock helper ${how} without reporting${stderr ? `: ${stderr}` : ""}`);
+}
+
+/** The last JSON line the helper printed, when it is an outcome; anything else is "didn't report". */
+function parseOutcome(stdout: string | null | undefined): OwnerLockOutcome | null {
+  const lines = (stdout ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return null;
+  try {
+    const value: unknown = JSON.parse(last);
+    if (!value || typeof value !== "object" || typeof (value as { ok?: unknown }).ok !== "boolean") return null;
+    const v = value as Record<string, unknown>;
+    const { outcome, kind, message, pid } = v;
+    if (v.ok === true) {
+      return outcome === "acquired" || outcome === "released" || outcome === "absent" || outcome === "kept" ? { ok: true, outcome } : null;
+    }
+    if (typeof message !== "string") return null;
+    if (kind === "live") return typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0 ? { ok: false, kind, pid, message } : null;
+    if (kind === "malformed" || kind === "operational") return { ok: false, kind, message };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Own `path` for this process. A lock whose pid is gone is recovered; a live pid (including one
- * this user may not signal) is refused. Returns the release, which removes the lock only while it
- * still carries this process's token.
+ * this user may not signal) is refused with LockHeldError. The check and the change run under the
+ * guard, so concurrent starters see each other. A busy guard or a helper that can't run raises
+ * OwnerLockBusyError. Returns the release, which removes the lock only while it still carries this
+ * process's pid and token. The release runs one guarded operation and does not retry: an
+ * OwnerLockBusyError from it means the record is still ours on disk, and calling the release
+ * again is the retry.
  */
 export function acquireOwnerLock(path: string): () => void {
+  path = resolve(path);
   const token = randomUUID();
-  const body = `${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() })}\n`;
-  for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt++) {
-    if (createExclusive(path, body)) return makeRelease(path, token);
-    const holder = parseHolder(readPrivateFile(path, LOCK_MAX_BYTES));
-    if (holder === null) {
-      // Removed between the create and the read, or unreadable: a missing one is retried, an
-      // unreadable one is for a person to inspect.
-      let present = true;
-      try { lstatSync(path); } catch (err) { present = code(err) !== "ENOENT"; }
-      if (!present) continue;
-      throw new Error(`${path} isn't a workshop lock the store can read - if no workshop is running, delete it and try again`);
-    }
-    if (processAlive(holder.pid)) throw new LockHeldError(path, holder.pid);
-    // Stale: its process is gone on this machine. Remove and try again.
-    try {
-      unlinkSync(path);
-    } catch (err) {
-      if (code(err) !== "ENOENT") throw err;
-    }
-  }
-  throw new Error(`${path} keeps reappearing - another program is writing there`);
+  const outcome = runGuarded("acquire", path, process.pid, token);
+  if (outcome.ok) return makeRelease(path, token);
+  if (outcome.kind === "live") throw new LockHeldError(path, outcome.pid);
+  throw new Error(outcome.message);
 }
 
 function makeRelease(path: string, token: string): () => void {
   let held = true;
   return () => {
     if (!held) return;
+    // A busy guard or a helper that can't run throws OwnerLockBusyError here, and `held` stays
+    // true: the record may still be ours, and the caller decides whether to try again. Once this
+    // process exits its pid is gone and the next owner recovers the record either way.
+    const outcome = runGuarded("release", path, process.pid, token);
+    if (!outcome.ok) throw new Error(`${path} couldn't be released: ${outcome.message}`);
+    // released, absent, or kept: in every case nothing of ours remains to remove.
     held = false;
-    try {
-      if (parseHolder(readPrivateFile(path, LOCK_MAX_BYTES))?.token === token) unlinkSync(path);
-    } catch {
-      // Left in place: its pid is gone once this process exits, so the next owner recovers it.
-    }
   };
 }

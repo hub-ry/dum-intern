@@ -22,6 +22,7 @@ import { loopsAndConditionsMaterials } from "./materials.ts";
 import type {
   Attempt,
   BuildInput,
+  BuildOptions,
   BuildResult,
   ConceptProgress,
   Evidence,
@@ -48,6 +49,7 @@ import {
   MAX_ATTEMPTS_PER_GOAL,
   MAX_CONCEPT,
   MAX_CONTEXT,
+  MAX_ERROR_LENGTH,
   MAX_EVIDENCE_PER_GOAL,
   MAX_EXERCISE_ID,
   MAX_FEEDBACK,
@@ -105,6 +107,51 @@ export type {
 const STATE_FILE = "workshop.json";
 const POSITIONS_FILE = "positions.json";
 const LOCK_FILE = "owner.lock";
+
+// -- capacity reserve -------------------------------------------------------------------------
+//
+// The state file has one ceiling, MAX_STATE_BYTES, for reading and writing. A job that is queued
+// or running must always be able to end: failJob adds an error of up to MAX_ERROR_LENGTH
+// characters, a finishedAt, and one global event, and claimNextJob adds a startedAt plus one
+// previous artifact id. If an ordinary write (a teaching, a ready result) were allowed right up to
+// the ceiling, the failure that follows a result too large to keep could not be written either,
+// and the job would stay running and block the queue forever. So every write is checked against
+// the ceiling less a reserve computed on the state as it will be after the write:
+//   ordinary: one failure's room per active job, plus one claim's room while any job is active;
+//   claim:    one failure's room per active job (the claim spends the claim headroom);
+//   settle:   one failure's room per job still active afterwards.
+// A failure fits because the job it ends no longer counts, so the reserve shrinks by exactly the
+// room its own failure may use; a requeue or a recovery only shrinks the state. Only these three
+// bounds are enforced: the reserve does not promise that a claim fits after a failure that used
+// all of its room, nor does it bound repeated interrupted attempts' retained artifact lineage.
+
+/** UTF-8 bytes JSON.stringify can spend on one string character at most: a "\uXXXX" escape. */
+const MAX_JSON_BYTES_PER_CHAR = 6;
+/** Characters of the failure message a buildFailed event quotes. */
+const EVENT_DETAIL_CHARS = 120;
+/** Fixed JSON around a failure's fields and one pretty-printed event, generously rounded. */
+const FAILURE_FIXED_BYTES = 1024;
+/** Bytes one running job can grow by when failJob records it; also covers the state's shrink to "failed". */
+export const JOB_FAILURE_RESERVE_BYTES = FAILURE_FIXED_BYTES + (MAX_ERROR_LENGTH + EVENT_DETAIL_CHARS + MAX_TITLE + 2 * 36 + 2 * 30) * MAX_JSON_BYTES_PER_CHAR;
+/** Bytes one claim can grow a queued job by: startedAt, a wider attempts count, one previous artifact id, a new one. */
+export const JOB_CLAIM_RESERVE_BYTES = 512;
+
+/** The 409 raised when a write would push the state file past what it may hold. Nothing was written. */
+export class WorkshopCapacityError extends WorkshopError {
+  constructor(message: string) {
+    super(409, message);
+    this.name = "WorkshopCapacityError";
+  }
+}
+
+/**
+ * ordinary: any caller's write; must leave every active job's failure room and, while any job is
+ *   active, one claim's room.
+ * claim: marks a queued job running; must leave every active job's failure room.
+ * settle: fail, requeue, or recover a job; must leave the failure room of every job still active
+ *   afterwards. The job a failure ends is no longer active, which is what makes the failure fit.
+ */
+type CommitKind = "ordinary" | "claim" | "settle";
 
 /** How many of a goal's most recent interactions its computed context quotes. */
 const CONTEXT_RECENT_INTERACTIONS = 12;
@@ -185,6 +232,11 @@ export class WorkshopStore {
   private releaseLock: (() => void) | null;
   private readonly listeners = new Set<Listener>();
   private closed = false;
+  /**
+   * The write ceiling, equal to the read ceiling MAX_STATE_BYTES. Private: capacity tests lower it
+   * on an open store to exercise the reserve invariant without a 256 MB fixture.
+   */
+  private stateCapacityBytes = MAX_STATE_BYTES;
 
   constructor(home?: string) {
     const chosen = home === undefined ? defaultHome() : resolve(home);
@@ -227,7 +279,13 @@ export class WorkshopStore {
       }
       this.recoverInterruptedJobs();
     } catch (err) {
-      this.releaseLock();
+      try {
+        this.releaseLock();
+      } catch (releaseErr) {
+        // The failure to open is the one to report. The record left behind carries this pid and
+        // is recovered once this process exits; the release failure rides along as the cause.
+        if (err instanceof Error && err.cause === undefined) err.cause = releaseErr;
+      }
       this.releaseLock = null;
       throw err;
     }
@@ -243,7 +301,7 @@ export class WorkshopStore {
           delete job.startedAt;
         }
       }
-    });
+    }, "settle");
   }
 
   // -- transactions ---------------------------------------------------------------------------
@@ -252,18 +310,32 @@ export class WorkshopStore {
     if (this.closed) throw WorkshopError.conflict("the workshop store is closed");
   }
 
+  /** Bytes a write of `kind` must leave free below the ceiling, for the state as it will be after the write. */
+  private reserveBytes(state: State, kind: CommitKind): number {
+    const active = state.jobs.reduce((n, j) => (j.state === "queued" || j.state === "running" ? n + 1 : n), 0);
+    const claimHeadroom = kind === "ordinary" && active > 0 ? JOB_CLAIM_RESERVE_BYTES : 0;
+    return active * JOB_FAILURE_RESERVE_BYTES + claimHeadroom;
+  }
+
   /**
    * Apply `mutate` to the live state and write the result. If anything throws, including the
    * write, the in-memory state is rebuilt from the last text on disk, so memory never runs ahead
-   * of the file.
+   * of the file. A write that would not fit under the ceiling less the reserve for `kind` raises
+   * WorkshopCapacityError before touching the disk.
    */
-  private commit<T>(mutate: (state: State) => T): T {
+  private commit<T>(mutate: (state: State) => T, kind: CommitKind = "ordinary"): T {
     this.ensureOpen();
     let out: T;
     try {
       out = mutate(this.state);
       const text = JSON.stringify(this.state, null, 2);
-      if (Buffer.byteLength(text, "utf8") > MAX_STATE_BYTES) throw WorkshopError.conflict(`workshop state exceeds its ${MAX_STATE_BYTES}-byte capacity; existing history is unchanged`);
+      const bytes = Buffer.byteLength(text, "utf8");
+      const ceiling = this.stateCapacityBytes - this.reserveBytes(this.state, kind);
+      if (bytes > ceiling) {
+        throw new WorkshopCapacityError(
+          `workshop state would be ${bytes} bytes, past its ${this.stateCapacityBytes}-byte capacity${ceiling < this.stateCapacityBytes ? ` less the ${this.stateCapacityBytes - ceiling} bytes reserved for ending active jobs` : ""}; existing history is unchanged`,
+        );
+      }
       writePrivateFile(this.statePath, text);
       this.stateText = text;
     } catch (err) {
@@ -308,12 +380,17 @@ export class WorkshopStore {
     }
   }
 
+  /**
+   * Release the owner lock and refuse further use. The release goes first: if it fails for an
+   * operational reason (a busy guard, a helper that could not run) the store stays open and the
+   * error propagates, so the caller may close again.
+   */
   close(): void {
     if (this.closed) return;
-    this.closed = true;
-    this.listeners.clear();
     this.releaseLock?.();
     this.releaseLock = null;
+    this.closed = true;
+    this.listeners.clear();
   }
 
   // -- lookups ---------------------------------------------------------------------------------
@@ -852,11 +929,15 @@ export class WorkshopStore {
         job.artifactId = randomUUID();
       }
       return job;
-    });
+    }, "claim");
     return clone(claimed);
   }
 
-  /** Runner entry: a validated result makes the job ready. The publisher's files are not touched. */
+  /**
+   * Runner entry: a validated result makes the job ready. The publisher's files are not touched.
+   * Invalid input raises a 400; a result the state file has no room for raises
+   * WorkshopCapacityError (409) and leaves the job running for the runner to fail durably.
+   */
   completeJob(jobId: string, raw: unknown): Job {
     this.ensureOpen();
     const id = requireId(jobId, "job id");
@@ -891,9 +972,9 @@ export class WorkshopStore {
       j.error = message;
       j.finishedAt = at;
       const goal = s.goals.find((g) => g.id === j.goalId);
-      if (goal) this.pushEvent(s, "buildFailed", goal, `job ${j.id}: ${message.slice(0, 120)}`, at);
+      if (goal) this.pushEvent(s, "buildFailed", goal, `job ${j.id}: ${message.slice(0, EVENT_DETAIL_CHARS)}`, at);
       return j;
-    });
+    }, "settle");
     return clone(failed);
   }
 
@@ -908,7 +989,7 @@ export class WorkshopStore {
       j.state = "queued";
       delete j.startedAt;
       return j;
-    });
+    }, "settle");
     return clone(requeued);
   }
 
@@ -957,6 +1038,8 @@ export class WorkshopRunner {
   private current: Current | null = null;
   private controller: AbortController | null = null;
   private tickQueued = false;
+  /** The publisher. Private: runner tests replace it on an instance to hand back a prepared result. */
+  private readonly build: (input: BuildInput, options: BuildOptions) => Promise<unknown> = buildCreation;
 
   constructor(store: WorkshopStore, options: WorkshopRunnerOptions) {
     if (!options || typeof options.artifactRoot !== "string" || !options.artifactRoot.trim()) {
@@ -1105,7 +1188,7 @@ export class WorkshopRunner {
     let outcome: { ok: true; result: unknown } | { ok: false; error: unknown };
     try {
       if (job.parentId !== undefined) input.parent = await this.readParentCreation(job.parentId);
-      const result: unknown = await buildCreation(input, { artifactRoot: this.artifactRoot, signal: controller.signal });
+      const result: unknown = await this.build(input, { artifactRoot: this.artifactRoot, signal: controller.signal });
       outcome = { ok: true, result };
     } catch (err) {
       outcome = { ok: false, error: err };
@@ -1117,13 +1200,21 @@ export class WorkshopRunner {
     try {
       if (this.stopping && !timedOut) {
         // Interrupted on purpose: back to the queue, never failed. A result that arrived anyway
-        // is kept if it validates, since the work is real and done.
+        // is kept if it validates, since the work is real and done. One that the state file has
+        // no room for is failed now, not requeued: building it again would not make it fit. One
+        // that does not validate (400) is requeued: an interrupted build may hand back a partial
+        // result, and a later run produces a fresh one. Anything else the store raises (closed,
+        // I/O, a job no longer running) is operational and goes to onError like any other.
         if (outcome.ok) {
           try {
             this.store.completeJob(job.id, outcome.result);
             return;
-          } catch {
-            // Fall through to requeue; a later run produces a fresh artifact.
+          } catch (err) {
+            if (err instanceof WorkshopCapacityError) {
+              this.store.failJob(job.id, err);
+              return;
+            }
+            if (!(err instanceof WorkshopError && err.status === 400)) throw err;
           }
         }
         this.store.requeueJob(job.id);
@@ -1133,7 +1224,10 @@ export class WorkshopRunner {
         try {
           this.store.completeJob(job.id, outcome.result);
         } catch (err) {
-          if (err instanceof WorkshopError && err.status === 400) this.store.failJob(job.id, err);
+          // A result that is invalid, or too large for the state file to keep, ends the job
+          // durably; the reserve kept by every ordinary write guarantees the failure fits.
+          // Anything else (closed store, I/O) is operational and leaves the job running.
+          if (err instanceof WorkshopCapacityError || (err instanceof WorkshopError && err.status === 400)) this.store.failJob(job.id, err);
           else throw err;
         }
       } else {

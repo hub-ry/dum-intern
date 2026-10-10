@@ -9,20 +9,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 setTimeout(() => { console.error('verifier timed out'); process.exit(1); }, 80_000).unref();
 
-function freeze() {
-  let s = 42;
-  Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x80000000; };
-  const T = 1700000000000;
-  const D = Date;
-  const F = function (...a) { return a.length ? new D(...a) : new D(T); };
-  F.now = () => T;
-  F.UTC = D.UTC;
-  F.parse = D.parse;
-  F.prototype = D.prototype;
-  window.Date = F;
-  performance.now = () => 0;
-}
-
 async function waitFor(fn, ms) {
   const end = Date.now() + ms;
   for (;;) {
@@ -58,7 +44,6 @@ async function main() {
       page.on('console', (message) => { if (message.type() === 'error') problems.push('console error'); });
       page.on('popup', () => problems.push('popup'));
       page.on('dialog', (d) => { problems.push('dialog'); d.dismiss().catch(() => {}); });
-      await page.evaluate(freeze);
       await page.setContent(html, { waitUntil: 'load' });
       await sleep(100);
       return page;

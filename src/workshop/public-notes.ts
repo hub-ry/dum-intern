@@ -58,8 +58,8 @@ export const MAX_LINK_URL = 500;
 export const MAX_NOTE_BODY_BYTES = 32 * 1024;
 /** A revision file on disk is the payload plus a little metadata. */
 const MAX_REVISION_FILE_BYTES = 64 * 1024;
-const MAX_NOTES_LISTED = 5000;
-const MAX_REVISIONS_PER_NOTE = 100_000;
+export const MAX_NOTES_LISTED = 5000;
+export const MAX_REVISIONS_PER_NOTE = 100_000;
 
 const NOTE_SCHEMA_VERSION = 1;
 const PRIVATE_DIR = "public-notes";
@@ -543,16 +543,20 @@ export class PublicNotes {
     return this.readRevision(id, numbers[numbers.length - 1]!);
   }
 
-  /** Every note's latest revision, oldest creation first, ties broken by id. Reads only revision files. */
-  private latestAll(): NoteRevision[] {
+  private noteIds(): string[] {
     this.checkPrivateRoot();
-    const out: NoteRevision[] = [];
     const ids: string[] = [];
     for (const entry of readdirSync(this.privateRoot, { withFileTypes: true })) {
       if (entry.isDirectory() && !entry.isSymbolicLink() && UUID.test(entry.name)) ids.push(entry.name);
     }
-    ids.sort();
     if (ids.length > MAX_NOTES_LISTED) throw WorkshopError.corrupt(`more than ${MAX_NOTES_LISTED} notes under ${this.privateRoot}`);
+    return ids;
+  }
+
+  /** Every note's latest revision, oldest creation first, ties broken by id. Reads only revision files. */
+  private latestAll(): NoteRevision[] {
+    const out: NoteRevision[] = [];
+    const ids = this.noteIds();
     for (const id of ids) {
       const latest = this.latestOrNull(id);
       if (latest) out.push(latest);
@@ -570,6 +574,12 @@ export class PublicNotes {
   }
 
   private storeRevision(rev: NoteRevision): void {
+    if (rev.revision > MAX_REVISIONS_PER_NOTE) {
+      throw WorkshopError.conflict(`note ${rev.id} has reached its ${MAX_REVISIONS_PER_NOTE}-revision capacity`);
+    }
+    if (rev.revision === 1 && this.noteIds().length >= MAX_NOTES_LISTED) {
+      throw WorkshopError.conflict(`public notes have reached their ${MAX_NOTES_LISTED}-note capacity`);
+    }
     const dir = this.noteDir(rev.id);
     ensurePrivateDir(dir);
     createPrivateFileOnce(join(dir, `revision-${rev.revision}.json`), `${JSON.stringify(rev, null, 2)}\n`);

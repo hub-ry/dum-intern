@@ -109,6 +109,8 @@ The private UI/API and artifacts use separate origins, ports 8770 and 8771. Auth
 
 Real browser verification completed an original shelter creation and a corrected `>= 5` revision. The verifier also rejected a revision whose declared output disagreed with the real demo. Original artifacts, context, history, and reading position survived service restart.
 
+Private ownership uses a stable, private OS-lock guard so concurrent recovery cannot admit two writers. State-size checks retain failure capacity for queued/running jobs; oversized completion becomes a bounded terminal failure rather than blocking the queue. Public note and revision writes remain within their readers' limits. The verifier leaves browser clocks and randomness unchanged, and the reader retries failed initial refreshes and restores pending navigation across version switches.
+
 ## Delivery order and public learning log
 
 Finish and exercise the backend before redesigning or deploying dumintern.com. Keep the site's Celeste-inspired visual direction; remove the obsolete desktop-install claims and the promised demo video.

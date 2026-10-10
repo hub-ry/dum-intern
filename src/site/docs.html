@@ -61,13 +61,13 @@
   <p>The public example is exactly this: six screenshots from the corrected creation of one job, with the captions and code the backend recorded. Reading saved pages makes no model calls.</p>
 
   <h2 id="verification">Verification</h2>
-  <p>Each creation is checked with a browser automation script inside an isolated Docker container. The container has no network, a read-only filesystem and no privileges. The script performs the declared clicks and input changes and compares what it sees with what the creation claims. The screenshots you read were captured during that run.</p>
+  <p>Each creation is checked with a browser automation script inside an isolated Docker container. The container has no network, a read-only filesystem and no privileges. The script checks two initial renders agree, then performs the declared clicks and input changes and compares what it sees with what the creation claims. It uses the browser's real clocks and randomness, without replacing them. The screenshots you read were captured during that run.</p>
   <div class="note">
     <p>This isolation is about offline execution and keeping generated code away from the host. It's not a universal security guarantee, and the generated page should still be treated as untrusted code.</p>
   </div>
 
   <h2 id="runtime">Runtime</h2>
-  <p>The workshop uses Node 24, TypeScript, tsx, and zod. Its default local setup listens on two separate origins:</p>
+  <p>The workshop runs on Linux with Node 24, TypeScript, tsx, zod, and util-linux <code>flock</code> for exclusive ownership of private records. Its default local setup listens on two separate origins:</p>
   <ul>
     <li><code>127.0.0.1:8770</code> serves the workshop app and its API, with authentication whenever a token is set.</li>
     <li><code>127.0.0.1:8771</code> serves finished artifacts, such as screenshots and the creation's own page, from a separate origin so they can't touch the app.</li>
