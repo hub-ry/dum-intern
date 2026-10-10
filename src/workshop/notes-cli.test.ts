@@ -97,9 +97,10 @@ test("explicit environment overrides the file, the token is required, and the wo
   }
 });
 
-test("the pages file is a pages array or a {pages, links} object, validated with the server's rules; title and topic are flags", () => {
+test("the pages file is a {pages, links} object, validated with the server's rules; title and topic are flags", () => {
   const pages = [{ heading: "One", text: "first" }, { heading: "Two", text: "second", code: "x = 1" }];
-  assert.deepEqual(payloadFromFile(JSON.stringify(pages), "T", "topic"), { title: "T", topic: "topic", pages });
+  assert.throws(() => payloadFromFile(JSON.stringify(pages), "T", "topic"), cliError(2));
+  assert.deepEqual(payloadFromFile(JSON.stringify({ pages }), "T", "topic"), { title: "T", topic: "topic", pages });
   const withLinks = payloadFromFile(JSON.stringify({ pages, links: [{ label: "l", url: "https://example.com/" }] }), "T", "topic");
   assert.deepEqual(withLinks.links, [{ label: "l", url: "https://example.com/" }]);
   assert.equal("links" in payloadFromFile(JSON.stringify({ pages }), "T", "topic"), false);
@@ -111,9 +112,9 @@ test("the pages file is a pages array or a {pages, links} object, validated with
   assert.throws(() => payloadFromFile(JSON.stringify({ pages, context: "private" }), "T", "topic"), cliError(2));
   assert.throws(() => payloadFromFile(JSON.stringify({ links: [] }), "T", "topic"), cliError(2));
   assert.throws(() => payloadFromFile("[]", "T", "topic"), cliError(2));
-  assert.throws(() => payloadFromFile(JSON.stringify([{ heading: "h", text: "t", extra: 1 }]), "T", "topic"), cliError(2));
-  assert.throws(() => payloadFromFile(JSON.stringify(pages), "", "topic"), cliError(2));
-  assert.throws(() => payloadFromFile(JSON.stringify(pages), "T", "line\nbreak"), cliError(2));
+  assert.throws(() => payloadFromFile(JSON.stringify({ pages: [{ heading: "h", text: "t", extra: 1 }] }), "T", "topic"), cliError(2));
+  assert.throws(() => payloadFromFile(JSON.stringify({ pages }), "", "topic"), cliError(2));
+  assert.throws(() => payloadFromFile(JSON.stringify({ pages }), "T", "line\nbreak"), cliError(2));
   assert.throws(() => payloadFromFile(JSON.stringify({ pages, links: [{ label: "l", url: "http://example.com/" }] }), "T", "topic"), cliError(2));
-  assert.throws(() => payloadFromFile(JSON.stringify([{ heading: "h", text: "x".repeat(40_000) }]), "T", "topic"), cliError(2));
+  assert.throws(() => payloadFromFile(JSON.stringify({ pages: [{ heading: "h", text: "x".repeat(40_000) }] }), "T", "topic"), cliError(2));
 });

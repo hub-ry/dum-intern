@@ -243,6 +243,7 @@ a { color: var(--ink); }
     showJob: null,
     panelIndex: 0,
     pollTimer: null,
+    positionSaves: new Map(),
     // Unsaved typing survives every re-render and every poll. Keys carry the goal id.
     drafts: new Map(),
     // Editable server-backed fields: a dirty value wins over the server until it is saved.
@@ -472,14 +473,22 @@ a { color: var(--ink); }
     const goalId = state.goalId;
     if (!goalId) return;
     const seq = ++state.refreshSeq;
-    const [ctx, jobs] = await Promise.all([api("GET", goalPath("context")), api("GET", "/api/jobs?goalId=" + encodeURIComponent(goalId))]);
-    // Only the newest response for the goal that is still selected may write; older or foreign ones are dropped.
-    if (seq !== state.refreshSeq || state.goalId !== goalId || ctx.goal.id !== goalId) return;
-    state.attempts = ctx.attempts || []; state.teachings = ctx.teachings || []; state.jobs = jobs.jobs || []; state.progress = ctx.progress || null;
-    const i = state.goals.findIndex((g) => g.id === ctx.goal.id); if (i >= 0) state.goals[i] = ctx.goal;
-    const focus = captureFocus();
-    renderGoals(); renderStudy(); renderTeachings(); renderJobs(); renderContext(ctx); schedulePoll();
-    restoreFocus(focus);
+    try {
+      const [ctx, jobs] = await Promise.all([api("GET", goalPath("context")), api("GET", "/api/jobs?goalId=" + encodeURIComponent(goalId))]);
+      // Only the newest response for the goal that is still selected may write; older or foreign ones are dropped.
+      if (seq !== state.refreshSeq || state.goalId !== goalId || ctx.goal.id !== goalId) return;
+      state.attempts = ctx.attempts || []; state.teachings = ctx.teachings || []; state.jobs = jobs.jobs || []; state.progress = ctx.progress || null;
+      const i = state.goals.findIndex((g) => g.id === ctx.goal.id); if (i >= 0) state.goals[i] = ctx.goal;
+      const selected = state.showJob && state.jobs.find((j) => j.id === state.showJob.id);
+      const changed = selected && selected.state !== state.showJob.state;
+      if (selected) state.showJob = { ...state.showJob, ...selected };
+      const focus = captureFocus();
+      renderGoals(); renderStudy(); renderTeachings(); renderJobs(); renderContext(ctx);
+      if (changed) renderShow();
+      restoreFocus(focus);
+    } finally {
+      if (state.goalId === goalId) schedulePoll();
+    }
   }
   async function refreshGlobal() {
     const seq = ++state.globalSeq;
@@ -763,7 +772,8 @@ a { color: var(--ink); }
   function schedulePoll() {
     clearTimeout(state.pollTimer);
     const busy = state.jobs.some((j) => j.state === "queued" || j.state === "running");
-    if (busy) state.pollTimer = setTimeout(() => refreshGoal().catch(() => {}), 4000);
+    const scheduled = state.goals.find((g) => g.id === state.goalId)?.schedule;
+    if (state.goalId && (busy || scheduled)) state.pollTimer = setTimeout(() => refreshGoal().catch(() => {}), 4000);
   }
 
   // --- Presentation -----------------------------------------------------------------------
@@ -872,7 +882,10 @@ a { color: var(--ink); }
     const n = job.result.panels.length; const next = Math.max(0, Math.min(state.panelIndex + delta, n - 1));
     if (next === state.panelIndex) return;
     state.panelIndex = next; renderShow();
-    api("PUT", "/api/jobs/" + encodeURIComponent(job.id) + "/position", { panel: next }).catch(() => {});
+    const previous = state.positionSaves.get(job.id) || Promise.resolve();
+    const save = previous.then(() => api("PUT", "/api/jobs/" + encodeURIComponent(job.id) + "/position", { panel: next })).catch(() => {});
+    state.positionSaves.set(job.id, save);
+    save.then(() => { if (state.positionSaves.get(job.id) === save) state.positionSaves.delete(job.id); });
   }
   $("prevBtn").addEventListener("click", () => move(-1));
   $("nextBtn").addEventListener("click", () => move(1));

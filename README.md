@@ -90,7 +90,7 @@ npm run note -- list
 
 The notes service reuses the same static server on loopback port 8071. Cloudflare's `notes.ryhub.dev` ingress points there, not to the private API. Public GET/HEAD requests can read pages; public mutations are rejected.
 
-`pages.json` is an array of `{ "heading": "...", "text": "...", "code": "optional" }` pages, or `{ "pages": [...], "links": [{ "label": "...", "url": "https://..." }] }`. The CLI reads the private environment file literally, authenticates to the workshop, and never writes public files directly. Public content is explicitly selected; no context, attempts, or teaching history is automatically exported. Private note revisions are immutable; only their escaped HTML projection is served publicly.
+`pages.json` is an object with `pages`, an array of `{ "heading": "...", "text": "...", "code": "optional" }`, and optional `links`, an array of `{ "label": "...", "url": "https://..." }`. The CLI reads the private environment file literally, authenticates to the workshop, and never writes public files directly. Public content is explicitly selected; no context, attempts, or teaching history is automatically exported. Private note revisions are immutable; only their escaped HTML projection is served publicly.
 
 The reusable [dum-publish skill](.claude/skills/dum-publish/SKILL.md) documents the complete payload, API, hosting, and privacy rules.
 

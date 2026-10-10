@@ -194,8 +194,10 @@ export type BuildInput = {
   id: string;
   goal: { id: string; title: string; ambition: string; context: string };
   teachings: { id: string; concept: string; text: string; createdAt: string }[];
+  globalContext: string;
   correction?: string;
   parentId?: string;
+  parent?: { html: string; presentation: BuildResult };
 };
 
 export type BuildOptions = {

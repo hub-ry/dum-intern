@@ -15,10 +15,10 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFileSync, constants as fsConstants, type Stats } from "node:fs";
-import { lstat, open, type FileHandle } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, join, sep, isAbsolute, extname } from "node:path";
+import { resolve, join } from "node:path";
+import { openArtifactFile } from "./artifacts.ts";
 import { fileURLToPath } from "node:url";
 import type { Socket } from "node:net";
 import { WorkshopStore, WorkshopRunner, WorkshopError } from "./runtime.js";
@@ -60,23 +60,6 @@ const SESSION_COOKIE = "dum_workshop_session";
 const LOGIN_FAILURES_PER_WINDOW = 10;
 const LOGIN_WINDOW_MS = 5 * 60_000;
 
-const MIME: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".htm": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".txt": "text/plain; charset=utf-8",
-  ".md": "text/plain; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2",
-};
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -446,63 +429,6 @@ function loadGlyphs(): { intern: Glyph; wizard: Glyph } | null {
 // ---------------------------------------------------------------------------------------------
 // The artifact server's file access: every component checked, nothing followed.
 
-type Opened = { handle: FileHandle; size: number; type: string };
-
-async function lstatNoSymlink(p: string): Promise<Stats | null> {
-  try {
-    const st = await lstat(p);
-    if (st.isSymbolicLink()) return null;
-    return st;
-  } catch {
-    return null;
-  }
-}
-
-/** Opens root/segments... only if every ancestor (including the root's own) is a real directory and the leaf a real file. */
-async function openArtifactFile(root: string, segments: string[]): Promise<Opened | null> {
-  if (!isAbsolute(root)) return null;
-  const parts = root.split(sep).filter((p) => p !== "");
-  let current: string = sep;
-  const dirs: string[] = [current];
-  for (const p of parts) {
-    current = current === sep ? `${sep}${p}` : `${current}${sep}${p}`;
-    dirs.push(current);
-  }
-  for (const d of dirs) {
-    const st = await lstatNoSymlink(d);
-    if (!st || !st.isDirectory()) return null;
-  }
-  for (let i = 0; i < segments.length; i++) {
-    current = `${current}${sep}${segments[i]}`;
-    const st = await lstatNoSymlink(current);
-    if (!st) return null;
-    const last = i === segments.length - 1;
-    if (last ? !st.isFile() : !st.isDirectory()) return null;
-    if (last) {
-      const type = MIME[extname(current).toLowerCase()];
-      if (!type) return null;
-      const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
-      let handle: FileHandle;
-      try {
-        handle = await open(current, flags);
-      } catch {
-        return null;
-      }
-      try {
-        const fst = await handle.stat();
-        if (!fst.isFile() || fst.ino !== st.ino || fst.dev !== st.dev) {
-          await handle.close();
-          return null;
-        }
-        return { handle, size: fst.size, type };
-      } catch {
-        await handle.close().catch(() => {});
-        return null;
-      }
-    }
-  }
-  return null;
-}
 
 /**
  * Takes the raw request target, before any URL parser gets to normalize "." or ".." away, and

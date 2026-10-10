@@ -5,21 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 
-export interface BuildInput {
-  id: string;
-  goal: { id: string; title: string; ambition: string; context: string };
-  teachings: Array<{ id: string; concept: string; text: string; createdAt: string }>;
-  correction?: string;
-  parentId?: string;
-}
-
-export interface BuildResult {
-  title: string;
-  panels: Array<{ image?: string; code?: string; caption: string; teachingIds: string[] }>;
-  demoPath?: string;
-  verification: { command: string; output: string };
-  supportingMachinery: string[];
-}
+import type { BuildInput, BuildOptions, BuildResult } from './types.ts';
+import { MAX_TITLE, MAX_AMBITION, MAX_CONCEPT, MAX_TEXT, MAX_TEACHINGS_PER_GOAL, validateBuildResult } from './validate.ts';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const TESTID_RE = /^[a-z][a-z0-9-]{0,48}$/;
@@ -42,14 +29,16 @@ const HOST_MACHINERY = [
 const Id = z.string().regex(ID_RE);
 const InputSchema = z.object({
   id: Id,
-  goal: z.object({ id: Id, title: z.string().min(1).max(200), ambition: z.string().max(4000), context: z.string().max(20000) }),
+  goal: z.object({ id: Id, title: z.string().min(1).max(MAX_TITLE), ambition: z.string().max(MAX_AMBITION), context: z.string() }),
   teachings: z
-    .array(z.object({ id: Id, concept: z.string().min(1).max(200), text: z.string().min(1).max(8000), createdAt: z.string().min(1).max(64) }))
+    .array(z.object({ id: Id, concept: z.string().min(1).max(MAX_CONCEPT), text: z.string().min(1).max(MAX_TEXT), createdAt: z.string().min(1).max(64) }))
     .min(1)
-    .max(200),
-  correction: z.string().max(4000).optional(),
+    .max(MAX_TEACHINGS_PER_GOAL),
+  globalContext: z.string(),
+  correction: z.string().max(MAX_TEXT).optional(),
   parentId: Id.optional(),
-});
+  parent: z.object({ html: z.string().min(1).max(200000), presentation: z.unknown() }).optional(),
+}).refine((input) => (input.parentId !== undefined) === (input.parent !== undefined), { message: 'Parent ID and verified parent creation must be provided together' });
 
 const ActionSchema = z.strictObject({
   kind: z.enum(['click', 'fill']),
@@ -112,7 +101,7 @@ const ReportSchema = z.strictObject({
     .max(8),
 });
 
-const SYSTEM_PROMPT = `You are the Workshop publisher. Build ONE small, real, deterministic, interactive creation as a single self-contained HTML document that genuinely exercises the concepts the learner was taught. Input (stdin JSON): goal, teachings (chronological; the LAST teaching is the most recent and MUST be the centerpiece), optional correction (a revision request: fix exactly what it says while keeping the creation's identity).
+const SYSTEM_PROMPT = `You are the Workshop publisher. Build ONE small, real, deterministic, interactive creation as a single self-contained HTML document that genuinely exercises the concepts the learner was taught. Input (stdin JSON): goal, globalContext, optional parent (verified HTML and presentation to revise), teachings (chronological; the LAST teaching is the most recent and MUST be the centerpiece), optional correction (a revision request: fix exactly what it says while keeping the creation's identity).
 Rules:
 - html: complete document with <head> and <body>, inline <style> and inline <script> only. No external resources, no <script src>, <link>, <iframe>, <object>, <embed>, <base>, <meta http-equiv>, no fetch/XHR/WebSocket/workers/storage, no timers, no Math.random/Date dependence for visible output. Everything must render deterministically at 1100x760 without scrolling.
 - Interactivity only through elements carrying data-testid attributes matching ^[a-z][a-z0-9-]{0,48}$ (unique per document). Buttons for click, inputs/textareas for fill.
@@ -234,6 +223,8 @@ async function generate(input: BuildInput, signal?: AbortSignal) {
   const stdin = JSON.stringify({
     goal: input.goal,
     teachings: input.teachings,
+    globalContext: input.globalContext,
+    parent: input.parent ?? null,
     correction: input.correction ?? null,
     parentId: input.parentId ?? null,
   });
@@ -249,7 +240,7 @@ async function generate(input: BuildInput, signal?: AbortSignal) {
     for (const [name, value] of Object.entries(process.env)) {
       if (value && value.length >= 8 && /key|token|secret|password|credential/i.test(name)) diagnostic = diagnostic.replaceAll(value, '[redacted credential]');
     }
-    for (const text of [input.goal.context, input.goal.ambition, input.correction, ...input.teachings.map((t) => t.text)]) {
+    for (const text of [input.goal.context, input.goal.ambition, input.globalContext, input.correction, input.parent?.html, input.parent ? JSON.stringify(input.parent.presentation) : undefined, ...input.teachings.map((t) => t.text)]) {
       if (text && text.length >= 8) {
         diagnostic = diagnostic.replaceAll(text, '[private input]').replaceAll(JSON.stringify(text).slice(1, -1), '[private input]');
       }
@@ -304,8 +295,9 @@ function validateModel(model: ModelOutput, input: BuildInput): string {
     const txt = t.text.trim();
     if (txt.length >= 60 && html.includes(txt)) throw new Error('Demo HTML must not embed teaching text');
   }
-  const ctx = input.goal.context.trim();
-  if (ctx.length >= 60 && html.includes(ctx)) throw new Error('Demo HTML must not embed goal context');
+  for (const ctx of [input.goal.context.trim(), input.globalContext.trim()]) {
+    if (ctx.length >= 60 && html.includes(ctx)) throw new Error('Demo HTML must not embed private context');
+  }
 
   const known = new Set(input.teachings.map((t) => t.id));
   const recent = input.teachings.at(-1)!;
@@ -404,12 +396,13 @@ async function verify(jobDir: string, imageId: string, nonce: string, sourceHash
   return { report, command };
 }
 
-export async function buildCreation(input: BuildInput, options: { artifactRoot: string; signal?: AbortSignal }): Promise<BuildResult> {
+export async function buildCreation(input: BuildInput, options: BuildOptions): Promise<BuildResult> {
   const parsedInput = InputSchema.safeParse(input);
   if (!parsedInput.success) throw new Error(`Invalid build input: ${parsedInput.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).slice(0, 8).join('; ')}`);
   const inp = parsedInput.data as BuildInput;
   if (new Set(inp.teachings.map((t) => t.id)).size !== inp.teachings.length) throw new Error('Teaching IDs must be unique');
   if (inp.teachings.some((t) => !Number.isFinite(Date.parse(t.createdAt)))) throw new Error('Teaching timestamps must be valid');
+  if (inp.parent) inp.parent.presentation = validateBuildResult(inp.parent.presentation, new Set(inp.teachings.map((t) => t.id)));
   inp.teachings.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   const { signal } = options;
   const image = await preflightImage(signal);
@@ -437,7 +430,7 @@ export async function buildCreation(input: BuildInput, options: { artifactRoot: 
     const modelMeta = { requestedModel: meta.requestedModel, effort: meta.effort, canonicalModels: meta.canonicalModels, modelUsage: meta.modelUsage, totalCostUSD: meta.totalCostUSD };
     const output = JSON.stringify({ report, model: modelMeta }, null, 2);
     await fs.writeFile(path.join(jobDir, 'verification.json'), JSON.stringify({ report, model: modelMeta }, null, 2), { flag: 'wx' });
-    const result: BuildResult = {
+    const result = validateBuildResult({
       title: model.title,
       panels: model.panels.map((p, i) => ({
         image: `captures/panel-${i + 1}.png`,
@@ -448,7 +441,7 @@ export async function buildCreation(input: BuildInput, options: { artifactRoot: 
       demoPath: 'demo.html',
       verification: { command, output },
       supportingMachinery: [...model.supportingMachinery, `Creation source generated by ${meta.canonicalModels.join(', ')} (requested ${meta.requestedModel}, effort ${meta.effort}); this does not retrain the model`, ...HOST_MACHINERY],
-    };
+    }, new Set(inp.teachings.map((t) => t.id)));
     await fs.writeFile(path.join(jobDir, 'creation.json'), JSON.stringify(result, null, 2), { flag: 'wx' });
     return result;
   } catch (e) {

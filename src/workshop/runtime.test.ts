@@ -454,3 +454,25 @@ test("the runner rejects an artifact root that is a symlink, sits under a symlin
   assert.equal(existsSync(join(home, "workshop.json")), true);
   store.close();
 });
+
+test("a complete large verification report survives completion and restart", () => {
+  const home = freshHome();
+  const first = openStore(home);
+  const goal = goalWithTeaching(first);
+  first.enqueue(goal.id);
+  const job = first.claimNextJob();
+  assert.ok(job);
+  const result = buildResultFor(job);
+  result.verification.output = JSON.stringify({
+    panels: Array.from({ length: 8 }, (_, i) => ({
+      actual: "a".repeat(1000),
+      actions: Array.from({ length: i === 0 ? 0 : 4 }, () => ({ before: "b".repeat(1200), after: "a".repeat(1200) })),
+    })),
+  });
+  assert.ok(result.verification.output.length > 64000);
+  assert.deepEqual(first.completeJob(job.id, result).result, result);
+  first.close();
+  const second = openStore(home);
+  assert.deepEqual(second.getJob(job.id).result, result);
+  second.close();
+});

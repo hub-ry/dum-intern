@@ -10,11 +10,12 @@
 // durably. Stopping aborts the current build and leaves its job queued; a restart does the same
 // for jobs found running, so an interrupted attempt never overwrites files the next run writes.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { buildCreation } from "./publisher.ts";
+import { openArtifactFile } from "./artifacts.ts";
 import { WorkshopError } from "./errors.ts";
 import { acquireOwnerLock, ensurePrivateDir, intendedRealPath, isWithin, LockHeldError, readPrivateFile, writePrivateFile } from "./files.ts";
 import { loopsAndConditionsMaterials } from "./materials.ts";
@@ -262,6 +263,7 @@ export class WorkshopStore {
     try {
       out = mutate(this.state);
       const text = JSON.stringify(this.state, null, 2);
+      if (Buffer.byteLength(text, "utf8") > MAX_STATE_BYTES) throw WorkshopError.conflict(`workshop state exceeds its ${MAX_STATE_BYTES}-byte capacity; existing history is unchanged`);
       writePrivateFile(this.statePath, text);
       this.stateText = text;
     } catch (err) {
@@ -277,6 +279,7 @@ export class WorkshopStore {
     try {
       mutate(this.positions);
       const text = JSON.stringify(this.positions, null, 2);
+      if (Buffer.byteLength(text, "utf8") > MAX_POSITIONS_BYTES) throw WorkshopError.conflict(`reading positions exceed their ${MAX_POSITIONS_BYTES}-byte capacity`);
       writePrivateFile(this.positionsPath, text);
       this.positionsText = text;
     } catch (err) {
@@ -1061,6 +1064,25 @@ export class WorkshopRunner {
     });
   }
 
+  private async readParentCreation(id: string): Promise<NonNullable<BuildInput["parent"]>> {
+    const parent = this.store.getJob(id);
+    if (parent.state !== "ready" || !parent.result?.demoPath) throw new Error("Parent has no ready demo source to revise");
+    const opened = await openArtifactFile(join(this.artifactRoot, parent.artifactId ?? parent.id), parent.result.demoPath.split("/"));
+    if (!opened) throw new Error("Parent demo source is unavailable or unsafe");
+    try {
+      if (opened.size > 200000) throw new Error("Parent demo source exceeds the verified source limit");
+      const source = await opened.handle.readFile();
+      const verification = JSON.parse(parent.result.verification.output);
+      const hash = createHash("sha256").update(source).digest("hex");
+      if (source.length > 200000 || verification.report?.ok !== true || verification.report?.sourceHash !== hash) {
+        throw new Error("Parent demo source does not match its verification evidence");
+      }
+      return { html: source.toString("utf8"), presentation: parent.result };
+    } finally {
+      await opened.handle.close();
+    }
+  }
+
   private async run(job: Job): Promise<void> {
     const controller = new AbortController();
     this.controller = controller;
@@ -1070,10 +1092,11 @@ export class WorkshopRunner {
       controller.abort(new Error(`build exceeded ${BUILD_TIMEOUT_MS / 60_000} minutes`));
     }, BUILD_TIMEOUT_MS);
 
-    const { goal, teachings } = job.snapshot;
+    const { goal, teachings, globalContext } = job.snapshot;
     const input: BuildInput = {
       id: job.artifactId ?? job.id,
       goal: { id: goal.id, title: goal.title, ambition: goal.ambition, context: goal.context },
+      globalContext: globalContext.context,
       teachings: teachings.map((t) => ({ id: t.id, concept: t.concept, text: t.text, createdAt: t.createdAt })),
     };
     if (job.correction !== undefined) input.correction = job.correction;
@@ -1081,6 +1104,7 @@ export class WorkshopRunner {
 
     let outcome: { ok: true; result: unknown } | { ok: false; error: unknown };
     try {
+      if (job.parentId !== undefined) input.parent = await this.readParentCreation(job.parentId);
       const result: unknown = await buildCreation(input, { artifactRoot: this.artifactRoot, signal: controller.signal });
       outcome = { ok: true, result };
     } catch (err) {

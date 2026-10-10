@@ -5,8 +5,8 @@
 //   npm run note -- revise --id <uuid> --title "..." --topic "..." --file pages.json
 //   npm run note -- list
 //
-// pages.json is either a JSON array of pages, [{"heading","text","code"?}, ...], or an object
-// {"pages": [...], "links"?: [{"label","url"}]}. Title and topic come from the flags. The
+// pages.json is an object {"pages": [{"heading","text","code"?}, ...],
+// "links"?: [{"label","url"}]}. Title and topic come from the flags. The
 // serialized note must fit the API's 32 KiB body limit. Every field is checked with the same
 // validator the server uses, so a rejected file never reaches the network.
 //
@@ -197,9 +197,7 @@ export function payloadFromFile(text: string, title: string, topic: string): Not
   }
   let pages: unknown;
   let links: unknown;
-  if (Array.isArray(parsed)) {
-    pages = parsed;
-  } else if (parsed && typeof parsed === "object") {
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>;
     for (const key of Object.keys(obj)) {
       if (key !== "pages" && key !== "links") throw new CliError(`the pages file has an unexpected field "${key.slice(0, 40)}"; only "pages" and optional "links" belong there (title and topic are flags)`, 2);
@@ -207,7 +205,7 @@ export function payloadFromFile(text: string, title: string, topic: string): Not
     pages = obj.pages;
     links = obj.links;
   } else {
-    throw new CliError("the pages file must hold a JSON array of pages or an object with \"pages\"", 2);
+    throw new CliError("the pages file must hold an object with \"pages\"", 2);
   }
   const candidate: Record<string, unknown> = { title, topic, pages };
   if (links !== undefined) candidate.links = links;
@@ -291,7 +289,7 @@ const USAGE = `usage:
   npm run note -- revise --id <uuid> --title <title> --topic <topic> --file <pages.json> [--env-file <path>]
   npm run note -- list [--env-file <path>]
 
-pages.json: a JSON array of pages [{"heading","text","code"?}] or {"pages": [...], "links"?: [{"label","url"}]}.
+pages.json: {"pages": [{"heading","text","code"?}], "links"?: [{"label","url"}]}.
 Links must be https. 1 to 12 pages. The note must fit in 32 KiB.
 Configuration: DUM_WORKSHOP_TOKEN, optional DUM_WORKSHOP_URL or DUM_WORKSHOP_HOST/DUM_WORKSHOP_PORT,
 from the environment (wins) or ${DEFAULT_ENV_FILE}.`;

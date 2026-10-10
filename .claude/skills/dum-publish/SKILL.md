@@ -58,7 +58,7 @@ npm run note -- revise --id <uuid> --title "Approved title" --topic "Approved to
 npm run note -- list
 ```
 
-`pages.json` is either a JSON pages array or an object with `pages` and optional `links`. Title and topic come from flags. The CLI validates locally, calls the authenticated private API, and prints only resulting IDs and URLs. It never writes public files directly. Failure exits nonzero; don't describe it as publication success.
+`pages.json` is an object with `pages` and optional `links`. Title and topic come from flags. The CLI validates locally, calls the authenticated private API, and prints only resulting IDs and URLs. It never writes public files directly. Failure exits nonzero; don't describe it as publication success.
 
 Configuration comes from the process environment, overriding `~/.config/dum-workshop/environment`. Use `--env-file <path>` for another file. The file is parsed as literal `KEY=value` lines, with quoted values and comments, without shell evaluation or expansion. Do not source it in a shell to run this command.
 
