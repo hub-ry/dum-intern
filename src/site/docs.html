@@ -70,7 +70,7 @@
   <p>The workshop runs on Linux with Node 24, TypeScript, tsx, zod, and util-linux <code>flock</code> for exclusive ownership of private records. Its default local setup listens on two separate origins:</p>
   <ul>
     <li><code>127.0.0.1:8770</code> serves the workshop app and its API, with authentication whenever a token is set.</li>
-    <li><code>127.0.0.1:8771</code> serves finished artifacts, such as screenshots and the creation's own page, from a separate origin so they can't touch the app.</li>
+    <li><code>127.0.0.1:8771</code> serves finished artifacts, such as screenshots and the creation's own page.</li>
   </ul>
   <p>Private-network access requires a workshop token. Neither port is exposed by this public site. The public site uses a separate, dependency-free static server.</p>
 
@@ -79,8 +79,7 @@
 
   <h2 id="privacy">Privacy</h2>
   <ul>
-    <li>Lessons, teaching text, job history and creations stay on the hub.</li>
-    <li>Generation sends private inputs to the configured Claude CLI provider. See the <a href="https://github.com/hub-ry/dum-intern#run-the-workshop" rel="noreferrer">workshop privacy and execution boundaries</a> for what is sent.</li>
+    <li>See the <a href="https://github.com/hub-ry/dum-intern#run-the-workshop" rel="noreferrer">workshop privacy and execution boundaries</a> for where private records are stored and what generation sends to the configured Claude CLI provider.</li>
     <li>Verification runs offline in the container.</li>
     <li>Reading saved creations, here or in the workshop, makes no model calls.</li>
     <li>No account is needed to read this site. The jumping game keeps no score history. Cloudflare handles public delivery.</li>

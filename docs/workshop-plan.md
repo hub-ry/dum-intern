@@ -64,8 +64,8 @@ Hub owns the persistent records and build jobs, so the laptop can close without 
 
 For each job:
 
-1. Snapshot the selected goal context and teaching records.
-2. Build one bounded creation in an isolated workspace without hub credentials or unrelated project access.
+1. Snapshot the private build inputs described in the [workshop execution boundaries](../README.md#run-the-workshop).
+2. Generate one bounded creation with CLI tools disabled.
 3. Run it and exercise the behavior being presented.
 4. Capture actual screenshots/results and matching code excerpts. Keep diagrams clearly distinguishable from observed output.
 5. Generate the fixed panels and narration, emphasizing recent teaching.

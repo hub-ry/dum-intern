@@ -1,7 +1,8 @@
 // The workshop: one page where you set a goal, study one concept at a time, predict what a loop or
 // a condition does in plain English, report what you tried, teach Dum in your own words, and ask
 // it to build. Dum's builds come back as a manga strip served from a separate, unauthenticated
-// artifact origin so nothing it generates can touch the app's cookies.
+// artifact origin. Both its response CSP and the reader iframe sandbox allow scripts without
+// same-origin access, keeping generated pages away from the app's cookies.
 //
 //   DUM_WORKSHOP_PORT=8770 DUM_WORKSHOP_ARTIFACT_PORT=8771 npx tsx src/workshop/server.ts
 //

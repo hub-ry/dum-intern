@@ -9,7 +9,7 @@ Use the private workshop to teach Dum and request a creation. Use the notes CLI 
 
 ## Teaching Dum and requesting a creation
 
-The private app defaults to port 8770. Read `GET /api/config` for its separate artifact origin. Authenticate with `Authorization: Bearer <workshop token>`, or log in through `POST /api/login` with `{ "password": "<workshop token>" }` and use the returned cookie. Never print or copy the token into a note, chat, or repository. Mutations with cookie auth require an Origin header matching the private app. Bearer requests without Origin are supported; a supplied Origin must still match.
+The private app defaults to port 8770. Read `GET /api/config` for its separate artifact origin. Authenticate with `Authorization: Bearer <workshop token>`, or log in through `POST /api/login` with `{ "password": "<workshop token>" }` and use the returned cookie. Login requires an Origin header matching the private app. Never print or copy the token into a note, chat, or repository. Mutations with cookie auth require the same Origin header. Bearer mutations can omit Origin; if supplied, it must still match.
 
 Use the existing workshop UI, or these authenticated endpoints:
 
@@ -75,7 +75,7 @@ These routes run on the private app, after its auth and mutation Origin guards. 
 | `GET /api/notes/:uuid` | 200 with `{ note }`, the latest revision including pages and optional links. Read-only. |
 | `PUT /api/notes/:uuid` | Complete replacement payload. 200 with `{ note }`, revision n+1. |
 
-The stable public URL is `https://notes.ryhub.dev/notes/<uuid>/`. Invalid payloads return 400; oversized request bodies return 413. If a revision was saved privately but projection fails, the response is 500 and includes the saved note. Don't retry creation blindly and make a duplicate: inspect the saved ID. The next explicit create/revise or configured restart rebuilds the projection.
+The stable public URL is `https://notes.ryhub.dev/notes/<uuid>/`. Invalid payloads return 400; oversized request bodies return 413. Reaching a [publication capacity limit](../../../README.md#public-site-and-learning-journal) returns 409 without writing a new revision. If a revision was saved privately but projection fails, the response is 500 and includes the saved note. Don't retry creation blindly and make a duplicate: inspect the saved ID. The next explicit create/revise or configured restart rebuilds the projection.
 
 ## Storage and hosting
 
