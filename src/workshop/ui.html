@@ -693,7 +693,9 @@ a { color: var(--ink); }
       const goalId = state.goalId, submittedText = text.value, submittedHelped = helped.checked;
       act(rBtn, () => api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/report", { concept, text: submittedText, helped: submittedHelped }).then(() => {
         settleDraft(textKey, submittedText);
-        if (!state.drafts.has(textKey)) { if (text.value === submittedText) text.value = ""; state.drafts.delete(helpedKey); if (helped.checked === submittedHelped) helped.checked = false; }
+        settleDraft(helpedKey, submittedHelped);
+        if (!state.drafts.has(textKey) && text.value === submittedText) text.value = "";
+        if (!state.drafts.has(helpedKey) && helped.checked === submittedHelped) helped.checked = false;
       }), "Attempt recorded as you reported it.", rErr);
     } });
     const note = bindDraft(el("textarea", { class: "short", maxlength: "12000", placeholder: "What still feels unclear" }), noteKey);
