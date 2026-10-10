@@ -926,6 +926,47 @@ test("window focus leaves dictation recording and draft bubbles available", () =
   assert.equal(d.bubbles.at(-1)?.lines[0], "Ready to send");
 });
 
+test("unchanged request replies leave voice interactions in the bubble", async () => {
+  for (const content of ["question", "progress", "completion"] as const) {
+    for (const phase of ["recording", "transcribing", "ready", "error"] as const) {
+      for (const focused of [false, true]) {
+        const d = desktop();
+        await typed(d.router, d.live());
+        d.show(focused);
+        d.focus(focused);
+        d.update({ state: content === "question"
+          ? state({ prompt: { type: "question", question: "Which file?", why: "", intern: true }, transcript: [{ kind: "question", id: 1, question: "Which file?", why: "", answer: null }] })
+          : state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }) });
+        const binding = d.live();
+        d.router.voiceEvent({ op: "recording", recordingId: "r", binding });
+        if (phase === "transcribing") d.router.voiceEvent({ op: "transcribing", recordingId: "r", binding });
+        if (phase === "ready") d.router.voiceEvent({ op: "transcript", recordingId: "r", binding, text: "Use tree.ts" });
+        if (phase === "error") d.router.voiceEvent({ op: "error", recordingId: "r", message: "Try dictating again" });
+        const preview = d.bubbles.at(-1);
+        const publications = d.bubbles.length;
+        d.focus(false);
+        d.update({ look: { ...d.host.view!.look, reason: "decision" }, ...(content === "completion" ? { runningRequestId: null } : {}) });
+        assert.deepEqual(d.bubbles.at(-1), preview, `${content}/${phase}/${focused}`);
+        assert.equal(d.bubbles.length, publications);
+      }
+    }
+  }
+});
+
+test("new request content replaces a voice preview and a Send starts a fresh reply", async () => {
+  const d = desktop();
+  await typed(d.router, d.live());
+  d.update({ state: state({ prompt: { type: "question", question: "Which file?", why: "", intern: true }, transcript: [{ kind: "question", id: 1, question: "Which file?", why: "", answer: null }] }) });
+  const binding = d.live();
+  d.router.voiceEvent({ op: "transcript", recordingId: "r", binding, text: "Use tree.ts" });
+  d.update({ state: state({ prompt: { type: "question", question: "Which folder?", why: "", intern: true }, transcript: [{ kind: "question", id: 2, question: "Which folder?", why: "", answer: null }] }) });
+  assert.equal(d.bubbles.at(-1)?.kind, "reply");
+  assert.equal(d.bubbles.at(-1)?.lines[0], "Which folder?");
+  d.router.voiceEvent({ op: "error", message: "Try again" });
+  ok(await d.router.handle({ type: "send", binding: d.live(), draftRevision: d.router.snapshot().draft.revision }, "window"));
+  assert.equal(d.bubbles.at(-1)?.kind, "reply");
+});
+
 test("synchronous typed and voice commands finish before Verify is pressed", async () => {
   for (const source of ["typed", "voice"]) {
     const d = desktop();

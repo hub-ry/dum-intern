@@ -278,7 +278,7 @@ export function bubbleLines(dum: readonly string[], wizard: string | null): stri
   const out: string[] = [];
   let budget = BUBBLE_CHARS;
   let cut = false;
-  for (const text of dum) {
+  for (const text of [...dum, ...(wizard ? [`Wizard: ${wizard.replace(/\s+/g, " ").trim()}`] : [])]) {
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -291,10 +291,6 @@ export function bubbleLines(dum: readonly string[], wizard: string | null): stri
       out.push(piece);
       budget -= piece.length;
     }
-  }
-  if (wizard && out.length < BUBBLE_LINES - 1 && budget > 0) {
-    const line = `Wizard: ${wizard.replace(/\s+/g, " ").trim()}`;
-    out.push(line.length > budget ? `${line.slice(0, Math.max(0, budget - 1))}…` : line);
   }
   if (cut) out.push(BUBBLE_OPEN);
   return out;

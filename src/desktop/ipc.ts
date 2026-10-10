@@ -223,6 +223,7 @@ export class Router {
   private voice: VoiceState = IDLE_VOICE;
   /** The request whose reply goes to the bubble: transcript entries after `after` are its reply. */
   private following: { requestId: string; after: number } | null = null;
+  private lastReply: readonly string[] = [];
   private paused = false;
   /** The last Anthropic key they pasted was refused; cleared by a saved key, a sign-out or a new choice. */
   private keyRejected = false;
@@ -478,7 +479,7 @@ export class Router {
     const sent = this.following;
     if (!sent || !view?.state) return;
     const { state } = view;
-    const { bubble, native } = this.o;
+    const { bubble } = this.o;
     const fresh = state.transcript.filter((e) => e.id > sent.after);
     const said = fresh.flatMap((e) => (e.kind === "say" ? [e.text] : []));
     const notes = fresh.flatMap((e) => (e.kind === "note" ? [e.text] : []));
@@ -491,11 +492,6 @@ export class Router {
     if (done) {
       this.following = null;
       this.next = randomUUID();
-    }
-    // The working window is in front of them: the reply is already on screen.
-    if (native.windowVisible() && native.windowFocused()) {
-      this.windowChanged();
-      return;
     }
     if (asking) {
       // A decision itself stays in the window; a plain question is shown. Both say where the answer goes.
@@ -518,6 +514,13 @@ export class Router {
   }
 
   private reply(lines: string[]): void {
+    const unchanged = lines.length === this.lastReply.length && lines.every((line, i) => line === this.lastReply[i]);
+    this.lastReply = lines;
+    if (this.o.native.windowVisible() && this.o.native.windowFocused()) {
+      this.windowChanged();
+      return;
+    }
+    if (unchanged && this.o.bubble.current?.kind === "voice") return;
     this.o.bubble.timed("reply", lines, BUBBLE_TTL.reply);
   }
 
@@ -583,6 +586,7 @@ export class Router {
   /** The bubble follows the request just submitted under `bound`; entries up to `after` are not its reply. */
   private watch(bound: RequestBinding, after: number): void {
     this.following = { requestId: bound.requestId, after };
+    this.lastReply = [];
     this.follow(this.o.host.view);
   }
 
