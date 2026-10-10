@@ -1,6 +1,6 @@
 # Contributing
 
-- Dum is a Mac app the user delegates to. One floating circle opens one working window (Zones → Current context → Chat). Dum follows the user's learning across a tree of zones and writes code on command only for skills they've proven. There is no command-line version.
+- Dum is a Mac app the user delegates to. One floating circle opens one working window: Chat, with one slim strip above it (zone crumb, look chip, goal, a Context chevron that expands Current context and the zone tree, the Settings cog, Hide). Dum follows the user's learning across a tree of zones and writes code on command only for skills they've proven. There is no command-line version.
 - The outcome is independent progress: understand the architecture, start implementing, and ask precise questions without the LLM.
 - [docs/architecture.md](docs/architecture.md) has the fifteen rules, the glossary and who owns each piece of state. It wins over anything here. Its vocabulary is binding: "actions" are what the model calls, "tools" are a skill kind, a "change" is what Dum writes, "practice" means suggested projects only, and "direction", "handoff", "session", "trail" and "story" mean what the glossary says. [docs/circle-design.md](docs/circle-design.md) is the contract for the circle, the window and the delegation loop.
 
@@ -26,13 +26,13 @@
   - ChatGPT is built on Sign in with ChatGPT and stays unreleased (`RELEASED` in `src/agent/registry.ts`); it moves to an OpenAI API key before it ships.
   - Local models stay on the Mac: Ollama and LM Studio over loopback only, no redirects, no cloud-routed models.
   - No fallback. Dum's model, the helper and the look model come from the backend the user chose; a failure is reported, never routed elsewhere. Same-provider retries are fine.
-  - Pictures go only to a model whose resolved id (what an alias like `haiku` runs today) is verified with real calls. A moved alias gets text until its new model is verified.
+  - Pictures go only to a model whose resolved id (what an alias like `haiku` runs today) is verified for pictures. `claude-opus-5-5` and `claude-fable-5-1` are verified in source (`CLAUDE_VERIFIED` in `src/agent/claude.ts`). Any other model is verified by a real image call through Dum's own backend (Verify for pictures: one 2×2 PNG, "Reply with the single word OK."), recorded per install in `~/.dum/verified-models.json`, which the host alone writes. A moved alias gets text until its new model is verified. Verification is refused while a request runs.
   - Claude sessions run with no built-in tools, setting files, plugins, hooks or foreign MCP servers, prove the API key is the route before any user content is sent, and refuse when managed policy is active.
   - Keys and tokens live in main's `safeStorage`-encrypted credential store, never in settings, logs or the renderer.
-- **The Wizard helps decide, when asked.** It speaks at goal alignment and when the user asks for help with the next delegation, as labeled option cards in Chat. No unprompted tips, asides or teaching (rule 15). Catalog anchors come from primary sources and keep their links. Unsupported dates, company decisions, quotations, statistics or personal experience are dropped or narrowed. Context refs and skills it cites must be ones the host supplied.
+- **The Wizard helps decide, when asked.** It speaks at goal alignment, when the user asks for help with the next delegation, and when Dum hands it a choice from chat (`decision_help`, at most once per message, while the user is weighing two or more approaches; the transcript shows "Dum asked the Wizard: …" and the card lands after Dum's turn). Always as labeled option cards in Chat. No unprompted tips, asides or teaching (rule 15). Catalog anchors come from primary sources and keep their links. Unsupported dates, company decisions, quotations, statistics or personal experience are dropped or narrowed. Context refs and skills it cites must be ones the host supplied.
 - **Debug chat is read-only.** It runs on its own binding with only the three diagnostic reads (`diagnostic_status`, `diagnostic_events`, `diagnostic_reference`). No zone, draft, memory, skills, files or settings; nothing on disk. Diagnostics are an in-memory ring (500 events, 512 KiB, 30 minutes), allowlisted before insertion; keys, tokens, provider bodies and absolute paths never enter it.
 - **History is data, not authority.** Old transcript entries stay readable. Old approvals, plans and model sessions never become current permissions.
-- **The desktop adds no capability the gate lacks.** Windows send only the finite requests in `src/desktop/protocol.ts`; `ipc.ts` validates them and checks the sender is Dum's own top-level page. The circle can only press, toggle and read its face; the bubble can't send anything. Sandbox and context isolation stay on, Node integration off. Main makes no model call; the utility host does.
+- **The desktop adds no capability the gate lacks.** Windows send only the finite requests in `src/desktop/protocol.ts`; `ipc.ts` validates them and checks the sender is Dum's own top-level page. The circle can only press, toggle and read its face; the bubble can't send anything. The bubble shows every reply (typed, spoken, finished handoffs) unless the window is visible and focused, cut at eight lines / 600 characters. Sandbox and context isolation stay on, Node integration off. Main makes no model call; the utility host does.
 - **Progress reflects current evidence.** The newbie/intern/good/cracked strip counts built skills with intact prerequisites, not messages or recognition. It is shorthand, not a credential.
 - **The app carries its runtime.** The build ships the exact Claude Code that matches the pinned Agent SDK, resolved by absolute path. No bare `claude` or global Node fallback. Raise the SDK pin only with a real model call proving the new runtime still passes the API-key route checks.
 - **Say what a build is.** Test builds are ad-hoc signed and not notarized. Never claim signing, notarization, native permissions, the circle's click-through or drag, Spaces or full-screen behavior, VoiceOver, focus return, login items, voice or Gatekeeper behavior without evidence from a real Mac.
@@ -48,13 +48,13 @@ npm test
 npm run typecheck
 ```
 
-Desktop, from the repo root:
+Desktop, from the repo root. Build the packaged Mac app first:
 
 ```sh
-npm run desktop            # build, then launch from the checkout
+npm run desktop:mac        # packaged Mac app with native helpers, plus DMG and ZIP
+npm run desktop            # development loop from the checkout, without voice
 npm run desktop:build      # build only
 npm run desktop:pack       # unpacked app for this OS, in release/
-npm run desktop:mac        # DMG and ZIP; only on a Mac
 npm run desktop:smoke      # drive a built app; see below
 ```
 

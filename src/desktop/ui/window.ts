@@ -1,7 +1,8 @@
-// The one working window: Zones → Current context → Chat (docs/circle-design.md §3). Settings, Skills,
-// Records, Story and Move circle open inside the Chat region and return focus to their opener. Tab
-// follows the visual order; ⌘K switches zone, ⌘. stops, ⌘W hides, and Esc closes the innermost thing
-// first, then an in-window view, then hides the window. Esc is never Stop, No or a dismissal.
+// The one working window, chat first: a status strip (zone, look, goal) whose Context chevron expands the
+// zone tree and Current context above Chat (docs/circle-design.md §3). Settings, Skills, Records, Story and
+// Move circle open inside the Chat region and return focus to their opener. Tab follows the visual order;
+// ⌘K switches zone, ⌘. stops, ⌘W hides, and Esc closes the innermost thing first, then the expanded strip,
+// then an in-window view, then hides the window. Esc is never Stop, No or a dismissal.
 
 import type { CircleDisplays, DesktopPreferences, Snapshot, ViewName } from "../protocol.ts";
 import { Client, h, icon, iconButton, plain } from "./dom.ts";
@@ -10,7 +11,7 @@ import { Transcript } from "./transcript.ts";
 import { ZoneSwitcher, ZoneTree, zonePath } from "./zones.ts";
 import { AgentSheet } from "./agent-sheet.ts";
 import { DecisionCards } from "./decision-view.ts";
-import { ContextTrail, StoryView } from "./context-trail.ts";
+import { ContextTrail, StoryView, alignmentChip, lookChip } from "./context-trail.ts";
 import { SettingsView } from "./settings-view.ts";
 import { RECORD_TABS, RecordsView, SkillsView, type RecordTab } from "./records-view.ts";
 
@@ -21,8 +22,9 @@ const MODES: Record<DesktopPreferences["mode"], string> = {
   "anti-vibe": "The same skill gates, with your approach first. Tell Dum how you want it done, then delegate the unlocked parts. Explaining an approach doesn't count as building a skill.",
 };
 
-/** The Skills / Records menu, in the order it lists them. */
+/** The Chat header's menu, in the order it lists things. */
 const MENU: { label: string; open: ViewName }[] = [
+  { label: "Manage zones", open: "zones" },
   { label: "Skills", open: "tree" },
   ...(Object.entries(RECORD_TABS) as [RecordTab, { label: string }][]).map(([tab, meta]) => ({ label: meta.label, open: tab })),
   { label: "Full story", open: "story" },
@@ -95,6 +97,7 @@ export function windowView() {
   let opener: HTMLElement | null = null;
   let wantAgent = false;
   let managing = false;
+  let contextOpen = false;
   let shownZone: string | null | undefined;
   let forceBottom = false;
   let chatScroll = 0;
@@ -191,8 +194,7 @@ export function windowView() {
   function showView(view: ViewName) {
     if (view === "zones") {
       closeAux(false);
-      managing = true;
-      render();
+      manage(true);
       zones.focus();
     } else if (view === "settings") openAux("settings");
     else if (view === "tree") {
@@ -207,7 +209,7 @@ export function windowView() {
     }
   }
 
-  // -- Zones -----------------------------------------------------------------------
+  // -- Status strip: zone crumb, look, goal; Context expands the zone tree and Current context ---
 
   const zones = new ZoneTree(client, {
     aligned: (v, goalSet) => {
@@ -219,29 +221,21 @@ export function windowView() {
   const crumb = h("span", { class: "crumb-text" }, "no zone yet");
   const switcher = new ZoneSwitcher(client, () => crumbBtn.focus());
   const crumbBtn = h("button", { type: "button", class: "crumb-btn", "aria-haspopup": "dialog", title: "Switch zone (⌘K)", onclick: () => switcher.open() }, icon("zones"), crumb, icon("chevron"));
-  const manageBtn = h("button", {
-    type: "button", class: "btn ghost small", "aria-expanded": "false", "aria-controls": "zone-tree-box",
-    onclick: () => {
-      managing = !managing;
-      render();
-      if (managing) zones.focus();
-    },
-  }, "Manage");
-  const zonesHead = h(
+  const lookChipEl = h("span", { class: "chip strip-look", role: "status" });
+  const goalText = h("span", { class: "strip-goal" });
+  const contextBtn = h("button", { type: "button", class: "btn ghost small strip-toggle", "aria-expanded": "false", "aria-controls": "context-panel", onclick: () => openContext(!contextOpen) }, icon("chevron"), "Context");
+  const stripHead = h(
     "header",
-    { class: "zones-head" },
-    h("h2", { class: "visually-hidden" }, "Zones"),
+    { class: "strip-head" },
+    h("h2", { id: "strip-title", class: "visually-hidden" }, "Zones and context"),
     crumbBtn,
+    lookChipEl,
+    goalText,
     h("span", { class: "spacer" }),
-    manageBtn,
+    contextBtn,
     iconButton("gear", "Settings", () => (aux === "settings" ? closeAux(true) : openAux("settings"))),
     iconButton("hide", "Hide (Esc)", () => void client.call({ type: "dismiss-surface", surface: "window" })),
   );
-  const zoneBox = h("div", { class: "zone-tree-box", id: "zone-tree-box" }, zones.el);
-  const zonesSection = h("section", { class: "zones-section", "aria-label": "Zones" }, zonesHead, switcher.el, zoneBox);
-
-  // -- Current context --------------------------------------------------------------
-
   const context = new ContextTrail(client, {
     show: showView,
     story: (kind) => {
@@ -251,11 +245,26 @@ export function windowView() {
     editGoal: () => {
       const id = client.snap?.activeZone?.id;
       if (!id) return;
-      managing = true;
-      render();
+      manage(true);
       zones.edit(id);
     },
   });
+  const zoneBox = h("div", { class: "zone-tree-box", id: "zone-tree-box" }, zones.el);
+  const panel = h("div", { class: "strip-panel", id: "context-panel", hidden: true }, zoneBox, context.el);
+  const strip = h("section", { class: "strip", "aria-labelledby": "strip-title" }, stripHead, switcher.el, panel);
+
+  /** Expanded or collapsed for the rest of this window session; focus stays on the chevron. */
+  function openContext(open: boolean) {
+    contextOpen = open;
+    render();
+  }
+
+  /** Manage shows the zone tree's tools and forms; it lives inside the expanded strip. */
+  function manage(on: boolean) {
+    managing = on;
+    if (on) contextOpen = true;
+    render();
+  }
 
   // -- Chat header ------------------------------------------------------------------
 
@@ -265,8 +274,8 @@ export function windowView() {
     const s = client.snap;
     if (s) void client.call({ type: "settings", settings: { ...s.settings, mode: modeSelect.value === "anti-vibe" ? "anti-vibe" : "understand" } });
   });
-  const menu = h("ul", { class: "menu-list", role: "menu", hidden: true, "aria-label": "Skills and records" });
-  const menuBtn = h("button", { type: "button", class: "btn ghost small", "aria-haspopup": "menu", "aria-expanded": "false", onclick: () => toggleMenu(menu.hidden) }, "Skills / Records", icon("chevron"));
+  const menu = h("ul", { class: "menu-list", role: "menu", hidden: true, "aria-label": "Menu" });
+  const menuBtn = h("button", { type: "button", class: "btn ghost small", "aria-haspopup": "menu", "aria-expanded": "false", onclick: () => toggleMenu(menu.hidden) }, "Menu", icon("chevron"));
   for (const item of MENU) {
     menu.append(h("li", { role: "none" }, h("button", { type: "button", role: "menuitem", class: "menu-item", tabindex: "-1", onclick: () => { toggleMenu(false); showView(item.open); } }, item.label)));
   }
@@ -375,10 +384,18 @@ export function windowView() {
       forceBottom = true;
     }
     const live = s.zones.zones.some((z) => z.deletedAt === null);
-    crumb.textContent = s.activeZone ? zonePath(s.zones, s.activeZone.id) || s.activeZone.breadcrumb.map((b) => b.name).join(" › ") : live ? "choose a zone" : "no zone yet";
-    crumbBtn.title = s.activeZone ? `Goal: ${s.activeZone.goal} · Switch zone (⌘K)` : "Switch zone (⌘K)";
+    const zone = s.activeZone;
+    crumb.textContent = zone ? zonePath(s.zones, zone.id) || zone.breadcrumb.map((b) => b.name).join(" › ") : live ? "choose a zone" : "no zone yet";
+    crumbBtn.title = zone ? `Goal: ${zone.goal} · Switch zone (⌘K)` : "Switch zone (⌘K)";
     crumbBtn.disabled = !live;
-    manageBtn.setAttribute("aria-expanded", String(managing));
+    const look = lookChip(s.look);
+    lookChipEl.textContent = look.label;
+    lookChipEl.className = `chip chip-${look.tone} strip-look`;
+    lookChipEl.hidden = !zone;
+    goalText.replaceChildren(!zone ? "" : s.direction?.current ? zone.goal : alignmentChip(s.direction));
+    goalText.title = zone?.goal ?? "";
+    contextBtn.setAttribute("aria-expanded", String(contextOpen));
+    panel.hidden = !contextOpen;
     zoneBox.classList.toggle("managing", managing);
     zones.update(s);
     context.update(s);
@@ -429,21 +446,26 @@ export function windowView() {
     if (!menu.hidden) return toggleMenu(false);
     const closeManaging = () => {
       if (!managing) return false;
-      managing = false;
-      render();
-      manageBtn.focus();
+      manage(false);
+      contextBtn.focus();
       return true;
     };
-    // Zones and Current context stay visible above an open view, so Esc there closes their own inner thing.
-    if (zonesSection.contains(document.activeElement) && (zones.escape() || closeManaging())) return;
+    if (zones.el.contains(document.activeElement) && (zones.escape() || closeManaging())) return;
     if (context.el.contains(document.activeElement) && context.escape()) return;
-    if (aux) {
-      // An open view hides Chat: its forms wait behind it and never take this Esc.
+    if (!aux && composer.el.contains(document.activeElement) && composer.escape()) return;
+    if (!aux && decisions.el.contains(document.activeElement) && decisions.escape()) return;
+    if (auxEl.contains(document.activeElement)) {
       if (aux === "settings" && settings.escape()) return;
       if (aux === "story" && story.escape()) return;
+    }
+    if (contextOpen) {
+      openContext(false);
+      return contextBtn.focus();
+    }
+    if (aux) {
+      // An open view hides Chat: its forms wait behind it and never take this Esc.
       return closeAux(true);
     }
-    if (composer.escape() || decisions.escape() || zones.escape() || context.escape() || closeManaging()) return;
     void client.call({ type: "dismiss-surface", surface: "window" });
   });
   document.addEventListener("click", (e) => {
@@ -453,16 +475,7 @@ export function windowView() {
     if (document.activeElement === document.body) (aux ? auxTitle : composer.textarea).focus();
   });
 
-  document.body.append(
-    h(
-      "div",
-      { class: "window" },
-      zonesSection,
-      client.errors,
-      context.el,
-      chat,
-    ),
-  );
+  document.body.append(h("div", { class: "window" }, strip, client.errors, chat));
   client.on(render);
   // Main opens an in-window view by setting the location hash.
   const fromHash = () => {

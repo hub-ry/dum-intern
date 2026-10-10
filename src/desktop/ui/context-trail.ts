@@ -4,7 +4,7 @@
 // Facts only: no score from chat, no model-written retrospective (docs/circle-design.md §4).
 
 import type { Snapshot, ViewName } from "../protocol.ts";
-import type { ContextUseItem, Direction } from "../../delegation-types.ts";
+import type { ContextUseItem, Direction, DirectionView } from "../../delegation-types.ts";
 import type { LookReason, LookStatusView } from "../../observe-types.ts";
 import type { SessionMeta, StoryRow, TrailEvent, TrailSource, TrailStep, TrailView } from "../../trail-types.ts";
 import type { SkillRef, ZoneId } from "../../zone-types.ts";
@@ -63,6 +63,18 @@ export function lookText(look: LookStatusView): string {
   if (look.permission === "denied" && look.status !== "checking") return "screen permission denied; apps and files still watched";
   const reason = look.reason ? REASON[look.reason] : "";
   return reason ? `${STATUS[look.status].label} · ${reason}` : STATUS[look.status].label;
+}
+
+/** The look in one word, for the window's status strip. */
+export function lookChip(look: LookStatusView): { label: string; tone: Tone } {
+  if (look.paused) return { label: "paused", tone: "muted" };
+  if (look.permission === "denied" && look.status !== "checking") return { label: "blocked", tone: "warn" };
+  return look.status === "blocked" ? { label: "blocked", tone: "warn" } : STATUS[look.status];
+}
+
+/** Alignment state when no direction is current, as a chip. */
+export function alignmentChip(d: DirectionView | null): HTMLElement {
+  return chip(d?.status === "aligning" ? "aligning" : d?.status === "deferred" ? "Alignment deferred" : d?.status === "needs-backend" ? "Alignment waits for a model" : "Alignment needed", d?.status === "aligning" ? "info" : "warn");
 }
 
 /** One trail event as a line of text, for the ordered list that is the authoritative trail. */
@@ -271,7 +283,7 @@ export class ContextTrail {
     };
     const direction = d?.current
       ? h("span", { class: "direction" }, h("span", { class: "muted" }, "Agreed direction: "), `${d.current.ability} — ${d.current.choice.title}`)
-      : h("span", {}, chip(d?.status === "aligning" ? "aligning" : d?.status === "deferred" ? "Alignment deferred" : d?.status === "needs-backend" ? "Alignment waits for a model" : "Alignment needed", d?.status === "aligning" ? "info" : "warn"));
+      : h("span", {}, alignmentChip(d));
     return h(
       "div",
       { class: "goal-line" },

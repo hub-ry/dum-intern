@@ -40,7 +40,7 @@ import { DELEGATION_LIMITS } from "../delegation-types.ts";
 import { TRAIL_LIMITS } from "../trail-types.ts";
 import { view as treeView, type View } from "../web/view.ts";
 import { HostRequestSchema, type HostEvent, type HostRequest, type HostResult } from "./host-protocol.ts";
-import type { AgentBackend, AgentChoice, BackendId, CredentialNeed, CredentialSource, LoginMethod, ModelOption, Picture } from "../agent/types.ts";
+import type { AgentBackend, AgentChoice, BackendId, CredentialNeed, CredentialSource, LoginMethod, ModelOption, Picture, Selector } from "../agent/types.ts";
 import type {
   AlignmentAcceptInput, AlignmentAttempt, AlignmentBinding, AlignmentStepInput, ContextRef, ContextRefKind, ContextUseItem, ContextUsePage,
   ContextUseView, DecisionInput, DecisionResult, DecisionView, DelegationOption, DelegationProposal, Direction, DirectionOption, DirectionView,
@@ -74,8 +74,8 @@ const L = DELEGATION_LIMITS;
 /** The commands that call a model; every other command, and the views, work before any backend is chosen. */
 const MODEL_COMMANDS: Record<string, true> = { projects: true, submit: true };
 
-/** What the host builds its backends from; main never sees these. */
-export type BackendFactory = (o: { claudeExecutable: string | null; credential: CredentialSource }) => AgentBackend[];
+/** What the host builds its backends from; main never sees these. `home` is H, for backend-owned records. */
+export type BackendFactory = (o: { home: string; claudeExecutable: string | null; credential: CredentialSource }) => AgentBackend[];
 
 export type ControllerOptions = {
   epoch: string;
@@ -108,6 +108,9 @@ type Job = { files: SharedFiles; binding: RequestBinding; handoff: Handoff | nul
 
 /** The one latest decision card in host memory, and what it was composed from. */
 type Decision = { view: DecisionView; input: DecisionInput };
+
+/** What Dum asked the Wizard for, kept until the turn that asked ends. `said` is that turn's live list. */
+type Summon = { outcome: string; why: string; said: readonly string[] };
 
 /** What the latest decision or request used: Current context's Using inventory. */
 type Use = { subject: NonNullable<ContextUseView["subject"]>; contextRevision: string; items: ContextUseItem[] };
@@ -143,6 +146,11 @@ type Live = {
   decision: Decision | null;
   /** Decision help in flight: a new one, dismissal and Stop abort it. */
   deciding: AbortController | null;
+  /**
+   * Dum's one Wizard summons per turn, keyed by the request that asked. `queued` lands when that
+   * turn ends; dismissal empties it, and the key alone refuses a second ask until the next send.
+   */
+  summon: { requestId: string; queued: Summon | null } | null;
   use: Use | null;
   /** Ready handoffs a reload made stale: they need a refresh before Do this. */
   stale: Set<string>;
@@ -245,6 +253,7 @@ export class DesktopController {
       case "observe-frame": return this.now(() => this.observeFrame(r.checkId, r.image));
       case "observe-tick": return this.observeTick(r.tick).then(() => undefined);
       case "agent-models": return this.agentModels(r.backend, r.login).then((models) => ({ models }));
+      case "agent-verify-images": return this.agentVerifyImages(r.selector, r.login).then(() => undefined);
       case "interrupt": return this.now(() => this.interrupt());
       case "close": return this.close().then(() => undefined);
       case "alignment-read": return this.alignmentRead(r.zoneId).then((direction) => ({ direction }));
@@ -271,7 +280,7 @@ export class DesktopController {
   }
 
   private async ordered(r: Exclude<HostRequest, { op:
-    | "credential" | "observe-frame" | "observe-tick" | "agent-models" | "interrupt" | "close" | "alignment-read" | "direction-read"
+    | "credential" | "observe-frame" | "observe-tick" | "agent-models" | "agent-verify-images" | "interrupt" | "close" | "alignment-read" | "direction-read"
     | "handoff-read" | "context-use-read" | "trail-read" | "trail-source" | "story-read" | "debug-open" | "debug-send" | "debug-stop"
     | "debug-reset" | "diagnostic-main" | "decision-help" | "alignment-step" }>): Promise<HostResult | undefined> {
     switch (r.op) {
@@ -331,7 +340,7 @@ export class DesktopController {
     process.env.DUM_HOME = home;
     const release = acquire(home);
     try {
-      const backends = this.o.backends({ claudeExecutable, credential: (need, signal) => this.askCredential(need, signal) });
+      const backends = this.o.backends({ home, claudeExecutable, credential: (need, signal) => this.askCredential(need, signal) });
       const released = new Set((Object.keys(RELEASED) as BackendId[]).filter((id) => RELEASED[id]));
       const registry = createRegistry(backends, released);
       const diagnostics = new Diagnostics(Date.now, main, diagnosticSettings(settings));
@@ -386,6 +395,18 @@ export class DesktopController {
   async agentModels(backend: BackendId, login: LoginMethod): Promise<ModelOption[]> {
     const init = this.ready();
     return init.registry.backend(backend).models(login, AbortSignal.timeout(60_000));
+  }
+
+  /**
+   * Verify for pictures: one small real call to `selector` on its own backend, never another. Refused
+   * while a request runs so the probe can't race the conversation's session for the key or the catalog.
+   */
+  async agentVerifyImages(selector: Selector, login: LoginMethod): Promise<void> {
+    const init = this.ready();
+    if (this.live?.running) throw new Error("finish what dum is doing first, or Stop it");
+    const backend = init.registry.backend(selector.backend);
+    if (!backend.verifyImages) throw new Error(`${backend.label} doesn't need verifying for pictures`);
+    await backend.verifyImages(selector, login, AbortSignal.timeout(60_000));
   }
 
   /** Main's answer to a credential request. Values are handed to the waiting backend and kept nowhere. */
@@ -621,21 +642,37 @@ export class DesktopController {
    * card, dismissal or Stop replaces it. Nothing here writes a file or grants anything.
    */
   async decisionHelp(binding: RequestBinding, outcome: string): Promise<DecisionView> {
+    const init = this.ready();
+    const live = this.bound(binding);
+    if (live.running || live.store.getSnapshot().prompt?.type !== "next") throw new Error("finish what dum is doing first, or Stop it");
+    return this.compose(init, live, outcome.trim(), null);
+  }
+
+  /**
+   * One card from the Wizard, for Help me decide and for a summons Dum queued. With `said` (what
+   * they typed the turn Dum asked), an open card for the same outcome that was waiting on them is
+   * recomposed with those words as its answer; otherwise the card is fresh.
+   */
+  private async compose(init: Init, live: Live, outcome: string, said: readonly string[] | null): Promise<DecisionView> {
     const prepared = await this.serial(async () => {
-      const init = this.ready();
-      const live = this.bound(binding);
-      if (live.running || live.store.getSnapshot().prompt?.type !== "next") throw new Error("finish what dum is doing first, or Stop it");
+      if (this.live !== live) throw new Error("that zone closed - no decision card was made");
       if (!this.powered(init)) throw new Error("decision help is unavailable: choose who powers Dum in Settings first. Chat still works");
       live.deciding?.abort();
       const abort = new AbortController();
       live.deciding = abort;
-      live.decision = null;
-      const input = this.decisionInput(init, live, outcome.trim(), []);
+      const open = live.decision;
+      // An open card still asking them something (a question, or an option missing a detail) is answered, not replaced.
+      const asking = open && (open.view.questions.length > 0 || open.view.options.some((o) => o.eligibility === "needs-detail"));
+      const previous = said && open && asking && open.view.outcome === outcome ? open : null;
+      if (!previous) live.decision = null;
+      const answer = said ? said.join("\n").slice(0, L.textBytes) : "";
+      const answers = previous ? previous.view.questions.map((q) => ({ question: q.text, answer })) : [];
+      const input = this.decisionInput(init, live, outcome, previous && !answers.length ? [{ question: "What's missing?", answer }] : answers);
       this.activity(init, live);
       this.changed();
-      return { init, live, input, abort, contextRevision: this.contextRevisionOf(init, live.zone) };
+      return { input, abort, previous, contextRevision: this.contextRevisionOf(init, live.zone) };
     });
-    const { init, live, input, abort, contextRevision: asked } = prepared;
+    const { input, abort, previous, contextRevision: asked } = prepared;
     let result: DecisionResult;
     try {
       result = await live.store.helper((signal) => this.decide(init, input, AbortSignal.any([signal, abort.signal, live.stop.signal])));
@@ -647,19 +684,21 @@ export class DesktopController {
     return this.serial(async () => {
       if (this.live !== live || abort.signal.aborted) throw new Error("that decision moved on before the card was ready - ask again");
       if (this.contextRevisionOf(init, live.zone) !== asked) throw new Error("Context changed while Dum was thinking - ask again");
-      const view = this.card(init, live, input, result, null);
+      const view = this.card(init, live, input, result, previous && live.decision === previous ? previous : null);
       this.changed();
       return view;
     });
   }
 
-  /** Dismiss: the card goes and isn't shown again until they ask again or change the outcome. */
+  /** Dismiss: the card goes and isn't shown again until they ask again or change the outcome. A summons Dum queued goes with it. */
   async decisionDismiss(binding: RequestBinding, decisionId: string, revision: number): Promise<void> {
     const live = this.bound(binding, false);
     const decision = live.decision;
     if (!decision || decision.view.id !== decisionId || decision.view.revision !== revision) throw new Error("that card is already gone");
     live.deciding?.abort();
     live.decision = null;
+    const requestId = live.running?.binding.requestId ?? live.next?.binding.requestId ?? live.summon?.requestId;
+    if (requestId) live.summon = { requestId, queued: null };
     this.changed();
   }
 
@@ -975,8 +1014,14 @@ export class DesktopController {
     }
     this.use(init, live, { kind: "request", id: binding.requestId }, this.requestRefs(init, live));
     files.activate();
-    live.next = { files, binding, ctx, handoff };
+    const next = { files, binding, ctx, handoff };
+    live.next = next;
+    store.closeBoard();
     store.submit(text);
+    if (store.getSnapshot().prompt === prompt) {
+      live.next = null;
+      this.finish(init, live, next, null);
+    }
   }
 
   /** A yes/no button for the question the running request parked. */
@@ -1522,8 +1567,8 @@ export class DesktopController {
   private hooks(init: Init, live: Live, binding: RequestBinding): SessionHooks {
     const mine = () => this.live === live;
     const empty = { entryId: null, requestId: binding.requestId, evidenceId: null, changeId: null, handoffId: null, proof: null };
-    const decision = live.decision;
-    const waiting = decision && (decision.view.questions.length > 0 || decision.view.options.some((o) => o.eligibility === "needs-detail"));
+    const open = live.decision;
+    const waiting = open && (open.view.questions.length > 0 || open.view.options.some((o) => o.eligibility === "needs-detail")) ? open.view.outcome : null;
     return {
       report: (topics) => {
         if (!mine()) return "That conversation is over - nothing noted.";
@@ -1552,16 +1597,17 @@ export class DesktopController {
           ...empty, kind: "evidence", evidenceId: proof.id, proof: kept, excerpt: clipBytes(proof.why, TRAIL_LIMITS.excerptBytes),
         });
       },
-      decide: waiting && decision
-        ? async (said, signal) => {
-          if (!mine() || live.decision !== decision) return "That card already changed - nothing recomposed.";
-          const answers = decision.view.questions.map((q) => ({ question: q.text, answer: said.join("\n").slice(0, L.textBytes) }));
-          const input = this.decisionInput(init, live, decision.view.outcome, answers.length ? answers : [{ question: "What's missing?", answer: said.join("\n").slice(0, L.textBytes) }]);
-          const result = await this.decide(init, input, AbortSignal.any([signal, live.stop.signal]));
-          if (!mine() || live.decision !== decision) return "That card already changed - nothing recomposed.";
-          const view = this.card(init, live, input, result, decision);
-          this.changed();
-          return `Their card is now revision ${view.revision} with ${view.options.length} option${view.options.length === 1 ? "" : "s"}; they choose. Don't repeat it.`;
+      // Every zone has a goal, agreed or still aligning; only a backend decides whether the Wizard can be asked.
+      decide: this.powered(init)
+        ? {
+          waiting,
+          ask: (outcome, why, said) => {
+            if (!mine()) throw new Error("that conversation is over - the Wizard wasn't asked");
+            if (live.summon?.requestId === binding.requestId) throw new Error("the Wizard was already asked this turn - wait for their next message");
+            live.summon = { requestId: binding.requestId, queued: { outcome, why, said } };
+            live.store.quip(`Dum asked the Wizard: ${why}`);
+            return "The Wizard is laying out options in Dum.";
+          },
         }
         : null,
     };
@@ -1609,6 +1655,7 @@ export class DesktopController {
     prepare(live.zone, init.settings.mode, live.store, this.personal(init), init.evidence, request.files, init.registry, request.binding, this.hooks(init, live, request.binding));
     request.files.activate();
     live.running = request;
+    live.store.closeBoard();
     this.changed();
     void live.store.command(name, argument).finally(() => this.finish(init, live, request, null));
   }
@@ -1616,6 +1663,8 @@ export class DesktopController {
   /**
    * A request or command ended, however: its shares lapse and the change list catches up. A
    * commanded handoff records how it ended from orchestration and this request's change receipts.
+   * A summons Dum queued this turn goes to the Wizard now, never beside the running session;
+   * Stop and close drop it, like a card in flight.
    */
   private finish(init: Init, live: Live, request: Job, ended: { end: RunEnd; refused: readonly string[] } | null): void {
     request.files.revoke();
@@ -1624,6 +1673,14 @@ export class DesktopController {
     if (this.live !== live) return;
     this.refreshChanges(init, live);
     this.changed();
+    const queued = live.summon?.requestId === request.binding.requestId ? live.summon.queued : null;
+    if (!queued) return;
+    live.summon!.queued = null;
+    if (ended?.end !== "ok" && ended?.end !== "failed") return;
+    // No caller waits for this card: a failure is a note in the conversation.
+    this.compose(init, live, queued.outcome, queued.said).catch((err: Error) => {
+      if (this.live === live) live.store.note(`the Wizard couldn't lay out options: ${err.message}`);
+    });
   }
 
   private finishHandoff(init: Init, live: Live, request: Job, ended: { end: RunEnd; refused: readonly string[] }): void {
@@ -1812,7 +1869,7 @@ export class DesktopController {
       detach: () => { unsubscribe(); stopMemory(); clearInterval(idleTimer); }, done: Promise.resolve(), pending: null, running: null, next: null,
       changes: [], signals: new Map(),
       look: { status: "watching", reason: null, seen: null, noPictures: "", lastTick: null, lastAttempt: null, lastSuccess: null, pending: 0, inflight: false },
-      idle: randomUUID(), session: null, lastActivity: Date.now(), idleTimer, decision: null, deciding: null, use: null, stale: new Set(),
+      idle: randomUUID(), session: null, lastActivity: Date.now(), idleTimer, decision: null, deciding: null, summon: null, use: null, stale: new Set(),
     };
     // The Ambient's callbacks reach `live` only once it exists; nothing calls them before the first tick.
     live.ambient = this.ambient(init, live);
@@ -2045,6 +2102,7 @@ export class DesktopController {
         activeZone: live?.zone ?? null,
         zoneEpoch: live?.epoch ?? null,
         inputToken: this.tokenOf(live),
+        runningRequestId: (live?.running ?? live?.next)?.binding.requestId ?? null,
         canAttach: !!live && !live.running && live.store.canAttach,
         shares: live ? (live.running?.files ?? live.pending)?.grants().filter((g) => g.scope === "request") ?? [] : [],
         follows: live?.follows.list() ?? [],
@@ -2088,6 +2146,7 @@ export function serve(o: Omit<ControllerOptions, "post">): DesktopController {
     if (request.op === "close") closing = true;
     try {
       const result = await controller.handle(request);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       post({ type: "reply", epoch: o.epoch, id: request.id, ok: true, ...(result ? { result } : {}) });
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : "the host couldn't complete that action";

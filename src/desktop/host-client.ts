@@ -8,7 +8,7 @@ import { BrowserWindow, utilityProcess, type UtilityProcess } from "electron";
 import { providerFreeEnv } from "../agent/claude-cli.ts";
 import { HostEventSchema, HostRequestSchema, type HostEvent, type HostRequest, type HostResult } from "./host-protocol.ts";
 import type { Context } from "../context.ts";
-import type { AgentChoice, BackendId, CredentialSource, LoginMethod, ModelOption, Picture } from "../agent/types.ts";
+import type { AgentChoice, BackendId, CredentialSource, LoginMethod, ModelOption, Picture, Selector } from "../agent/types.ts";
 import type {
   AlignmentAcceptInput, AlignmentStepInput, ContextUsePage, DecisionView, Direction, DirectionView, HandoffDismissInput, HandoffEditInput,
   HandoffReviewInput, HandoffRunInput, HandoffSelectInput, HandoffView, IgnoreObservationInput,
@@ -171,6 +171,9 @@ export class HostController {
   }
   async agentModels(backend: BackendId, login: LoginMethod): Promise<ModelOption[]> {
     return (await this.call({ op: "agent-models", backend, login }))?.models ?? [];
+  }
+  async agentVerifyImages(selector: Selector, login: LoginMethod): Promise<void> {
+    await this.call({ op: "agent-verify-images", selector, login });
   }
   async send(binding: RequestBinding, text: string, shares: ShareGrant[], image?: SharedImage): Promise<void> {
     await this.call({ op: "send", binding, text, shares, ...(image ? { image } : {}) });
@@ -368,7 +371,7 @@ export class HostController {
       const state = before ? { ...before, busy: false, prompt: null, status: message } : null;
       const seen = look.seen ? { ...look.seen, stale: true } : null;
       this.current = {
-        ...this.current, state, zoneEpoch: null, canAttach: false, shares: [], decision: null,
+        ...this.current, state, zoneEpoch: null, runningRequestId: null, canAttach: false, shares: [], decision: null,
         look: { ...look, status: "failed", reason: null, seen },
       };
     }

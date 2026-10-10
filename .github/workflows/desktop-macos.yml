@@ -67,6 +67,11 @@ jobs:
             test -x "$osw/Contents/MacOS/OpenSuperWhisper"
             test -s "$APP/Contents/Resources/OpenSuperWhisper-LICENSE.txt"
             lipo "$osw/Contents/MacOS/OpenSuperWhisper" -verify_arch arm64
+            # Dum trusts the helper only through these XML plist values (src/desktop/dictation.ts).
+            test "$(head -c 5 "$osw/Contents/Info.plist")" = "<?xml"
+            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$osw/Contents/Info.plist")" = "com.dumintern.opensuperwhisper"
+            test "$(/usr/libexec/PlistBuddy -c 'Print DumBridgeVersion' "$osw/Contents/Info.plist")" = "1"
+            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$osw/Contents/Info.plist")" = "0.1.0"
             # The voice helper loads only the OS and what its bundle carries: no OpenMP, nothing from Homebrew.
             linked="$(otool -L "$osw/Contents/MacOS/OpenSuperWhisper")"
             echo "$linked"

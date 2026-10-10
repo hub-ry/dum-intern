@@ -536,6 +536,18 @@ async function press(page, scope, text) {
   }, scope, text);
   assert.ok(hit, `no visible enabled "${text}" button in ${scope}`);
 }
+/** Expands the strip's Context panel (zone tree + Current context) when it is collapsed. */
+async function openContext(win) {
+  const expanded = await win.$eval('.strip-toggle', (b) => b.getAttribute('aria-expanded') === 'true');
+  if (!expanded) await win.click('.strip-toggle');
+  await win.waitForFunction(() => !document.getElementById('context-panel').hidden && document.querySelector('.strip-toggle')?.getAttribute('aria-expanded') === 'true');
+}
+/** Collapses the Context panel so Esc reaches the view under it rather than the strip. */
+async function closeContext(win) {
+  const expanded = await win.$eval('.strip-toggle', (b) => b.getAttribute('aria-expanded') === 'true');
+  if (expanded) await win.click('.strip-toggle');
+  await win.waitForFunction(() => document.getElementById('context-panel').hidden);
+}
 async function stop() {
   if (!active) return;
   const instance = active;
@@ -672,16 +684,16 @@ async function firstRun(dirs) {
     await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'What are you trying to learn?', { timeout: 10_000 });
     if (linux) assert.ok(await xfocusIs((await xshown(X_WINDOW)).id), 'the working window has X keyboard focus');
   }, { critical: true });
-  await step('the window is Zones → Current context → Chat, top to bottom, in tab order', async () => {
+  await step('the window is the Zones-and-context strip → Chat, top to bottom, in tab order', async () => {
     const sections = await win.evaluate(() => [...document.querySelectorAll('.window > section')].map((s) => ({
       name: s.getAttribute('aria-label') ?? document.getElementById(s.getAttribute('aria-labelledby') ?? '')?.textContent ?? '',
       top: s.getBoundingClientRect().top,
       height: s.getBoundingClientRect().height,
     })));
-    assert.deepEqual(sections.map((s) => s.name), ['Zones', 'Current context', 'Chat']);
+    assert.deepEqual(sections.map((s) => s.name), ['Zones and context', 'Chat']);
     assert.ok(sections.every((s, i) => s.height > 0 && (i === 0 || s.top >= sections[i - 1].top + sections[i - 1].height - 1)), `positions: ${JSON.stringify(sections)}`);
     const chatHead = await win.$$eval('.chat-head button, .chat-head select', (els) => els.map((e) => e.getAttribute('aria-label') ?? e.innerText.trim()));
-    assert.ok(chatHead.includes('Mode') && chatHead.some((t) => /Skills \/ Records/.test(t)) && chatHead.includes('Move circle'), `chat header: ${chatHead.join(', ')}`);
+    assert.ok(chatHead.includes('Mode') && chatHead.some((t) => /^Menu$/.test(t)) && chatHead.includes('Move circle'), `chat header: ${chatHead.join(', ')}`);
     await shoot(win, `${current}-window-first-run.png`);
     return sections.map((s) => `${s.name}@${Math.round(s.top)}`).join(' → ');
   });
@@ -719,6 +731,7 @@ async function firstRun(dirs) {
     await win.waitForSelector('.decisions .card.alignment', { timeout: 10_000 });
     await shoot(win, `${current}-alignment.png`);
     const card = await win.$eval('.decisions .card.alignment', (el) => ({ label: el.getAttribute('aria-label'), text: el.innerText, buttons: [...el.querySelectorAll('button')].map((b) => b.innerText.trim()) }));
+    await openContext(win);
     const context = await win.$eval('.context', (el) => el.innerText);
     assert.equal(card.label, 'Goal alignment');
     assert.ok(card.text.includes(GOAL), 'the card names the goal');
@@ -736,11 +749,18 @@ async function otherZone() {
   const { win } = active;
   await step('a zone created inside the root without entering it gets its own labeled alignment; the active zone stays', async () => {
     const before = await snapshot();
-    await press(win, '.zones-head', 'Manage');
+    await press(win, '.chat-head', 'Menu');
+    await press(win, '.chat-head .menu-list', 'Manage zones');
     await win.waitForSelector('.zone-tree-box.managing [role=treeitem]');
+    assert.equal(await win.$eval('.strip-toggle', (b) => b.getAttribute('aria-expanded')), 'true', 'Manage zones did not expand the Context panel');
     await win.click('[role=treeitem]');
     await press(win, '.zone-tools', 'Inside');
     await win.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Name');
+    await win.click('.context .section-head button[aria-controls="context-details"]');
+    await win.keyboard.press('Escape');
+    assert.equal(await win.$$eval('.zone-form', els => els.length), 1, 'Esc in Current context canceled the zone form');
+    assert.equal(await win.$eval('.context .section-head button[aria-controls="context-details"]', b => b.getAttribute('aria-expanded')), 'false');
+    await win.focus('.zone-form input[aria-label=Name]');
     await win.keyboard.type(CHILD.name);
     await win.focus('.zone-form textarea[aria-label=Goal]');
     await win.keyboard.type(CHILD.goal);
@@ -765,6 +785,7 @@ async function otherZone() {
     assert.ok(text.includes(CHILD.goal), 'the card names that zone\'s goal');
     await win.evaluate(() => document.querySelector('.decisions')?.scrollIntoView());
     await shoot(win, `${current}-other-zone-alignment.png`);
+    await win.focus('.zone-tree-box [role=treeitem]');
     await win.keyboard.press('Escape'); // closes Manage, not the window
     await win.waitForSelector('.zone-tree-box:not(.managing)');
     assert.equal((await snapshot()).window.visible, true, 'Esc hid the window instead of closing Manage');
@@ -798,9 +819,14 @@ async function circleGestures(dirs) {
     window.__smokePresses = [];
     window.addEventListener('pointerdown', (e) => window.__smokePresses.push({ x: e.clientX, y: e.clientY }), { capture: true });
   });
-  await step('Esc hides only the working window; the circle stays', async () => {
+  await step('Esc collapses the expanded Context panel first, then hides only the working window; the circle stays', async () => {
     const window = await xshown(X_WINDOW);
     await xdo('windowfocus', '--sync', window.id);
+    await openContext(active.win);
+    await active.win.focus('textarea.composer-input');
+    await xdo('key', 'Escape');
+    await active.win.waitForFunction(() => document.getElementById('context-panel').hidden, { timeout: 5_000 });
+    assert.ok(await xshown(X_WINDOW, 0), 'the first Esc hid the window instead of collapsing the Context panel');
     await active.win.focus('textarea.composer-input');
     await xdo('key', 'Escape');
     assert.ok(await xgone(X_WINDOW), 'the working window stayed mapped');
@@ -1098,12 +1124,13 @@ async function decisions(dirs) {
 /** Settings is a sheet in Chat with exactly §5's list. */
 async function settings() {
   const { win } = active;
-  await step('Settings opens inside Chat with Zones and Current context still above it', async () => {
-    await win.click('.zones-head button[aria-label="Settings"]');
+  await step('Settings opens inside Chat with the strip (and its expanded Context panel) still above it', async () => {
+    await openContext(win);
+    await win.click('.strip button[aria-label="Settings"]');
     await win.waitForFunction(() => document.querySelector('#aux-title')?.textContent === 'Settings' && !document.querySelector('.aux').hidden);
     const layout = await win.evaluate(() => ({
       inChat: !!document.querySelector('.chat .chat-region .aux.sheet .settings'),
-      zones: document.querySelector('.zones-section').offsetParent !== null,
+      zones: document.querySelector('.strip .strip-head').offsetParent !== null,
       context: document.querySelector('.context').offsetParent !== null,
       chatHidden: document.querySelector('.chat-main').hidden,
       focus: document.activeElement?.id,
@@ -1161,6 +1188,19 @@ async function settings() {
     const open = await win.$$eval('.aux .settings > details', (els) => els.map((d) => `${d.querySelector('summary').innerText.trim()}:${d.open}`));
     assert.deepEqual(open, ['Agent:true', 'Look:false', 'Shortcuts:false', 'Debug chat:false']);
   });
+  await step('Esc closes the focused Settings disclosure before the expanded Context panel', async () => {
+    await win.evaluate(() => {
+      const box = document.querySelector('.aux .settings > details:nth-of-type(2)');
+      box.open = true;
+      box.querySelector('summary').focus();
+    });
+    await win.keyboard.press('Escape');
+    const after = await win.evaluate(() => {
+      const box = document.querySelector('.aux .settings > details:nth-of-type(2)');
+      return { open: box.open, focus: document.activeElement === box.querySelector('summary'), context: !document.getElementById('context-panel').hidden, settings: !document.querySelector('.aux').hidden };
+    });
+    assert.deepEqual(after, { open: false, focus: true, context: true, settings: true });
+  });
   await step('Look explains the 3-second look with its status and permission; Shortcuts shows the three defaults', async () => {
     await win.evaluate(() => { for (const d of document.querySelectorAll('.aux .settings > details')) if (/Look|Shortcuts/.test(d.querySelector('summary').innerText)) d.open = true; });
     const look = await win.$eval('.aux .settings > details:nth-of-type(2)', (el) => el.innerText);
@@ -1183,20 +1223,22 @@ async function settings() {
     await win.evaluate(() => { document.querySelector('.aux .settings > details:nth-of-type(1)').open = true; });
     return keys.join(', ');
   });
-  await step('moved controls live where §5 puts them: Mode in Chat, Pause in Current context, follow in Context, web tree in Skills', async () => {
+  await step('moved controls live where §5 puts them: Mode in Chat, Pause in Current context inside the Context panel, follow in Context, web tree in Skills', async () => {
+    await openContext(win);
     const where = await win.evaluate(() => ({
       mode: !!document.querySelector('.chat-head select[aria-label=Mode]'),
-      pause: [...document.querySelectorAll('.context .section-head button')].some((b) => /Pause looking|Resume looking/.test(b.getAttribute('aria-label') ?? '')),
+      pause: [...document.querySelectorAll('#context-panel .context .section-head button')].some((b) => /Pause looking|Resume looking/.test(b.getAttribute('aria-label') ?? '')),
     }));
     assert.deepEqual(where, { mode: true, pause: true });
     await press(win, '.aux-head', '‹ Back');
     await win.waitForFunction(() => document.querySelector('.aux').hidden);
-    await press(win, '.chat-head', 'Skills / Records');
+    await press(win, '.chat-head', 'Menu');
     await press(win, '.chat-head .menu-list', 'Skills');
     await win.waitForFunction(() => document.querySelector('#aux-title')?.textContent === 'Skills');
     const web = await win.$$eval('.aux .web-tree button', (bs) => bs.map((b) => b.textContent.trim()));
     for (const label of ['Link', 'Sync now', 'New link', 'Unlink']) assert.ok(web.includes(label), `Skills › Web tree lacks ${label}: ${web.join(', ')}`);
     await press(win, '.aux-head', '‹ Back');
+    await openContext(win);
     await press(win, '.context', 'Context / followed folders');
     await win.waitForFunction(() => /Records/.test(document.querySelector('#aux-title')?.textContent ?? ''));
     assert.ok(await win.evaluate(() => [...document.querySelectorAll('.aux button')].some((b) => b.innerText.includes('Follow a folder'))), 'Context has no Follow a folder');
@@ -1208,7 +1250,8 @@ async function settings() {
 /** Settings → Debug chat with no agent: its own draft, needs-backend, nothing sent. */
 async function debugChat() {
   const { win } = active;
-  await win.click('.zones-head button[aria-label="Settings"]');
+  await closeContext(win); // Esc with the panel expanded collapses the strip first; this exercises Esc on the view
+  await win.click('.strip button[aria-label="Settings"]');
   await win.waitForFunction(() => document.querySelector('#aux-title')?.textContent === 'Settings');
   const debugBox = '.aux .settings > details:nth-of-type(4)';
   const chipText = () => win.$eval(`${debugBox} .debug [role=status]`, (el) => el.textContent.trim());
@@ -1293,8 +1336,9 @@ async function lookAndFollow(dirs) {
     return;
   }
   let follow;
-  await step('Current context › Context › Follow a folder… opens the native picker; the chosen non-Git folder is followed', async () => {
+  await step('Context › Current context › Context › Follow a folder… opens the native picker; the chosen non-Git folder is followed', async () => {
     assert.equal(existsSync(join(learning, '.git')), false);
+    await openContext(win);
     await press(win, '.context', 'Context / followed folders');
     await win.waitForFunction(() => /Records/.test(document.querySelector('#aux-title')?.textContent ?? ''));
     await press(win, '.aux', 'Follow a folder…');
@@ -1398,8 +1442,9 @@ async function lookAndFollow(dirs) {
   sampling = false;
   await sampler;
   if (flicker) await count.evaluate('globalThis.__dumSmokeFlicker()');
-  await step('Current context shows the look status: no backend, and Pause', async () => {
+  await step('Current context (under the Context chevron) shows the look status: no backend, and Pause', async () => {
     await openWindow();
+    await openContext(win);
     const s = await snapshot();
     await win.waitForFunction(() => /^no backend/.test(document.querySelector('.context .look-state')?.textContent ?? ''), { timeout: 10_000 });
     const label = await win.$eval('.context .look-state', (el) => el.textContent);

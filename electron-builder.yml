@@ -32,6 +32,9 @@ mac:
   notarize: false
   extendInfo:
     LSUIElement: true
+    # The voice helper is a child process, so macOS attributes its microphone request to Dum and
+    # shows this text; Electron's generic default would appear otherwise.
+    NSMicrophoneUsageDescription: Dum records while you hold the voice shortcut and transcribes on this Mac. Nothing is sent until you press Send.
   # prepare-dictation.mjs builds the universal focus helper (dum-focus) on any Mac and the
   # bridge-mode OpenSuperWhisper only on Apple Silicon. It creates this directory on all
   # platforms so electron-builder does not error when the filter matches nothing.

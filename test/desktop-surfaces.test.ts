@@ -126,6 +126,16 @@ test("bubble text is what Dum and the Wizard said, at most eight lines and 600 c
   assert.equal(long.at(-1), "Open Dum for the full reply");
 });
 
+test("shortened or omitted Wizard asides always show the full-reply notice", () => {
+  for (const dum of [["x".repeat(590)], ["x".repeat(600)], Array.from({ length: 7 }, (_, i) => `line ${i}`)]) {
+    const lines = bubbleLines(dum, "The Wizard has more to say.");
+    assert.equal(lines.at(-1), "Open Dum for the full reply");
+    assert.ok(lines.length <= BUBBLE_LINES);
+    assert.ok(lines.slice(0, -1).join("").length <= BUBBLE_CHARS);
+  }
+  assert.deepEqual(bubbleLines(["x".repeat(580)], "small"), ["x".repeat(580), "Wizard: small"]);
+});
+
 test("dismissal gives focus back to the external app captured at summon, once", async () => {
   const calls: string[] = [];
   const focus = {

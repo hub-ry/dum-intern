@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>docs — dum intern</title>
-  <meta name="description" content="How Dum works: the circle and its window, goal alignment, decision cards and handoffs, sessions, trail and story, zones, the skill tree and evidence, voice and keyboard, direct changes with revert, the look, the Wizard, Settings, backends and privacy.">
+  <meta name="description" content="How Dum works: the circle, the window and the bubble, goal alignment, decision cards and handoffs, sessions, trail and story, zones, the skill tree and evidence, voice and keyboard, direct changes with revert, the look, the Wizard, Settings, backends and verified models, privacy.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -85,22 +85,35 @@
      key, a voice error, or Dum's background process having stopped. A dashed ring means the look
      is paused. The circle is a labeled button, and its label says the same thing in words.</p>
 
-  <p>There's one window, and it has three parts, top to bottom.</p>
+  <p>There's one window, and it opens on Chat. Above it sits one slim strip:</p>
 
   <ul>
-    <li><strong>Zones.</strong> The active zone's path: click it, or press <code>⌘K</code>, to
-        switch zones. <em>Manage</em> shows the zone tree with its tools. Then
-        <em>Settings</em> and <em>Hide</em>.</li>
-    <li><strong>Current context.</strong> What Dum is working from right now. See
-        <a href="#context">current context</a>.</li>
-    <li><strong>Chat.</strong> The conversation, the decision and handoff cards, and the message
-        box. Its header has <em>Mode</em>, the <em>Skills / Records</em> menu and <em>Move
-        circle</em>. Settings, Skills, the records and the story open inside Chat; <em>Back</em>
-        returns to the conversation and to where you were.</li>
+    <li>The active zone's path: click it, or press <code>⌘K</code>, to switch zones.</li>
+    <li>The look chip, then your goal and the agreed direction, or <em>Alignment needed</em>.</li>
+    <li><strong>Context</strong>: a chevron that expands the full
+        <a href="#context">Current context</a> block and the zone tree under the strip, up to
+        about half the window. <em>Manage zones</em> opens there too.</li>
+    <li>The Settings cog and <em>Hide</em>.</li>
   </ul>
 
-  <p>Switching to another app hides the window. <code>Esc</code> or <code>⌘W</code> hides it and
-     gives focus back to the app you were in. Your draft stays.</p>
+  <p>Chat holds the conversation, the decision and handoff cards, and the message box. Its header
+     has <em>Mode</em>, <em>Menu</em> (Manage zones, Skills, Memory, History, Context, Evidence,
+     Boundary, Suggested projects, Changes, Full story) and <em>Move circle</em>. Settings and everything in
+     Menu open inside Chat; <em>Back</em> returns to the conversation and to where you were.</p>
+
+  <p>Switching to another app hides the window. <code>Esc</code> collapses the Context strip if
+     it's open, then hides the window; <code>⌘W</code> hides it straight away. Both give focus back
+     to the app you were in. Your draft stays.</p>
+
+  <h3>The bubble</h3>
+
+  <p>Every reply from Dum, typed or spoken, and every finished <em>Do this</em>, shows in a
+     click-through bubble near your cursor, unless Dum's window is visible and focused. Replies
+     stay 15 seconds. A long one is cut at eight lines or 600 characters and ends with
+     <em>Open Dum for the full reply</em>. Lines from the Wizard show the
+     Wizard's portrait. A question Dum asks you shows with <em>Dum is waiting for your answer in
+     Dum</em>. The full reply is in Chat either way. You can't click the bubble; clicks go through
+     to whatever is under it.</p>
 
   <h2 id="delegating">Delegating</h2>
 
@@ -176,7 +189,8 @@
 
   <h2 id="context">Current context, sessions and the story</h2>
 
-  <p>Current context sits between Zones and Chat and shows what Dum is working from.</p>
+  <p>Current context is behind the <em>Context</em> chevron in the strip and shows what Dum is
+     working from.</p>
 
   <ul>
     <li><strong>The look</strong>: watching, checking, not looking, no backend or call failed,
@@ -231,7 +245,7 @@
     <li><em>Manage</em> shows the tree with <em>New zone</em>, and for the selected zone
         <em>Enter</em>, <em>Inside</em> (a new zone inside it), <em>Edit</em> and <em>Delete</em>.
         There's no way to move a zone to a new parent.</li>
-    <li><em>Skills / Records</em> → <em>Context</em> holds <em>Notes for this zone</em>: background
+    <li><em>Menu</em> → <em>Context</em> holds <em>Notes for this zone</em>: background
         Dum reads in this zone and the zones inside it, up to 16 KiB per zone. Notes are context.
         They never unlock a skill or give Dum access to a file.</li>
   </ul>
@@ -256,7 +270,7 @@
      read, edit or delete them; they open in Obsidian. A skill is scoped to a language or to
      none, so <code>printing</code> in Python doesn't count in Go.</p>
 
-  <p><em>Skills / Records</em> → <em>Skills</em> shows curated tracks: basics for C, C++, Go, Java,
+  <p><em>Menu</em> → <em>Skills</em> shows curated tracks: basics for C, C++, Go, Java,
      JavaScript, Python, Rust and TypeScript, plus graphics, interview, systems and a language-free
      builder track. Each skill shows as built, recognized, open (everything under it is built) or
      locked. Skills you add that aren't on a track still get up to three mapped prerequisites.</p>
@@ -292,7 +306,7 @@
      as concepts. Every prerequisite under a skill has to hold too, so if you take an early rung
      back, the skills that rest on it lock again, though their notes stay.</p>
 
-  <p><em>Skills / Records</em> → <em>Boundary</em>, or <code>:boundary</code>, shows what Dum may do
+  <p><em>Menu</em> → <em>Boundary</em>, or <code>:boundary</code>, shows what Dum may do
      right now: what it may write, what it may use as a tool, what's closed, and which files it may
      read and change.</p>
 
@@ -316,23 +330,25 @@
   <h3>Voice</h3>
 
   <p>Hold <code>⌃⌥Space</code> and talk; let go to stop. Speech is turned into text on your Mac
-     by a bundled copy of OpenSuperWhisper, set up under <em>Set up voice</em> in Settings, where
-     you allow the microphone and pick a language and a speech model. The text lands in your
-     draft. It never sends itself.</p>
+     by a bundled copy of OpenSuperWhisper. Set it up once under <em>Set up voice</em> in
+     Settings: allow the microphone (the prompt is attributed to Dum), then pick and download a
+     speech model, because none is bundled. The <a href="/install#voice">install page</a> has the
+     steps. The text lands in your draft. It never sends itself.</p>
 
-  <p>The bubble appears near your cursor while you use voice. It shows <em>Listening…</em>, then
+  <p>While you use voice the bubble shows <em>Listening…</em>, then <em>Transcribing…</em>, then
      the draft for 20 seconds; press <code>⌘⇧↩</code> to send it, or open Dum to edit it. Dum's
-     reply to a voice message shows there for a few seconds, up to eight lines, with <em>Open Dum
-     for the full reply</em> when there's more. The full reply is in Chat either way. You can't
-     click the bubble; clicks go through to whatever is under it.</p>
+     reply then shows in the bubble like any other reply (see <a href="#circle">the bubble</a>).</p>
 
   <ul>
     <li>Voice won't start over a draft that isn't empty. Send it, edit it or clear it first.</li>
     <li>A recording stops after two minutes and is thrown away.</li>
     <li>The audio is a temporary file, deleted when transcription finishes or fails.</li>
     <li>You can also start and stop voice with the <em>Voice</em> button.</li>
-    <li>Voice comes with the packaged app on Apple Silicon. Running Dum straight from a checkout
-        with <code>npm run desktop</code> has no voice.</li>
+    <li>Voice comes with the packaged app (<code>npm run desktop:mac</code>) on Apple Silicon with
+        macOS 14 or later. Running Dum straight from a checkout with <code>npm run desktop</code>
+        has no voice.</li>
+    <li>If another app owns the shortcut, macOS refuses it silently and the press does nothing.
+        Change the Hold-to-talk shortcut in Settings.</li>
   </ul>
 
   <h3>Keyboard only</h3>
@@ -342,9 +358,9 @@
   <ul>
     <li><code>Return</code> sends, <code>Shift-Return</code> adds a line, <code>⌘.</code> stops
         Dum (or the debug chat, when your focus is in it).</li>
-    <li><code>Esc</code> backs out one step: an open chooser or form first, then an open view such
-        as Settings or Records, then it hides the window. It never stops Dum, answers a question or
-        dismisses a card.</li>
+    <li><code>Esc</code> backs out one step: an open chooser, menu or form first, then the
+        expanded Context strip, then an open view such as Settings or a record, then it hides the
+        window. It never stops Dum, answers a question or dismisses a card.</li>
     <li><code>⌘K</code> switches zones and filters as you type. <code>⌘W</code> hides the
         window.</li>
     <li>Zone tree: Up and Down move, Right and Left open and close, Return enters,
@@ -409,7 +425,7 @@
     <li>A new file is never created over one that appeared in the meantime. Yours is kept.</li>
   </ul>
 
-  <p>The diff shows in the conversation or on the handoff card, and <em>Skills / Records</em> →
+  <p>The diff shows in the conversation or on the handoff card, and <em>Menu</em> →
      <em>Changes</em> lists every change in the zone, newest first. <em>Revert</em> puts the file
      back the way it was, or deletes a file Dum created. It works after the share has ended. If
      you've edited the file since Dum wrote it, Revert refuses and your edits stay.</p>
@@ -502,6 +518,11 @@
      button. If you say no to the permission, Dum looks at app switches and saved files only, until
      you allow it.</p>
 
+  <p>Frames also need a look model that is verified for pictures. With <code>haiku</code> or any
+     other unverified Claude model the look runs on text and Settings says <em>No pictures: …
+     isn't verified for pictures yet</em>. Settings → <em>Agent</em> → <em>Verify for pictures (one
+     small call)</em> fixes that; see <a href="#backends">who powers Dum</a>.</p>
+
   <h3>Pausing</h3>
 
   <p>Pause and Resume are next to the look's status in Current context. It stays paused until you
@@ -509,7 +530,7 @@
 
   <h3>Followed folders</h3>
 
-  <p><em>Skills / Records</em> → <em>Context</em> → <em>Follow a folder…</em> picks a folder for
+  <p><em>Menu</em> → <em>Context</em> → <em>Follow a folder…</em> picks a folder for
      this zone. Current context has a shortcut to it. Dum may read the saved files in it, notices
      when you save, and can write <a href="#changes">changes</a> there. Up to eight folders per
      zone.</p>
@@ -541,7 +562,7 @@
   <ul>
     <li><code>:projects new</code> suggests projects for this zone; <code>:projects recursion</code>
         sizes them to one skill. Add <code>in go</code> for a language. Skills has a <em>suggest
-        projects</em> button on each skill, and <em>Skills / Records</em> → <em>Suggested
+        projects</em> button on each skill, and <em>Menu</em> → <em>Suggested
         projects</em> has <em>Suggest projects for this zone</em>.</li>
     <li>Each project says what done means, roughly how many active hours it takes, how hard it is,
         why it fits, and an ordered list of milestones, prerequisites first.</li>
@@ -562,9 +583,13 @@
   <h2 id="wizard">The Wizard</h2>
 
   <p>The Wizard helps you decide. It speaks at goal alignment and when you press <em>Help me
-     decide</em>, as cards in Chat. It doesn't teach, quiz, review your code or post tips you
-     didn't ask for. Dum owns the outcome and the handoff; the Wizard lays out the choices and their
-     tradeoffs, and you choose.</p>
+     decide</em>, as cards in Chat. Dum can also ask it for you: when a message of yours has Dum
+     weighing two or more approaches, Dum hands the choice to the Wizard. The transcript shows
+     <em>Dum asked the Wizard: </em>and the reason, in the Wizard's voice, and a normal decision
+     card lands once Dum's turn ends. That happens at most once per message, and a card you
+     dismiss doesn't come back until you send again. The Wizard doesn't teach, quiz, review your
+     code or post tips you didn't ask for. Dum owns the outcome and the handoff; the Wizard lays
+     out the choices and their tradeoffs, and you choose.</p>
 
   <p>It can only cite context Dum gave it, shown under <em>Based on</em>, and only skills from your
      tree. When it backs a tradeoff with an outside fact, the claim and the link come from a fixed
@@ -579,7 +604,9 @@
   <p>Settings opens inside Chat. It has exactly this, top to bottom:</p>
 
   <ul>
-    <li><strong>Agent</strong>: the backend, the three models and your API key.</li>
+    <li><strong>Agent</strong>: the backend, the three models and your API key. A Claude model
+        that isn't verified for pictures has a <em>Verify for pictures (one small call)</em>
+        button next to its role; see <a href="#backends">who powers Dum</a>.</li>
     <li><strong>Look</strong>: the Apps and Screen switches, Screen Recording status and
         <em>Open Screen Recording settings</em>.</li>
     <li><strong>Shortcuts</strong>: Open Dum, Hold to talk and Send the draft. Click a field and
@@ -593,9 +620,8 @@
   </ul>
 
   <p>The sections start closed, except one that needs fixing: no backend chosen, a shortcut that
-     couldn't be set, or Screen Recording denied. Things that used to live in Settings moved: Mode
-     is in the Chat header, notes and followed folders are in Records → Context, the web tree is
-     in Skills, and Pause is in Current context.</p>
+     couldn't be set, or Screen Recording denied. Mode is in the Chat header, notes and followed
+     folders are in Menu → Context, the web tree is in Skills, and Pause is in Current context.</p>
 
   <h3>Debug chat</h3>
 
@@ -639,9 +665,22 @@
      lists, including aliases like <code>opus</code>, <code>fable</code> and <code>haiku</code>,
      each of which runs some specific model today. Dum verifies models by that resolved model, not
      the alias. Dum's model has to support function calling. Pictures, for the look and shared
-     screenshots, go only to a model whose resolved model Dum has verified with real calls. If an
-     alias moves to a model Dum hasn't verified, the look keeps running on text and its status
-     says why. Models Dum hasn't verified are marked <em>untested</em>.</p>
+     screenshots, go only to a model whose resolved id is verified for pictures. Models Dum hasn't
+     verified are marked <em>untested</em>, and the look runs on text with them; its status says
+     why.</p>
+
+  <p><code>opus</code> and <code>fable</code> are verified out of the box. For any other Claude
+     model, <code>haiku</code> included, Settings → <em>Agent</em> shows <em>Verify for pictures
+     (one small call)</em> next to that role. It sends one 2×2 PNG and the line <em>Reply with the
+     single word OK.</em> to that model on your key. Success records the resolved id in
+     <code>~/.dum/verified-models.json</code> on this Mac, and the look starts sending frames.
+     Failure records nothing and the reason stays next to the button. Dum won't verify while it's
+     mid-request. If an alias later moves to a model you haven't verified, pictures stop until you
+     verify that one.</p>
+
+  <p>An Anthropic key has to be scoped to a workspace. A key created outside one fails with
+     <em>must include the anthropic-workspace-id header</em>; Dum doesn't add that header. Create
+     the key inside a workspace at console.anthropic.com.</p>
 
   <p>There's no fallback. If the backend you picked fails, Dum tells you; it never quietly
      switches to another one.</p>
@@ -649,8 +688,7 @@
   <p>Your API key is encrypted with Electron's safe storage, which uses the macOS Keychain, and
      kept in Dum's app data, never in settings.</p>
 
-  <p class="note">Key encryption, and the first real picture call to the default look model,
-     haven't been tried on a real Mac yet.</p>
+  <p class="note">Key encryption hasn't been tried on a real Mac yet.</p>
 
   <h2 id="privacy">Privacy</h2>
 

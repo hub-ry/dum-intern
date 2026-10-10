@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>installation — dum intern</title>
-  <meta name="description" content="How to install Dum, the Mac app: requirements, choosing a backend, and building it from source.">
+  <meta name="description" content="How to install Dum, the Mac app: prerequisites, building it on your Mac, first launch, verifying a model for pictures, setting up voice, and troubleshooting.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -16,88 +16,149 @@
 
 <main>
   <h1>Installation</h1>
-  <p class="jump-link"><a href="#ai-install">Have your AI install it <span aria-hidden="true">↓</span></a></p>
+  <p class="jump-link"><a href="#ai-install">Have your AI build it <span aria-hidden="true">↓</span></a></p>
 
-  <h2>Requirements</h2>
+  <p>There's no public release of this version yet. You build Dum on the Mac that will run it, in
+     the order below. Test builds also come out of the
+     <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>
+     on pushes to <code>main</code>; only signed-in GitHub accounts can download them, and the older
+     test prerelease on the releases page predates zones and doesn't match these docs.</p>
+
+  <h2>1. Prerequisites</h2>
   <ul>
-    <li>macOS 13 or later, on Apple Silicon or Intel.</li>
-    <li>Voice needs macOS 14 or later on Apple Silicon. Everything voice does also works from
-        the keyboard.</li>
-    <li>A backend to power Dum. Either your own Anthropic API key for Claude, or models running on
-        your Mac in Ollama or LM Studio. Claude takes only an API key, in every build. See
-        <a href="/docs#backends">who powers Dum</a>.</li>
+    <li>macOS 13 or later, on Apple Silicon or Intel. Voice needs macOS 14 or later on Apple Silicon;
+        everything voice does also works from the keyboard.</li>
+    <li>Node 22.6 or later: <code>brew install node</code>.</li>
+    <li>For voice, three more things on the build Mac: the full Xcode from the App Store (Command Line
+        Tools aren't enough), then <code>sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+        &amp;&amp; sudo xcodebuild -license accept</code>; cmake, <code>brew install cmake</code>; and
+        Rust through rustup with <code>rustup target add aarch64-apple-darwin</code>. Homebrew's
+        <code>rust</code> has no rustup and the build refuses it.</li>
+    <li>Network during the build (it fetches whisper.cpp and Swift packages) and once more when you
+        download a speech model.</li>
+    <li>A backend to power Dum: your own Anthropic API key for Claude, or models running on your Mac in
+        Ollama or LM Studio. See <a href="/docs#backends">who powers Dum</a>.</li>
   </ul>
   <p class="note">The app carries its own Claude Code. You don't install anything else to use
      Claude.</p>
 
-  <h2>Download</h2>
-  <p class="note">There's no public release of this version yet. Build it from source below.</p>
-  <p>Test builds come out of the
-    <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>
-    on pushes to <code>main</code>. They're ad-hoc signed and not notarized, and
-    only signed-in GitHub accounts can download them. The older test prerelease on the releases
-    page predates zones and doesn't match these docs.</p>
+  <h2>2. Build</h2>
+  <pre><code>git clone https://github.com/hub-ry/dum-intern
+cd dum-intern
+npm install &amp;&amp; npm run desktop:mac</code></pre>
+  <p>The app lands at <code>release/mac-arm64/Dum.app</code> on Apple Silicon or
+     <code>release/mac/Dum.app</code> on Intel, with a DMG beside it. If
+     <code>prepare-dictation</code> stops, its message names the missing tool from step 1. Every build
+     connects Claude with your own API key only.</p>
 
-  <h3>First run</h3>
+  <h2>3. Install</h2>
+  <p>Copy <code>Dum.app</code> to <code>/Applications</code>. The build is ad-hoc signed and not
+     notarized, so the first time, right-click it and choose <em>Open</em>. Dum is a small floating
+     circle; there's no Dock icon and no menu bar icon. Drag the circle wherever you like.</p>
+
+  <h2>4. First launch</h2>
   <ol>
-    <li>Open the DMG, drag Dum into Applications, and launch it.</li>
-    <li>If macOS blocks it: System Settings → Privacy &amp; Security → Security → Open Anyway.</li>
-    <li>Dum's window opens by itself. macOS asks for Screen Recording permission, for Dum's look.
-        If you say no, Dum looks at app switches and saved files only.</li>
-    <li>Answer <em>What are you trying to learn?</em> That becomes your first zone.</li>
-    <li>Click <em>Who powers Dum?</em> and pick a backend, Dum's model, the helper and the look
-        model. Then Dum and the Wizard start goal alignment for your first zone.</li>
-    <li>From then on, click the floating circle, or press <code>⌘⇧D</code> from anywhere, to open
-        or hide Dum's window.</li>
+    <li>Dum's window opens by itself and asks <em>What are you trying to learn?</em> The answer
+        becomes your first zone. Nothing is sent to a model for this.</li>
+    <li>macOS asks for Screen Recording permission, for Dum's look. If you say no, Dum looks at app
+        switches and saved files only.</li>
+    <li>Click <em>Who powers Dum?</em> and pick a backend and three models: Dum's model, the helper
+        and the look model. For Claude, paste your Anthropic API key. The key has to be scoped to a
+        workspace: a key created outside one fails with <em>must include the anthropic-workspace-id
+        header</em>. Create it at console.anthropic.com inside a Workspace, or use a key that already
+        belongs to one.</li>
+    <li>Dum and the Wizard then start goal alignment for your first zone. From now on, click the
+        circle, or press <code>⌘⇧D</code> from anywhere, to open or hide Dum's window.</li>
   </ol>
-  <p class="note">Dum is a small floating circle on your screen. There's no Dock icon and no menu
-     bar icon. Drag the circle wherever you like.</p>
 
-  <h2>Build from source</h2>
+  <h2>5. Verify for pictures, if you pick Haiku</h2>
+  <p>Dum sends screenshots only to a model whose resolved id it has verified for pictures.
+     <code>opus</code> and <code>fable</code> are verified out of the box. For any other Claude model,
+     <code>haiku</code> included, Settings → <em>Agent</em> shows <em>Verify for pictures (one small
+     call)</em> next to that role. Press it: Dum sends one 2×2 PNG and the line <em>Reply with the
+     single word OK.</em> to that model on your key. Success records the resolved id in
+     <code>~/.dum/verified-models.json</code> and the look starts sending frames. Failure records
+     nothing and the reason stays next to the button. Dum refuses to verify while it's in the middle
+     of a request; finish or Stop it first.</p>
 
-  <h3>Prerequisites</h3>
+  <h2 id="voice">6. Set up voice</h2>
+  <p>Voice exists only in the packaged app on Apple Silicon. No speech model is bundled; you pick and
+     download one the first time.</p>
+  <ol>
+    <li>Launch Dum. The voice helper starts with it, because a voice shortcut
+        (<code>Control+Option+Space</code>) is set by default. Nothing prompts yet.</li>
+    <li>Open Dum and go to Settings → <em>Set up voice</em>. The <em>Dum voice setup</em> window
+        opens.</li>
+    <li>Microphone: macOS asks the first time the window opens. The prompt is attributed to Dum. Click
+        <em>Allow</em>. If you clicked Don't Allow, go to System Settings → Privacy &amp; Security →
+        Microphone, turn on Dum, and reopen Set up voice.</li>
+    <li>Speech model: pick one and wait for the download. Whisper Small (574 MB) is the quickest to
+        try, Whisper V3 Large (1.6 GB) the most accurate, Parakeet v3 the fastest at run time. The row
+        becomes selected when the download finishes. Close the window.</li>
+    <li>Check the voice line in Settings reads <em>Hold the voice shortcut and talk…</em>. Any other
+        line names the step still missing: microphone, model or shortcut.</li>
+    <li>Open a zone with an empty draft. Hold <code>Control+Option+Space</code>, speak, release. The
+        bubble shows <em>Listening…</em>, then <em>Transcribing…</em>, then your text. A draft that
+        isn't empty refuses the press; clear it first.</li>
+    <li>The transcript is in your draft only. Send it with <code>⌘⇧Return</code>, or open Dum and
+        edit it. Voice never sends by itself.</li>
+  </ol>
+  <p>Speech models live in <code>~/Library/Application Support/com.dumintern.opensuperwhisper/</code>
+     (whisper) or <code>~/Library/Application Support/FluidAudio/Models/</code> (Parakeet). Recording
+     and transcription after that are local; the helper needs network again only if you pick another
+     model. A recording stops after two minutes.</p>
+  <p class="note">Known limits: if another app owns the hotkey, macOS refuses it silently and Dum
+     still reports the shortcut as set; the symptom is a press that does nothing and no bubble. Change
+     the Hold-to-talk shortcut in Settings. Intel Macs and macOS 13 get keyboard-only voice.</p>
+
+  <h2 id="troubleshooting">Troubleshooting</h2>
   <ul>
-    <li>A Mac with macOS 13 or later</li>
-    <li>Node 22.6 or later</li>
+    <li><strong>"must include the anthropic-workspace-id header."</strong> Your Anthropic key isn't
+        scoped to a workspace. Dum doesn't add that header. Create a key inside a workspace
+        (console.anthropic.com → Workspaces) and paste that one in Settings → Agent.</li>
+    <li><strong>"No pictures: … isn't verified for pictures yet."</strong> The look model's resolved
+        id isn't verified, so the look runs on text alone. Settings → Agent → <em>Verify for pictures
+        (one small call)</em> next to the look model.</li>
+    <li><strong>The circle shows the voice-error badge.</strong> Open Settings and read the voice
+        line, then <em>Set up voice</em> again. A stopped helper restarts on the next press or
+        setup.</li>
+    <li><strong>"The voice helper stopped" right after launch, from a DMG you downloaded through a
+        browser.</strong> Clear quarantine: <code>xattr -dr com.apple.quarantine
+        /Applications/Dum.app</code>, then open Dum again.</li>
   </ul>
 
-  <pre><code>npm install
-npm run desktop            # build Dum and launch it from the checkout
-npm run desktop:mac        # package the DMG and ZIP, with voice and the focus helper</code></pre>
-
-  <p>Every build, yours or a released one, connects Claude with your own API key only.</p>
-
+  <h2>Developing without voice</h2>
+  <pre><code>npm run desktop            # build Dum and launch it from the checkout</code></pre>
   <p class="note"><code>npm run desktop</code> runs without Dum's two native helpers, so there's
      no voice, no noticing app switches, and <code>Esc</code> can't hand focus back to the app you
-     were in. Packaging builds them: the focus helper on any Mac, voice only on Apple Silicon, which
-     needs Xcode, cmake, and Rust with the <code>aarch64-apple-darwin</code> target.</p>
-
-  <p class="note">The checkout also starts on Linux. That's for development and testing only; Dum
-     is a Mac app.</p>
+     were in. It also starts on Linux, for development and testing only; Dum is a Mac app.</p>
 
   <section class="terminal-setup" id="ai-install" aria-labelledby="terminal-setup-title">
-    <h2 id="terminal-setup-title">Let a terminal LLM set it up</h2>
-    <p>Prefer to paste one instruction into the terminal agent you already use? This walks it through building Dum from source and launching it, checks each step, and stops when it needs you.</p>
+    <h2 id="terminal-setup-title">Let a terminal LLM build it</h2>
+    <p>Prefer to paste one instruction into the terminal agent you already use? This walks it through building the packaged Mac app from source, checks each step, and stops when it needs you. The steps you do yourself afterwards: right-click → Open, the Screen Recording and microphone prompts, your API key, the speech model download.</p>
     <div class="setup-prompt-head">
       <span class="dl-meta">paste into your terminal LLM</span>
       <button class="copy-button" type="button" data-copy-target="setup-prompt">copy</button>
     </div>
-    <pre><code id="setup-prompt">Set up Dum from https://github.com/hub-ry/dum-intern for me: build the Mac app from source and launch it.
+    <pre><code id="setup-prompt">Set up Dum from https://github.com/hub-ry/dum-intern for me: build the packaged Mac app from source with `npm run desktop:mac`.
 
 Work one step at a time. Check the result before continuing. Ask me before:
-- using sudo or installing anything system-wide
+- using sudo or installing anything system-wide (including Xcode, cmake, rustup, Node)
+- accepting the Xcode license
 - opening a browser for any sign-in or completing 2FA
 - entering, copying, storing, or relaying passwords, API keys, one-time codes, recovery codes, or security keys
 - writing outside the folder I give you
 - changing an existing project or deleting anything
 
 1. Check that this is a Mac on macOS 13 or later, and check my Node version (22.6 or later is needed). If it isn't a Mac, tell me Dum is a Mac app and stop. If Node is missing or too old, ask me before installing it.
-2. Ask where I want the repository. Clone it there if it is not already present.
-3. In the repository, run `npm install`.
-4. Run `npm run desktop`. It builds Dum and launches it, and keeps running until I quit Dum. Dum shows up as a small floating circle with its window open, not in the Dock or the menu bar.
-5. Tell me to finish setup in the app myself: answer the Screen Recording prompt, answer "What are you trying to learn?", then click "Who powers Dum?" and pick a backend. Never ask for, type, store, or relay my Anthropic API key or any one-time code. I enter those in Dum myself.
-6. If a step fails, stop and show the exact error and the next command. At the end, print what's left for me to do and wait.</code></pre>
-    <p class="note">The prompt asks the agent to stop before system changes, sign-in, 2FA, or writing outside the folder you choose. Never give an agent your password, API key, one-time code, recovery code, or security key. Review its commands like any other shell command.</p>
+2. If this is an Apple Silicon Mac on macOS 14 or later, voice can be built too. Check for the full Xcode (`xcodebuild -version`), `cmake`, and `rustup` with the `aarch64-apple-darwin` target. Tell me what's missing and ask me before installing any of it. Homebrew's `rust` package won't do; it has to be rustup.
+3. Ask where I want the repository. Clone it there if it is not already present.
+4. In the repository, run `npm install`.
+5. Run `npm run desktop:mac`. If `prepare-dictation` stops, show me its message; it names the missing tool. When it finishes, confirm `release/mac-arm64/Dum.app` exists on Apple Silicon or `release/mac/Dum.app` on Intel.
+6. Copy the built `Dum.app` from that architecture's release folder to `/Applications` only if I say so. Do not open it yourself.
+7. Tell me what's left for me to do, then stop: right-click Dum.app and choose Open the first time; answer the Screen Recording prompt; answer "What are you trying to learn?"; click "Who powers Dum?" and pick a backend; in Settings → Set up voice, allow the microphone and download a speech model. Never ask for, type, store, or relay my Anthropic API key or any one-time code. I enter those in Dum myself.
+8. If a step fails, stop and show the exact error and the next command.</code></pre>
+    <p class="note">The prompt asks the agent to stop before sudo, the Xcode license, sign-in, 2FA, or writing outside the folder you choose. Never give an agent your password, API key, one-time code, recovery code, or security key. Review its commands like any other shell command.</p>
   </section>
 </main>
 

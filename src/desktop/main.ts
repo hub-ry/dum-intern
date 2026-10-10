@@ -452,6 +452,7 @@ async function start(): Promise<void> {
     publish = setImmediate(() => {
       publish = null;
       if (!router || quitting) return;
+      router.windowChanged();
       work.webContents.send("dum:snapshot", router.snapshot());
       const view: CircleView = router.circle();
       const json = JSON.stringify(view);
@@ -461,6 +462,8 @@ async function start(): Promise<void> {
       }
     });
   };
+
+  work.on("focus", broadcast);
 
   let restartTimer: NodeJS.Timeout | null = null;
   let restartDelay = 1_000;
@@ -685,6 +688,7 @@ async function start(): Promise<void> {
     showWindow,
     dismissWindow,
     windowVisible: () => work.isVisible(),
+    windowFocused: () => work.isFocused(),
     openView(view) {
       void showWindow();
       void work.webContents.loadFile(INDEX, { query: { view: "window" }, hash: view });

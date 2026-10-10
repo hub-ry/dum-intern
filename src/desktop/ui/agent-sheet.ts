@@ -12,6 +12,10 @@ import {
 } from "./agent-picker.ts";
 
 type Catalog = { state: "loading" } | { state: "ready"; models: ModelOption[] } | { state: "error"; message: string };
+/** One verify call at a time, keyed by role and model id; its result stays inline until the pick changes. */
+type Verify = { key: string } & ({ state: "busy" } | { state: "done" } | { state: "error"; message: string });
+
+export const VERIFY_LABEL = "Verify for pictures (one small call)";
 
 const ROLE_TEXT: Record<Role, { title: string; hint: string }> = {
   intern: { title: "Dum's model", hint: "Holds the conversation, runs handoffs you command with Do this and answers the debug chat, so it needs function calling." },
@@ -27,6 +31,7 @@ export class AgentSheet {
   private catalogs = new Map<string, Catalog>();
   private picks: Record<Role, Selector | null> = { intern: null, helper: null, look: null };
   private picksFor = "";
+  private verify: Verify | null = null;
   private key = "";
   private keyInput = h("input", { class: "input", type: "password", autocomplete: "off", spellcheck: "false", "aria-label": "Anthropic API key", "data-focus": "key", placeholder: "sk-ant-…" });
 
@@ -70,7 +75,7 @@ export class AgentSheet {
     if (row && catalog?.state === "ready") {
       for (const role of ROLES) this.picks[role] ??= preselectedSelector(row.id, role, catalog.models, s.agent.chosen);
     }
-    const key = JSON.stringify([s.agent, this.backend, login, catalog, this.picks]);
+    const key = JSON.stringify([s.agent, this.backend, login, catalog, this.picks, this.verify]);
     if (key === this.key) return;
     this.key = key;
     const inside = this.el.contains(document.activeElement) ? document.activeElement : null;
@@ -250,7 +255,37 @@ export class AgentSheet {
       h("div", { class: "role-selects" }, select, effort),
       caps ? h("p", { class: "hint" }, caps) : null,
       warning ? h("p", { class: "hint warn-text" }, icon("warning"), warning) : null,
+      current && pick && backend === "claude" && (!current.verified || this.verify?.key === `${role}:${current.id}`) ? this.verifier(role, pick, current) : null,
       h("p", { class: "hint" }, ROLE_TEXT[role].hint),
     );
+  }
+
+  /**
+   * Verify for pictures: one real picture call to the chosen Claude model. Success re-reads the catalog,
+   * which then shows the row verified; a refusal or timeout changes nothing and its reason stays inline.
+   */
+  private verifier(role: Role, pick: Selector, model: ModelOption): HTMLElement {
+    const key = `${role}:${model.id}`;
+    const state = this.verify?.key === key ? this.verify : null;
+    const button = model.verified ? null : h("button", {
+      type: "button", class: "btn ghost", "data-focus": `${role}-verify`, disabled: state?.state === "busy",
+      onclick: async () => {
+        this.verify = { key, state: "busy" };
+        this.redraw();
+        const r = await this.client.call({ type: "agent-verify-images", backend: "claude", selector: pick }, true);
+        if (r.ok) {
+          this.verify = { key, state: "done" };
+          // The host's catalog now lists the row verified; drop the copy so update() reads it again.
+          this.catalogs.delete(`${pick.backend}:${this.login.get(pick.backend)}`);
+        } else {
+          this.verify = { key, state: "error", message: r.error };
+        }
+        this.redraw();
+      },
+    }, state?.state === "busy" ? "Verifying…" : VERIFY_LABEL);
+    const result = state?.state === "done"
+      ? h("span", { class: "hint" }, `${model.label} is verified for pictures on this Mac.`)
+      : state?.state === "error" ? h("span", { class: "hint warn-text" }, icon("warning"), `Not verified: ${state.message}`) : null;
+    return h("div", { class: "role-verify", "aria-live": "polite" }, button, result);
   }
 }

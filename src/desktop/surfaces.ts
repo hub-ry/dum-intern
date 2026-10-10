@@ -51,12 +51,14 @@ export const WINDOW_MIN: Size = { width: 360, height: 480 };
 /** Gap between the circle and the working window beside it. */
 export const WINDOW_GAP = 12;
 
-/** A ready voice draft stays this long; a finished reply this long. */
-export const BUBBLE_TTL = { ready: 20_000, reply: 8_000, error: 8_000 } as const;
+/** A ready voice draft stays 20 s. A reply is read, not heard, so it stays 15 s. */
+export const BUBBLE_TTL = { ready: 20_000, reply: 15_000, error: 8_000 } as const;
 /** Recording has a two-minute ceiling; nothing in the bubble outlives it. */
 const RECORDING_MS = 2 * 60_000;
 export const BUBBLE_LINES = 8;
 export const BUBBLE_CHARS = 600;
+/** The last line of a cut reply; the bubble is click-through, so it only points at the Open shortcut. */
+export const BUBBLE_OPEN = "Open Dum for the full reply";
 
 /** `size` shrunk to fit inside `area` with the margin on every side. */
 function fit(size: Size, area: Rect): Size {
@@ -276,7 +278,7 @@ export function bubbleLines(dum: readonly string[], wizard: string | null): stri
   const out: string[] = [];
   let budget = BUBBLE_CHARS;
   let cut = false;
-  for (const text of dum) {
+  for (const text of [...dum, ...(wizard ? [`Wizard: ${wizard.replace(/\s+/g, " ").trim()}`] : [])]) {
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -290,11 +292,7 @@ export function bubbleLines(dum: readonly string[], wizard: string | null): stri
       budget -= piece.length;
     }
   }
-  if (wizard && out.length < BUBBLE_LINES - 1 && budget > 0) {
-    const line = `Wizard: ${wizard.replace(/\s+/g, " ").trim()}`;
-    out.push(line.length > budget ? `${line.slice(0, Math.max(0, budget - 1))}…` : line);
-  }
-  if (cut) out.push("Open Dum for the full reply");
+  if (cut) out.push(BUBBLE_OPEN);
   return out;
 }
 
@@ -308,7 +306,7 @@ export type BubblePorts = {
 
 /**
  * The cursor bubble's content and lifetime. It shows only while recording, transcribing or
- * answering, and goes away on its own: a ready draft after 20 s, a reply after 8 s.
+ * answering, and goes away on its own after its TTL (BUBBLE_TTL).
  */
 export class Bubble {
   private view: BubbleView | null = null;

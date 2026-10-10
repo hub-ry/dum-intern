@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { crc32, inflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { setImmediate } from "node:timers/promises";
@@ -8,6 +9,9 @@ import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_DEFAULTS } from "../src/agent/schema.ts";
 import {
   CLAUDE_VERIFIED,
+  PROBE_PNG,
+  PROBE_TEXT,
+  VERIFIED_FILE,
   assertInit,
   assertProvider,
   catalog,
@@ -16,8 +20,10 @@ import {
   closed,
   failure,
   noImages,
+  readVerified,
   retryStatus,
   start,
+  verified,
   type Sdk,
 } from "../src/agent/claude.ts";
 import { FLAGS, authStatus, cliArgs, providerFreeEnv } from "../src/agent/claude-cli.ts";
@@ -394,6 +400,122 @@ test("pictures sent for one resolved model never reach another: a mismatched ini
   const backend = claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }) });
   const session = await backend.open(openOptions({ selector: CLAUDE_DEFAULTS.intern, actions: [] }));
   await assert.rejects(drain(session.turn({ text: "look", images: [picture] })), /Claude ran claude-opus-9-9, not claude-opus-5-5/);
+});
+
+/** A throwaway H for the verified-models record. */
+function home(): string {
+  return mkdtempSync(`${tmpdir()}/dum-verified-`);
+}
+
+test("an id this install verified is read from verified-models.json: the catalog marks it and pictures are allowed", async () => {
+  const proven = new Set(["claude-haiku-5-5"]);
+  assert.equal(verified("claude-haiku-5-5", proven), true);
+  assert.equal(verified("claude-haiku-5-5"), false);
+  assert.equal(catalog(MODELS, proven).find((m) => m.id === "haiku")?.verified, true);
+  assert.equal(noImages(CLAUDE_DEFAULTS.look, "claude-haiku-5-5", proven), "");
+  const h = home();
+  try {
+    writeFileSync(`${h}/${VERIFIED_FILE}`, JSON.stringify({ claude: ["claude-haiku-5-5"] }));
+    const { sdk } = fakeSdk({});
+    const backend = claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }), home: h });
+    const models = await backend.models("anthropic-key", signal);
+    assert.deepEqual(models.filter((m) => m.verified).map((m) => m.id), ["default", "opus", "fable", "haiku"]);
+    const caps = await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal);
+    assert.deepEqual([caps.model, caps.images, caps.noImages], ["claude-haiku-5-5", true, ""]);
+    writeFileSync(`${h}/${VERIFIED_FILE}`, "{ not json");
+    assert.deepEqual(readVerified(h), new Set(), "a malformed record proves nothing");
+    writeFileSync(`${h}/${VERIFIED_FILE}`, JSON.stringify({ claude: ["haiku"], extra: true }));
+    assert.deepEqual(readVerified(h), new Set(), "an unexpected shape proves nothing");
+  } finally {
+    rmSync(h, { recursive: true, force: true });
+  }
+});
+
+test("Verify for pictures sends one tiny picture, records the model the session ran, and the catalog follows", async () => {
+  const h = home();
+  try {
+    const { sdk, seen } = fakeSdk({ replies: () => [lookInit, { type: "assistant", message: { content: [{ type: "text", text: "OK" }] } }, { type: "result", subtype: "success" }] });
+    const make = () => claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }), home: h });
+    const backend = make();
+    assert.equal((await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal)).images, false);
+    assert.deepEqual(await backend.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal), { resolved: "claude-haiku-5-5" });
+    const sent = seen.inputs[0]!.message.content;
+    assert.ok(Array.isArray(sent));
+    assert.deepEqual(sent, [{ type: "image", source: { type: "base64", media_type: "image/png", data: PROBE_PNG } }, { type: "text", text: PROBE_TEXT }]);
+    const image = sent[0];
+    assert.equal(image.type, "image");
+    if (image.type !== "image" || image.source.type !== "base64") throw new Error("expected a base64 image");
+    const png = Buffer.from(image.source.data, "base64");
+    assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20), png[24], png[25]], [2, 2, 8, 6]);
+    const pixels: Buffer[] = [];
+    for (let at = 8; at < png.length;) {
+      const length = png.readUInt32BE(at);
+      assert.equal(crc32(png.subarray(at + 4, at + 8 + length)), png.readUInt32BE(at + 8 + length));
+      if (png.toString("ascii", at + 4, at + 8) === "IDAT") pixels.push(png.subarray(at + 8, at + 8 + length));
+      at += length + 12;
+    }
+    const rows = inflateSync(Buffer.concat(pixels));
+    assert.equal(rows.length, 18);
+    assert.ok(rows[0]! <= 4 && rows[9]! <= 4);
+    assert.deepEqual(seen.options.at(-1)!.model, "haiku");
+    assert.deepEqual(seen.options.at(-1)!.mcpServers, {}, "a verify call has no actions");
+    assert.equal(seen.closed, 2);
+    assert.deepEqual(JSON.parse(readFileSync(`${h}/${VERIFIED_FILE}`, "utf8")), { claude: ["claude-haiku-5-5"] });
+    const caps = await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal);
+    assert.deepEqual([caps.images, caps.noImages], [true, ""]);
+    assert.equal(seen.started, 2, "the last listing is updated in place");
+    assert.equal((await make().models("anthropic-key", signal)).find((m) => m.id === "haiku")?.verified, true, "a new host reads the record");
+    const session = await backend.open(openOptions({ selector: CLAUDE_DEFAULTS.look, actions: [] }));
+    assert.deepEqual((await drain(session.turn({ text: "look", images: [picture] })))[0], { type: "model", model: "claude-haiku-5-5", effort: "low" });
+    session.close();
+  } finally {
+    rmSync(h, { recursive: true, force: true });
+  }
+});
+
+test("a verify persistence failure leaves pictures disabled in memory and later catalogs", async () => {
+  const h = home();
+  try {
+    const { sdk } = fakeSdk({ replies: () => [lookInit, { type: "assistant", message: { content: [{ type: "text", text: "OK" }] } }, { type: "result", subtype: "success" }] });
+    const backend = claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }), home: h });
+    mkdirSync(`${h}/${VERIFIED_FILE}`);
+    await assert.rejects(backend.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal));
+    assert.equal((await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal)).images, false);
+    assert.equal((await backend.models("anthropic-key", signal)).find((m) => m.id === "haiku")?.verified, false);
+    assert.deepEqual(readVerified(h), new Set());
+    rmSync(`${h}/${VERIFIED_FILE}`, { recursive: true });
+    await backend.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal);
+    assert.equal((await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal)).images, true);
+    assert.deepEqual(readVerified(h), new Set(["claude-haiku-5-5"]));
+  } finally {
+    rmSync(h, { recursive: true, force: true });
+  }
+});
+
+test("a verify the model refuses, answers without text, or that has nowhere to record changes nothing", async () => {
+  const cases: [Msg[], RegExp][] = [
+    [[lookInit, { type: "result", subtype: "error_during_execution", is_error: true, result: "image input is not supported" }], /image input is not supported/],
+    [[lookInit, { type: "result", subtype: "success" }], /sent no text back/],
+    [[{ type: "assistant", message: { content: [{ type: "text", text: "OK" }] } }, { type: "result", subtype: "success" }], /never reported which model ran/],
+  ];
+  for (const [replies, why] of cases) {
+    const h = home();
+    try {
+      const { sdk, seen } = fakeSdk({ replies: () => replies });
+      const backend = claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }), home: h });
+      await assert.rejects(backend.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal), why);
+      assert.equal(seen.closed, 1, "the probe session is closed");
+      assert.equal(existsSync(`${h}/${VERIFIED_FILE}`), false, "nothing is recorded");
+      assert.equal((await backend.capabilities(CLAUDE_DEFAULTS.look, "anthropic-key", signal)).images, false);
+    } finally {
+      rmSync(h, { recursive: true, force: true });
+    }
+  }
+  const { sdk, seen } = fakeSdk({});
+  const homeless = claudeBackend({ executable: "/opt/claude", sdk, credential: async () => ({ value: "sk", expiresAt: null }) });
+  await assert.rejects(homeless.verifyImages!(CLAUDE_DEFAULTS.look, "anthropic-key", signal), /nowhere to record/);
+  assert.equal(seen.started, 0, "refused before any call");
 });
 
 test("retry and failure copy", () => {

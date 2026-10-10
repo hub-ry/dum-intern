@@ -89,7 +89,7 @@ YOUR ACTIONS
   suggest_projects   suggested projects that fit a skill's scope
   remember           save guidance, a decision or a next step in this zone's memory
   report_context     note which skills this conversation is about, for their session trail
-  decision_help      refresh the decision cards they asked for (only when it's offered)
+  decision_help      hand a choice to the Wizard: option cards land in Dum after this turn
 
 EVIDENCE
 - check_answer: only after they explain something in their own words this turn.
@@ -111,8 +111,9 @@ A request that starts with HANDOFF is one they chose and commanded with Do this:
 task, aiming at its expected result, through change. It's not a plan to approve and not
 permission for anything else. Skills it doesn't hold are refused by code; say so and stop.
 Never claim the expected result is met: they review it. Decision cards (the Wizard's
-options) come only when they ask for help deciding. Never volunteer a recommendation,
-lesson or critique they didn't ask for.
+options) come when they ask for help deciding, or when you hand the Wizard a choice with
+decision_help: only while they're weighing two or more approaches and haven't picked,
+and once per turn. Never volunteer a recommendation, lesson or critique they didn't ask for.
 
 THE TRAIL
 Call report_context when the conversation is clearly about specific skills: pick exact
@@ -149,7 +150,7 @@ export type Shared = Resources & { grants(): ShareGrant[] };
 
 /**
  * How a request reports to the host's trail and decision owners. None of these writes source, a
- * skill or evidence: they link what already happened, or recompose cards the user asked for.
+ * skill or evidence: they link what already happened, or hand a choice to the Wizard.
  */
 export type SessionHooks = {
   /** report_context: the model's topics, validated against the catalog by the host. Says what was kept. */
@@ -159,10 +160,12 @@ export type SessionHooks = {
   /** The ledger accepted evidence for this skill this request. */
   proved(skill: SkillRef): void;
   /**
-   * Only for a decision turn the user opened (they're answering the open card's questions):
-   * recompose the card with what they said. Null otherwise, and decision_help isn't offered.
+   * decision_help: hand a choice to the Wizard. The card is composed after this turn ends, never
+   * beside the running session; `ask` throws when refused (already asked this turn). Null while no
+   * backend powers Dum. `waiting` is the open card's outcome when it asked them something: passed
+   * back, the card is recomposed with their answer.
    */
-  decide: ((said: readonly string[], signal: AbortSignal) => Promise<string>) | null;
+  decide: { waiting: string | null; ask(outcome: string, why: string, said: readonly string[]): string } | null;
 };
 
 /** How a request ended, for whoever commanded it. `closed`: the zone closed under it. */
@@ -530,9 +533,12 @@ function actions(ctx: Ctx): DumAction[] {
     }),
     ...(decide ? [define(store, {
       name: "decision_help",
-      description: "Refresh the decision cards they asked for, with what they said this request. Only offered while their card waits on a detail. Cards are theirs to choose from; this chooses nothing.",
-      schema: {},
-      run: () => store.helper((signal) => decide(ctx.said, signal)),
+      description: `Hand a choice to the Wizard: it lays out two or three option cards in Dum once this turn ends. Only while they're weighing two or more approaches and haven't picked; at most once per turn. They choose; this chooses nothing.${decide.waiting ? ` Their open card asked them something: if they just answered, pass its outcome back: ${JSON.stringify(decide.waiting)}.` : ""}`,
+      schema: {
+        outcome: z.string().min(1).max(400).describe("The outcome they're choosing how to reach, in their terms"),
+        why: z.string().min(1).max(200).describe("One sentence: why you're asking the Wizard now. Shown to them."),
+      },
+      run: async (a) => decide.ask(a.outcome.trim(), a.why.trim(), ctx.said),
     })] : []),
   ];
 }
