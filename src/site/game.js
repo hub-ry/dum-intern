@@ -1,14 +1,16 @@
 // game.js — dum intern endless runner
-// Rose Pine Moon palette, sprite data from src/art/intern.txt
+// Muted violet palette for ground and obstacles, sprite data from src/art/intern.txt.
+// Idle state draws nothing animated under prefers-reduced-motion; only a game the
+// visitor starts on purpose moves, and then at reduced speed.
 
 // Palette: rose pine moon
-const OVR = '#393552'; // overlay / ground
-const MUT = '#6e6a86'; // muted   / obstacle body
-const SUB = '#908caa'; // subtle  / game-over heading
-const TXT = '#e0def4'; // text    / state overlay
-const HLH = '#56526e'; // highlight high
-const HLM = '#44415a'; // highlight med / obstacle detail
-const GND = '#2a273f'; // ground fill, in front of the mountains
+const OVR = '#3b3460'; // ground top edge
+const MUT = '#6e6a86'; // obstacle body
+const SUB = '#b8b2d0'; // score / game-over detail
+const TXT = '#ece8f7'; // state overlay text
+const HLH = '#56526e'; // obstacle highlight
+const HLM = '#44415a'; // obstacle detail
+const GND = '#1f1a3a'; // ground fill, in front of the mountains
 
 // Intern sprite pixel colors (from art/intern.txt palette section)
 const _ = null;        // transparent
@@ -133,7 +135,10 @@ function init() {
 
   canvas.addEventListener('click', act);
   jumpBtn.addEventListener('click', act);
-  document.addEventListener('keydown', onKey);
+  // Keys only reach the game while the canvas itself is focused. The play
+  // button already turns Space and Enter into clicks on its own, so nothing
+  // listens on the document and the rest of the page keeps its Space scroll.
+  canvas.addEventListener('keydown', onKey);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) lastTs = null; // drop accumulated delta on tab resume
   });
@@ -169,11 +174,10 @@ function resize() {
 // ─── Input ───────────────────────────────────────────────────────────────────
 
 function onKey(e) {
-  if (e.code !== 'Space') return;
-  const el  = document.activeElement;
-  const tag = el ? el.tagName : '';
-  // Let links and form controls keep their default Space behaviour
-  if (tag === 'A' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  // Only fires with the canvas focused (see init). Space, Enter and ArrowUp
+  // start, jump or restart; anything else falls through untouched.
+  if (e.code !== 'Space' && e.code !== 'Enter' && e.code !== 'ArrowUp') return;
+  if (e.repeat) { e.preventDefault(); return; }
   e.preventDefault();
   act();
 }
@@ -200,7 +204,7 @@ function startGame() {
   lastTs    = null;
 
   setBtn('jump');
-  announce('Game started. Space or tap to jump.');
+  announce('Game started. Press Space, tap the game, or use the jump button to jump.');
 
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
@@ -217,7 +221,7 @@ function die() {
   gameState = 'dead';
   jumping   = false;
   setBtn('restart');
-  announce(`Game over. Score: ${Math.floor(score)}. Press space to try again.`);
+  announce(`Game over. Score: ${Math.floor(score)}. Press Space or the restart button to try again.`);
 }
 
 // ─── Loop ────────────────────────────────────────────────────────────────────
@@ -368,7 +372,7 @@ function drawFrame() {
   if (gameState === 'idle') {
     ctx.font      = `${Math.max(13, scale * 4)}px "Hack", monospace`;
     ctx.fillStyle = TXT;
-    ctx.fillText(rmq.matches ? 'press space to play' : 'press space to start', W / 2, cy);
+    ctx.fillText('click or press play', W / 2, cy);
   } else if (gameState === 'dead') {
     const fs1 = Math.max(14, scale * 5);
     const fs2 = Math.max(12, scale * 4);
@@ -380,7 +384,7 @@ function drawFrame() {
     ctx.font      = `${fs2}px "Hack", monospace`;
     ctx.fillStyle = SUB;
     ctx.fillText(`score  ${String(Math.floor(score)).padStart(5, '0')}`, W / 2, cy + fs1 * 1.4);
-    ctx.fillText('space to try again', W / 2, cy + fs1 * 1.4 + fs2 * 1.6);
+    ctx.fillText('click or restart to try again', W / 2, cy + fs1 * 1.4 + fs2 * 1.6);
   }
 }
 

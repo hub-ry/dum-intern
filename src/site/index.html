@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#232136">
+  <meta name="theme-color" content="#1b1733">
   <title>dum intern</title>
-  <meta name="description" content="Dum is your personal intern that automates what you already know. It only writes code for skills you've taught it.">
+  <meta name="description" content="Study one small idea, try it, teach it to Dum, and come back to a creation you can flip through. Read a verified example.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
@@ -14,43 +14,123 @@
 </head>
 <body class="home-page">
 
+<a class="skip-link" href="#main">Skip to content</a>
+
 <!--NAV-->
 
-<main class="home-main">
+<main id="main" class="home-main">
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy">
-      <h1 id="hero-title">Dum is your personal intern that automates what you already know.</h1>
-      <p class="hero-lede">It only writes code for skills you've taught it, by explaining them in your own words or writing them yourself without AI.</p>
-      <a class="button-primary" href="/install">Install Dum</a>
+      <p class="hero-eyebrow"><img src="/site/dum.svg" alt="">a small intern you teach</p>
+      <h1 id="hero-title">Teach Dum something. See what it makes.</h1>
+      <p class="hero-lede">Study one small idea. Try it yourself. Then explain it to your intern, and come back later to a creation you can flip through page by page.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="/demo/">Read a creation</a>
+        <a class="button button-secondary" href="/docs">How it works</a>
+      </div>
+      <p class="hero-caption">A real, verified creation from example teaching. No model calls to read it.</p>
     </div>
 
-    <figure class="video-slot" aria-label="Product video, not recorded yet">
-      <div class="video-stage">
-        <p class="video-note">Walkthrough video coming soon.</p>
-      </div>
+    <figure class="hero-scene" aria-hidden="true">
+      <svg viewBox="0 0 640 440" width="640" height="440" focusable="false">
+        <defs>
+          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#1d1840"/>
+            <stop offset=".55" stop-color="#3b2d6b"/>
+            <stop offset=".85" stop-color="#7a4d86"/>
+            <stop offset="1" stop-color="#b8688f"/>
+          </linearGradient>
+          <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#f2a2c4" stop-opacity=".0"/>
+            <stop offset="1" stop-color="#f2a2c4" stop-opacity=".35"/>
+          </linearGradient>
+        </defs>
+        <rect width="640" height="440" fill="url(#sky)"/>
+        <rect y="220" width="640" height="140" fill="url(#glow)"/>
+
+        <g fill="#f0c266">
+          <rect x="88" y="54" width="3" height="3"/>
+          <rect x="212" y="92" width="2" height="2"/>
+          <rect x="331" y="41" width="3" height="3"/>
+          <rect x="462" y="78" width="2" height="2"/>
+          <rect x="551" y="36" width="3" height="3"/>
+          <rect x="146" y="150" width="2" height="2"/>
+          <rect x="606" y="121" width="2" height="2"/>
+        </g>
+        <g fill="#8fdcea">
+          <rect x="40" y="118" width="2" height="2"/>
+          <rect x="268" y="138" width="2" height="2"/>
+          <rect x="398" y="112" width="3" height="3"/>
+          <rect x="513" y="164" width="2" height="2"/>
+        </g>
+        <g fill="#f2a2c4">
+          <rect x="176" y="24" width="2" height="2"/>
+          <rect x="432" y="150" width="2" height="2"/>
+          <rect x="587" y="190" width="2" height="2"/>
+        </g>
+
+        <circle cx="498" cy="104" r="30" fill="#f6e3cf"/>
+        <circle cx="488" cy="96" r="30" fill="#2b2355"/>
+
+        <polygon fill="#3a2f6a" points="0,440 0,300 58,250 112,286 176,196 236,262 282,224 332,284 380,236 440,296 500,232 560,286 604,250 640,282 640,440"/>
+        <polygon fill="#4c3a78" points="0,440 0,342 48,312 106,352 150,300 198,334 262,268 300,316 356,282 412,334 466,300 522,346 578,310 640,344 640,440"/>
+        <polygon fill="#f2a2c4" opacity=".55" points="262,268 274,288 250,290"/>
+        <polygon fill="#f2a2c4" opacity=".55" points="356,282 366,298 346,298"/>
+        <polygon fill="#5f4a86" points="0,440 0,372 72,352 128,388 182,344 226,380 286,330 346,386 406,348 460,392 520,352 590,398 640,370 640,440"/>
+        <polygon fill="#6a5590" points="0,440 0,404 64,392 130,422 196,386 266,418 330,392 392,428 452,396 520,432 584,404 640,418 640,440"/>
+
+        <polyline points="150,386 182,344 226,380" fill="none" stroke="#8fdcea" stroke-opacity=".7" stroke-width="2" stroke-linejoin="round"/>
+
+        <image href="/site/dum.svg" x="154" y="298" width="42" height="48"/>
+        <rect x="140" y="346" width="70" height="4" fill="#3a2f6a" opacity=".6"/>
+      </svg>
     </figure>
   </section>
 
-  <section class="game-section" aria-label="Dum jumping game">
-    <div class="mountain-world" aria-hidden="true">
-      <span class="world-star world-star-one"></span>
-      <span class="world-star world-star-two"></span>
-      <span class="world-star world-star-three"></span>
-      <span class="mountain mountain-back"></span>
-      <span class="mountain mountain-mid"></span>
-      <span class="mountain mountain-front"></span>
-    </div>
-    <canvas data-wizard-portrait class="sprite-wizard" aria-hidden="true"></canvas>
-    <div id="game-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-    <canvas id="game-canvas" tabindex="-1" aria-hidden="true"></canvas>
-    <div class="game-controls">
-      <button id="game-jump" class="game-jump-btn" type="button">play</button>
-      <span class="motion-notice">motion reduced</span>
-    </div>
+  <section class="how" aria-labelledby="how-title">
+    <h2 id="how-title">One loop, start to finish</h2>
+    <ol class="steps">
+      <li><strong>Study</strong> One small idea, with the material right beside your attempt.</li>
+      <li><strong>Try it</strong> Predict what happens. Inspect the gap, get help, and try again.</li>
+      <li><strong>Teach Dum</strong> Explain it in your own words. Dum keeps your teaching as context, not a claim of mastery.</li>
+      <li><strong>Read the creation</strong> Dum builds and checks a small creation. Flip through the real output, then explain a correction if you want to change it.</li>
+    </ol>
+    <p>Right now the guided lessons cover loops and conditions. You can teach Dum other things too, but there's no claim that it covers everything. <a href="/docs">Read the details</a>.</p>
   </section>
 
-  <footer class="home-footer"><a href="/" class="footer-brand">dum intern</a><a href="/docs">docs</a><a href="/install">install</a></footer>
+  <section class="game-block" aria-labelledby="game-title">
+    <div class="game-head">
+      <h2 id="game-title">Dum, out for a run</h2>
+      <p>A small jumping game. Nothing here is saved or sent anywhere.</p>
+    </div>
+    <div class="game-section">
+      <div class="mountain-world" aria-hidden="true">
+        <span class="world-star world-star-one"></span>
+        <span class="world-star world-star-two"></span>
+        <span class="world-star world-star-three"></span>
+        <span class="mountain mountain-back"></span>
+        <span class="mountain mountain-mid"></span>
+        <span class="mountain mountain-front"></span>
+      </div>
+      <canvas data-wizard-portrait class="sprite-wizard" aria-hidden="true"></canvas>
+      <div id="game-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+      <canvas id="game-canvas" tabindex="0" role="application" aria-label="Dum's jumping game. Press Space or Enter to start, then Space to jump."></canvas>
+      <div class="game-controls">
+        <button id="game-jump" class="game-jump-btn" type="button">play</button>
+        <span class="motion-notice">motion reduced</span>
+      </div>
+    </div>
+    <p class="game-help">Click or tap the strip, or press <kbd>Space</kbd> while it has focus. The play button does the same thing. Keys only act on the game while it's focused.</p>
+  </section>
 </main>
+
+<footer class="site-footer">
+  <a href="/" class="footer-brand">dum intern</a>
+  <a href="/docs">how it works</a>
+  <a href="/philosophy">philosophy</a>
+  <a href="/demo/">example</a>
+  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+</footer>
 
 </body>
 </html>

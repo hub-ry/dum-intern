@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Dum workshop</title>
+<style>
+:root {
+  --bg: #0f0f0f;
+  --card: #171717;
+  --raised: #1f1f1f;
+  --ink: #e4e4e4;
+  --muted: #8c8c8c;
+  --line: #2b2b2b;
+  --strong: #f4f4f4;
+  --ok: #b9d8bf;
+  --bad: #d9a9a3;
+  --mono: ui-monospace, "Hack", "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 var(--mono); }
+body { display: flex; flex-direction: column; min-height: 100vh; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.spacer { flex: 1; }
+header select { max-width: 40vw; }
+main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 12px 16px; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+section.card { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; min-width: 0; }
+section.card h2, .h2 { font-size: 11px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 600; }
+.wide { grid-column: 1 / -1; }
+.hidden { display: none !important; }
+button { font: inherit; padding: 5px 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--strong); color: var(--bg); border-color: var(--strong); }
+button.tab { border-radius: 999px; padding: 3px 12px; }
+button.tab.current { background: var(--strong); color: var(--bg); border-color: var(--strong); }
+button:disabled { opacity: .45; cursor: default; }
+input, textarea, select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); color: var(--ink); max-width: 100%; }
+input:focus, textarea:focus, select:focus { outline: 1px solid var(--muted); }
+textarea { width: 100%; min-height: 70px; resize: vertical; }
+textarea.short { min-height: 48px; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+label.inline { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.muted { color: var(--muted); font-size: 12px; }
+.note { font-size: 12px; color: var(--muted); margin: 4px 0; }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 8px 10px; overflow: auto; margin: 6px 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+.prose p { margin: 6px 0; }
+.prose h4 { margin: 10px 0 4px; font-size: 13px; color: var(--strong); }
+.prose li { margin: 2px 0; }
+.prose ul { padding-left: 18px; margin: 4px 0; }
+.exercise { margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); }
+.exercise .rule { color: var(--strong); margin: 0 0 6px; }
+.exercise .situation { margin: 0 0 4px; }
+.exercise .question { margin: 0 0 6px; color: var(--muted); }
+.feedback { margin-top: 6px; padding: 6px 8px; border-radius: 3px; border: 1px solid var(--line); }
+.feedback.ok { color: var(--ok); }
+.feedback.bad { color: var(--bad); }
+.glyph { image-rendering: pixelated; vertical-align: middle; margin-right: 6px; }
+.who { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; }
+.entry { border-top: 1px solid var(--line); padding: 6px 0; }
+.entry:first-child { border-top: 0; }
+.entry .text { white-space: pre-wrap; word-break: break-word; }
+.obs li { margin: 2px 0; }
+.jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.job { border: 1px solid var(--line); border-radius: 3px; padding: 8px; background: var(--raised); cursor: pointer; }
+.job:hover { border-color: var(--muted); }
+.job.current { border-color: var(--strong); }
+.job .state { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.job .state.ready { color: var(--ok); }
+.job .state.failed { color: var(--bad); }
+.job .title { font-weight: 600; margin: 2px 0; word-break: break-word; }
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+@media (min-width: 900px) { .panel.has-image { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.panel img { max-width: 100%; border: 1px solid var(--line); border-radius: 3px; background: #000; }
+.caption { font-size: 15px; padding: 8px 10px; border-left: 2px solid var(--strong); background: var(--raised); }
+.counter { font-variant-numeric: tabular-nums; }
+iframe.demo { width: 100%; height: 360px; border: 1px solid var(--line); border-radius: 3px; background: #000; }
+.err { color: var(--bad); font-size: 12px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+details.sub { margin: 6px 0; }
+details.code { margin: 6px 0; }
+#login { position: fixed; inset: 0; background: rgba(15,15,15,.96); display: flex; align-items: center; justify-content: center; z-index: 10; }
+#login form { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 18px; width: min(360px, 90vw); }
+#toast { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--strong); color: var(--bg); padding: 8px 14px; border-radius: 3px; font-size: 12px; max-width: 90vw; z-index: 20; }
+.versions button.current { border-color: var(--strong); font-weight: 600; }
+.full { width: 100%; }
+.m0 { margin: 0; }
+.mt { margin-top: 10px; }
+.login-title { margin: 0 0 8px; font-size: 14px; }
+ul.plain { margin: 4px 0; padding-left: 18px; }
+a { color: var(--ink); }
+.material { border-top: 1px solid var(--line); padding: 8px 0; }
+.material:first-child { border-top: 0; }
+.material h3 { font-size: 13px; margin: 0 0 4px; color: var(--strong); }
+</style>
+</head>
+<body>
+<div id="login" class="hidden">
+  <form id="loginForm">
+    <h2 class="login-title">Workshop token</h2>
+    <p class="note">This workshop is protected. Paste the token the server was started with.</p>
+    <input id="password" type="password" autocomplete="current-password" class="full" required>
+    <div class="row mt"><button class="primary" type="submit">Log in</button><span id="loginErr" class="err"></span></div>
+  </form>
+</div>
+
+<header>
+  <span id="headerGlyph"></span>
+  <h1>Dum workshop</h1>
+  <span class="spacer"></span>
+  <label for="goalSelect" class="m0">Goal</label>
+  <select id="goalSelect"></select>
+  <button id="newGoalBtn">New goal</button>
+  <button id="logoutBtn" class="hidden">Log out</button>
+</header>
+
+<main>
+  <section class="card wide" id="goalCard">
+    <h2>Goal</h2>
+    <div id="goalForm" class="hidden">
+      <label for="goalTitle">Title</label>
+      <input id="goalTitle" maxlength="160" class="full">
+      <label for="goalAmbition">Ambition: what should Dum eventually be able to build?</label>
+      <textarea id="goalAmbition" maxlength="4000"></textarea>
+      <div class="row"><button class="primary" id="createGoalBtn">Create goal</button><button id="cancelGoalBtn">Cancel</button><span id="goalErr" class="err"></span></div>
+    </div>
+    <div id="goalView"></div>
+  </section>
+
+  <section class="card" id="studyCard">
+    <h2>Study one thing</h2>
+    <div class="row" id="conceptTabs"></div>
+    <div id="study"></div>
+  </section>
+
+  <section class="card" id="teachCard">
+    <h2>Teach Dum</h2>
+    <p class="note">Write the concept in your own words. Dum only builds with what you have taught it.</p>
+    <label for="teachConcept">Concept</label>
+    <input id="teachConcept" maxlength="160" class="full" list="conceptList" placeholder="for...of loops">
+    <datalist id="conceptList"></datalist>
+    <label for="teachText">Your teaching</label>
+    <textarea id="teachText" maxlength="12000"></textarea>
+    <div class="row"><button class="primary" id="teachBtn">Teach</button><span id="teachErr" class="err"></span></div>
+    <div id="teachings"></div>
+  </section>
+
+  <section class="card" id="buildCard">
+    <h2>Build</h2>
+    <div class="row">
+      <button class="primary" id="buildBtn">Build now</button>
+      <label for="schedule" class="m0">Schedule</label>
+      <select id="schedule">
+        <option value="">Off</option>
+        <option value="15">Every 15 minutes</option>
+        <option value="60">Every hour</option>
+        <option value="240">Every 4 hours</option>
+        <option value="1440">Daily</option>
+      </select>
+      <button id="scheduleBtn">Apply</button>
+      <span id="buildErr" class="err"></span>
+    </div>
+    <p class="note" id="scheduleNote"></p>
+    <h2 class="mt">Past builds</h2>
+    <div class="jobs" id="jobs"></div>
+  </section>
+
+  <section class="card" id="contextCard">
+    <h2>What Dum will be given</h2>
+    <p class="note">The goal context Dum receives is your editable text followed by quotes from the actual records. The counts below are just counts.</p>
+    <ul class="obs" id="observations"></ul>
+    <label for="goalBase">Goal context (editable part)</label>
+    <textarea id="goalBase" maxlength="24000"></textarea>
+    <div class="row"><button id="saveGoalBase">Save goal context</button><span id="goalBaseErr" class="err"></span></div>
+    <details class="sub"><summary>Rendered goal context as Dum sees it</summary><pre id="goalContext"></pre></details>
+    <details class="sub"><summary>Progress record (reports and server grades, labelled)</summary><pre id="progressJson"></pre></details>
+    <details class="sub"><summary>Graded answers</summary><div id="attemptList"></div></details>
+    <label for="globalBase">Global context (editable part, shared by all goals)</label>
+    <textarea id="globalBase" maxlength="24000" class="short"></textarea>
+    <div class="row"><button id="saveGlobalBase">Save global context</button><span id="globalBaseErr" class="err"></span></div>
+    <details class="sub"><summary>Rendered global context</summary><pre id="globalContext"></pre></details>
+  </section>
+
+  <section class="card wide hidden" id="showCard">
+    <h2>Build</h2>
+    <div class="row">
+      <strong id="showTitle"></strong>
+      <a id="jobLink" class="muted hidden" href="#">Link to this version</a>
+      <span class="spacer"></span>
+      <span class="versions" id="versions"></span>
+    </div>
+    <div class="row">
+      <button id="prevBtn">&larr; Prev</button>
+      <span class="counter" id="counter"></span>
+      <button id="nextBtn">Next &rarr;</button>
+      <span class="muted">Arrow keys work too. Your place is saved.</span>
+    </div>
+    <div id="panel" class="panel"></div>
+    <details id="panelTeachings" class="sub"><summary>Teachings this panel drew on</summary><div id="panelTeachingList"></div></details>
+    <div id="demoWrap" class="hidden">
+      <h2 class="mt">Demo</h2>
+      <p class="note">Runs in a sandboxed frame on the separate artifact origin. It cannot see this page or its cookies.</p>
+      <iframe class="demo" id="demo" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Demo"></iframe>
+    </div>
+    <details class="sub"><summary>Verified build: inspect execution evidence</summary>
+      <pre id="verifyCmd"></pre>
+      <pre id="verifyOut"></pre>
+    </details>
+    <details class="sub"><summary>Supporting machinery Dum used (not taught, not evidence)</summary><ul class="plain" id="machinery"></ul></details>
+    <div id="correctionWrap">
+      <h2 class="mt">Correct and regenerate</h2>
+      <p class="note">Tell Dum what to change. A new version is queued; this one stays as shown.</p>
+      <textarea id="correction" maxlength="12000"></textarea>
+      <div class="row"><button class="primary" id="correctBtn">Regenerate</button><span id="correctErr" class="err"></span></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    config: null,
+    glyphs: null,
+    glyphUrls: { intern: null, wizard: null },
+    goals: [],
+    goalId: null,
+    groups: [],
+    conceptId: null,
+    familyIndex: {},
+    variantIndex: {},
+    openMaterial: null,
+    attempts: [],
+    teachings: [],
+    progress: null,
+    jobs: [],
+    showJob: null,
+    panelIndex: 0,
+    pollTimer: null,
+    // Unsaved typing survives every re-render and every poll. Keys carry the goal id.
+    drafts: new Map(),
+    // Editable server-backed fields: a dirty value wins over the server until it is saved.
+    dirty: { goalBase: new Map(), schedule: new Map(), globalBase: null },
+    // Only the latest request for the currently selected goal may write state.
+    selectSeq: 0,
+    refreshSeq: 0,
+    globalSeq: 0,
+    // Only the latest job open (click, version button or #job= deep link) may show a job.
+    openSeq: 0,
+  };
+
+  // --- Deep links: #job=<uuid> only; the id is checked before it ever reaches a URL ----------
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  /** Returns null for no fragment, { jobId } for a well-formed link, or { error } for anything else. */
+  function parseJobHash(hash) {
+    if (!hash || hash === "#") return null;
+    const m = /^#job=([0-9a-f-]{36})$/.exec(hash);
+    if (!m || !UUID.test(m[1])) return { error: "That link is not a valid build link. Expected #job=<build id>." };
+    return { jobId: m[1] };
+  }
+  const jobHref = (id) => location.pathname + location.search + "#job=" + id;
+  /** Records the open job in the URL. No entry is added when the fragment already says so. */
+  function setJobHash(id) {
+    if (!UUID.test(id) || location.hash === "#job=" + id) return;
+    history.pushState(null, "", jobHref(id));
+  }
+  function clearJobHash() {
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  }
+
+  // --- Drafts and focus ---------------------------------------------------------------------
+  const draftKey = (kind, id) => kind + ":" + (state.goalId || "") + ":" + id;
+  function bindDraft(elm, key, prop) {
+    const p = prop || "value";
+    elm.dataset.draft = key;
+    if (state.drafts.has(key)) elm[p] = state.drafts.get(key);
+    elm.addEventListener(p === "checked" ? "change" : "input", () => state.drafts.set(key, elm[p]));
+    return elm;
+  }
+  /** Forget a draft only if it still holds exactly what was submitted; edits typed during the save stay. */
+  function settleDraft(key, submitted) {
+    if (state.drafts.get(key) === submitted) state.drafts.delete(key);
+  }
+  function captureFocus() {
+    const a = document.activeElement;
+    if (!a || !a.dataset || !a.dataset.draft) return null;
+    const f = { key: a.dataset.draft, start: null, end: null };
+    try { f.start = a.selectionStart; f.end = a.selectionEnd; } catch {}
+    return f;
+  }
+  function restoreFocus(f) {
+    if (!f) return;
+    const a = document.querySelector('[data-draft="' + CSS.escape(f.key) + '"]');
+    if (!a) return;
+    a.focus({ preventScroll: true });
+    if (f.start !== null && typeof a.setSelectionRange === "function") { try { a.setSelectionRange(f.start, f.end); } catch {} }
+  }
+  // Static inputs keep one draft per goal; switching goals swaps them.
+  const STATIC_DRAFTS = [["teachConcept", "teachConcept"], ["teachText", "teachText"], ["correction", "correction"]];
+  for (const [id, kind] of STATIC_DRAFTS) {
+    const elm = document.getElementById(id);
+    elm.addEventListener("input", () => state.drafts.set(draftKey(kind, ""), elm.value));
+  }
+  function restoreStaticDrafts() {
+    for (const [id, kind] of STATIC_DRAFTS) document.getElementById(id).value = state.drafts.get(draftKey(kind, "")) || "";
+  }
+
+  // --- DOM helpers: all text goes through textContent, never markup -------------------------
+  function el(tag, attrs, children) {
+    const n = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v);
+    }
+    if (children) for (const c of children) if (c != null) n.append(c);
+    return n;
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+
+  // --- Glyphs: the authored idle frames, drawn pixel by pixel from the server's parsed matrix ----
+  function drawGlyph(g, scale) {
+    if (!g || !Array.isArray(g.rows) || !g.rows.length || !g.palette) return null;
+    const w = g.rows[0].length, h = g.rows.length;
+    if (w < 1 || w > 32 || h < 1 || h > 32) return null;
+    const c = document.createElement("canvas");
+    c.width = w * scale; c.height = h * scale;
+    const ctx = c.getContext("2d");
+    for (let y = 0; y < h; y++) {
+      const row = g.rows[y];
+      if (typeof row !== "string" || row.length !== w) return null;
+      for (let x = 0; x < w; x++) {
+        const color = g.palette[row[x]];
+        if (typeof color !== "string" || !/^#[0-9a-f]{6}$/.test(color)) continue;
+        ctx.fillStyle = color;
+        ctx.fillRect(x * scale, y * scale, scale, scale);
+      }
+    }
+    return c;
+  }
+  function glyphImg(kind, scale) {
+    const url = state.glyphUrls[kind];
+    if (!url) return el("span", { class: "muted", text: kind === "intern" ? "[dum]" : "[you]" });
+    const g = state.glyphs[kind];
+    return el("img", { class: "glyph", src: url, width: String(g.rows[0].length * scale), height: String(g.rows.length * scale), alt: kind === "intern" ? "Dum" : "Wizard" });
+  }
+  function who(kind, label) { return el("span", { class: "who" }, [glyphImg(kind, 2), label]); }
+  async function loadGlyphs() {
+    try {
+      const g = await api("GET", "/api/glyphs");
+      state.glyphs = g;
+      for (const kind of ["intern", "wizard"]) {
+        const c = drawGlyph(g[kind], 4);
+        state.glyphUrls[kind] = c ? c.toDataURL("image/png") : null;
+      }
+      const header = drawGlyph(g.intern, 3);
+      if (header) { header.className = "glyph"; header.setAttribute("aria-label", "Dum"); $("headerGlyph").replaceWith(header); }
+    } catch {}
+  }
+
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.remove("hidden");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 3500);
+  }
+  function setErr(id, msg) { $(id).textContent = msg || ""; }
+  function when(iso) { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString(); }
+
+  // --- API --------------------------------------------------------------------------------
+  async function api(method, path, body) {
+    const init = { method, credentials: "same-origin", headers: {} };
+    if (body !== undefined) { init.headers["content-type"] = "application/json"; init.body = JSON.stringify(body); }
+    let res;
+    try { res = await fetch(path, init); } catch { throw new Error("Could not reach the workshop server."); }
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+    if (res.status === 401) { showLogin(); throw new Error(data && data.error ? data.error : "Please log in."); }
+    if (!res.ok) throw new Error(data && data.error ? data.error : "Request failed (" + res.status + ")");
+    return data;
+  }
+  const goalPath = (sub) => "/api/goals/" + encodeURIComponent(state.goalId) + (sub ? "/" + sub : "");
+
+  // --- Login ------------------------------------------------------------------------------
+  function showLogin() { $("login").classList.remove("hidden"); $("password").focus(); }
+  $("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); setErr("loginErr", "");
+    try {
+      await api("POST", "/api/login", { password: $("password").value });
+      $("password").value = ""; $("login").classList.add("hidden");
+      await boot();
+    } catch (err) { setErr("loginErr", err.message); }
+  });
+  $("logoutBtn").addEventListener("click", async () => {
+    try { await api("POST", "/api/logout"); } catch {}
+    location.reload();
+  });
+
+  // --- Safe artifact URLs: relative paths only, each segment checked ---------------------------
+  function artifactUrl(job, rel) {
+    if (!state.config || typeof rel !== "string") return null;
+    const segs = rel.split("/").filter((s) => s !== "");
+    if (!segs.length) return null;
+    for (const s of segs) if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/.test(s)) return null;
+    if (!/^[0-9a-f-]{36}$/.test(job.id)) return null;
+    return state.config.artifactOrigin + "/artifacts/" + encodeURIComponent(job.id) + "/" + segs.map(encodeURIComponent).join("/");
+  }
+
+  // --- Goals ------------------------------------------------------------------------------
+  function currentGoal() { return state.goals.find((g) => g.id === state.goalId) || null; }
+  function renderGoals() {
+    const sel = clear($("goalSelect"));
+    if (!state.goals.length) sel.append(el("option", { value: "", text: "No goals yet" }));
+    for (const g of state.goals) sel.append(el("option", { value: g.id, text: g.title }));
+    sel.value = state.goalId || "";
+    const v = clear($("goalView"));
+    const g = currentGoal();
+    if (!g) { v.append(el("p", { class: "note", text: "No goal yet. Create one to begin." })); return; }
+    v.append(el("strong", { text: g.title }));
+    v.append(el("p", { class: "entry text", text: g.ambition }));
+    v.append(el("p", { class: "muted", text: "Created " + when(g.createdAt) + ", last changed " + when(g.updatedAt) }));
+    const interval = g.schedule ? g.schedule.intervalMinutes : null;
+    const sched = $("schedule");
+    for (const o of [...sched.options]) if (o.dataset.extra) o.remove();
+    const want = state.dirty.schedule.has(g.id) ? state.dirty.schedule.get(g.id) : (interval == null ? "" : String(interval));
+    sched.value = want;
+    if (want !== "" && sched.value !== want) {
+      const o = el("option", { value: want, text: "Every " + want + " minutes" }); o.dataset.extra = "1";
+      sched.append(o); sched.value = want;
+    }
+    $("scheduleNote").textContent = interval == null
+      ? "Schedule is off. Builds only run when you press Build now."
+      : "Dum rebuilds every " + interval + " minutes; next run due " + when(g.schedule.nextRunAt) + ". Scheduled runs are skipped while a build is queued or running.";
+  }
+  $("goalSelect").addEventListener("change", () => selectGoal($("goalSelect").value || null));
+  $("newGoalBtn").addEventListener("click", () => { $("goalForm").classList.remove("hidden"); $("goalTitle").focus(); });
+  $("cancelGoalBtn").addEventListener("click", () => $("goalForm").classList.add("hidden"));
+  $("createGoalBtn").addEventListener("click", async () => {
+    setErr("goalErr", "");
+    try {
+      const r = await api("POST", "/api/goals", { title: $("goalTitle").value, ambition: $("goalAmbition").value });
+      $("goalTitle").value = ""; $("goalAmbition").value = ""; $("goalForm").classList.add("hidden");
+      state.goals = (await api("GET", "/api/goals")).goals;
+      await selectGoal(r.goal.id);
+    } catch (err) { setErr("goalErr", err.message); }
+  });
+
+  /** opts.keepHash: set only by openDeepLink, which is switching to the linked job's own goal. */
+  async function selectGoal(id, opts) {
+    const seq = ++state.selectSeq;
+    if (!(opts && opts.keepHash)) { ++state.openSeq; clearJobHash(); }
+    clearTimeout(state.pollTimer);
+    state.goalId = id; state.showJob = null; state.openMaterial = null; $("showCard").classList.add("hidden");
+    state.groups = []; state.attempts = []; state.teachings = []; state.jobs = []; state.progress = null;
+    restoreStaticDrafts();
+    renderGoals();
+    if (!id) { state.conceptId = null; renderStudy(); renderTeachings(); renderJobs(); renderContext(null); return; }
+    renderStudy(); renderTeachings(); renderJobs(); renderContext(null);
+    const mat = await api("GET", "/api/material?goalId=" + encodeURIComponent(id));
+    if (seq !== state.selectSeq || state.goalId !== id) return;
+    state.groups = mat.groups || [];
+    if (!state.groups.some((g) => g.id === state.conceptId)) state.conceptId = state.groups.length ? state.groups[0].id : null;
+    await refreshGoal();
+  }
+  async function refreshGoal() {
+    const goalId = state.goalId;
+    if (!goalId) return;
+    const seq = ++state.refreshSeq;
+    const [ctx, jobs] = await Promise.all([api("GET", goalPath("context")), api("GET", "/api/jobs?goalId=" + encodeURIComponent(goalId))]);
+    // Only the newest response for the goal that is still selected may write; older or foreign ones are dropped.
+    if (seq !== state.refreshSeq || state.goalId !== goalId || ctx.goal.id !== goalId) return;
+    state.attempts = ctx.attempts || []; state.teachings = ctx.teachings || []; state.jobs = jobs.jobs || []; state.progress = ctx.progress || null;
+    const i = state.goals.findIndex((g) => g.id === ctx.goal.id); if (i >= 0) state.goals[i] = ctx.goal;
+    const focus = captureFocus();
+    renderGoals(); renderStudy(); renderTeachings(); renderJobs(); renderContext(ctx); schedulePoll();
+    restoreFocus(focus);
+  }
+  async function refreshGlobal() {
+    const seq = ++state.globalSeq;
+    const r = await api("GET", "/api/context");
+    if (seq !== state.globalSeq) return;
+    if (state.dirty.globalBase !== null) $("globalBase").value = state.dirty.globalBase;
+    else if (document.activeElement !== $("globalBase")) $("globalBase").value = r.global.baseContext || "";
+    $("globalContext").textContent = r.global.context || "";
+  }
+
+  // --- Material bodies: prose as text, fenced code behind a labelled details ------------------
+  function renderBody(text) {
+    const root = el("div", { class: "prose" });
+    const lines = String(text).split("\n");
+    let i = 0;
+    let para = [];
+    const flush = () => { if (para.length) { root.append(el("p", { text: para.join(" ") })); para = []; } };
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^```/.test(line)) {
+        flush();
+        const code = [];
+        i++;
+        while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+        i++;
+        const label = /^```\s*js/.test(line) ? "Optional: the JavaScript for this" : "Optional: expected output";
+        root.append(el("details", { class: "code" }, [el("summary", { text: label }), el("pre", { text: code.join("\n") })]));
+        continue;
+      }
+      if (/^#+\s/.test(line)) { flush(); root.append(el("h4", { text: line.replace(/^#+\s*/, "") })); i++; continue; }
+      if (/^\s*[-*]\s/.test(line)) {
+        flush();
+        const ul = el("ul");
+        while (i < lines.length && /^\s*[-*]\s/.test(lines[i])) { ul.append(el("li", { text: lines[i].replace(/^\s*[-*]\s*/, "") })); i++; }
+        root.append(ul); continue;
+      }
+      if (/^\|/.test(line)) {
+        flush();
+        const rows = [];
+        while (i < lines.length && /^\|/.test(lines[i])) { rows.push(lines[i]); i++; }
+        root.append(el("pre", { text: rows.join("\n") })); continue;
+      }
+      if (line.trim() === "") { flush(); i++; continue; }
+      para.push(line.trim()); i++;
+    }
+    flush();
+    return root;
+  }
+
+  // --- Study: one concept at a time, one rule at a time, change the input and go again --------
+  function currentGroup() { return state.groups.find((g) => g.id === state.conceptId) || null; }
+  function families(group) {
+    const out = [];
+    for (const ex of group.exercises) { let f = out.find((x) => x.id === ex.family); if (!f) { f = { id: ex.family, variants: [] }; out.push(f); } f.variants.push(ex); }
+    return out;
+  }
+  function lastAttempt(exerciseId) {
+    for (let i = state.attempts.length - 1; i >= 0; i--) if (state.attempts[i].exerciseId === exerciseId) return state.attempts[i];
+    return null;
+  }
+  function conceptProgress(concept) {
+    return state.progress && state.progress.concepts ? state.progress.concepts.find((c) => c.concept === concept) : null;
+  }
+  function renderStudy() {
+    const focus = captureFocus();
+    renderStudyInner();
+    restoreFocus(focus);
+  }
+  function renderStudyInner() {
+    const tabs = clear($("conceptTabs"));
+    const root = clear($("study"));
+    const dl = clear($("conceptList"));
+    if (!state.goalId) { root.append(el("p", { class: "note", text: "Pick or create a goal to see its materials." })); return; }
+    const names = new Set();
+    for (const g of state.groups) for (const m of g.materials) names.add(m.concept);
+    for (const n of names) dl.append(el("option", { value: n }));
+    for (const g of state.groups) {
+      tabs.append(el("button", { class: "tab" + (g.id === state.conceptId ? " current" : ""), text: g.title, onclick: () => { state.conceptId = g.id; state.openMaterial = null; renderStudy(); } }));
+    }
+    const group = currentGroup();
+    if (!group) { root.append(el("p", { class: "note", text: "This goal has no materials." })); return; }
+
+    // Materials for this concept: titles always, one body open at a time.
+    for (const m of group.materials) {
+      const box = el("div", { class: "material" });
+      const open = state.openMaterial === m.id;
+      const p = conceptProgress(m.concept);
+      box.append(el("h3", { text: m.title }));
+      const row = el("div", { class: "row" });
+      row.append(el("button", { text: open ? "Hide" : "Read", onclick: () => { state.openMaterial = open ? null : m.id; renderStudy(); } }));
+      const read = el("button", { text: "I read this", title: "Records that you marked this material studied. That introduces the concept, nothing more.", onclick: () => act(read, () => api("POST", goalPath("studied"), { concept: m.concept }), "Marked studied.") });
+      row.append(read);
+      if (typeof m.url === "string" && /^https:\/\//.test(m.url)) row.append(el("a", { href: m.url, target: "_blank", rel: "noopener noreferrer", text: "reference" }));
+      if (p) row.append(el("span", { class: "muted", text: "studied " + p.counts.introduced + ", reports " + p.learnerReports.length + ", revisit " + p.counts.needsRevisiting }));
+      box.append(row);
+      if (open) box.append(renderBody(m.body));
+      root.append(box);
+    }
+
+    // One rule at a time. Predict the outcome in plain words; the code is optional reading.
+    const fams = families(group);
+    if (fams.length) {
+      const fi = Math.min(state.familyIndex[group.id] || 0, fams.length - 1);
+      const fam = fams[fi];
+      const vi = Math.min(state.variantIndex[fam.id] || 0, fam.variants.length - 1);
+      const ex = fam.variants[vi];
+      const prev = lastAttempt(ex.id);
+      const box = el("div", { class: "exercise" });
+      box.append(el("div", { class: "muted", text: "Rule " + (fi + 1) + " of " + fams.length + ", input " + (vi + 1) + " of " + fam.variants.length }));
+      box.append(el("p", { class: "rule", text: ex.rule }));
+      box.append(el("p", { class: "situation", text: ex.situation }));
+      box.append(el("p", { class: "question", text: ex.question }));
+      const predKey = draftKey("pred", ex.id);
+      const input = bindDraft(el("input", { maxlength: "200", placeholder: "Your prediction", "aria-label": "Your prediction" }), predKey);
+      const fb = el("div", { class: "feedback " + (prev ? (prev.correct ? "ok" : "bad") : "hidden") });
+      if (prev) fb.textContent = "Last answer \"" + prev.answer + "\": " + prev.feedback;
+      const check = el("button", { class: "primary", text: "Check", onclick: async () => {
+        // Capture everything before the await: the goal, the exercise and the exact text submitted.
+        const goalId = state.goalId, exerciseId = ex.id, answer = input.value;
+        if (!goalId || !answer.trim()) { fb.className = "feedback bad"; fb.textContent = "Type a prediction first."; return; }
+        check.disabled = true;
+        try {
+          const r = await api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/attempt", { exerciseId, answer });
+          if (state.goalId !== goalId) return;
+          state.attempts.push(r.attempt);
+          settleDraft(predKey, answer);
+          if (document.activeElement !== input && input.value === answer) input.value = "";
+          fb.className = "feedback " + (r.attempt.correct ? "ok" : "bad");
+          fb.textContent = r.attempt.feedback;
+          refreshGoal().catch(() => {});
+        } catch (err) { if (state.goalId === goalId) { fb.className = "feedback bad"; fb.textContent = err.message; } }
+        check.disabled = false;
+      } });
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") check.click(); });
+      const change = el("button", { text: "Change the input", onclick: () => { state.variantIndex[fam.id] = (vi + 1) % fam.variants.length; renderStudy(); } });
+      if (fam.variants.length < 2) change.disabled = true;
+      const nextRule = el("button", { text: "Next rule", onclick: () => { state.familyIndex[group.id] = (fi + 1) % fams.length; renderStudy(); } });
+      box.append(el("div", { class: "row" }, [input, check, change, nextRule]), fb);
+      if (ex.code) box.append(el("details", { class: "code" }, [el("summary", { text: "Optional: the JavaScript for this rule" }), el("pre", { text: ex.code })]));
+      root.append(box);
+    }
+
+    // Self report in your own words, and a revisit mark. Recorded as stated, under the material's concept.
+    const concept = group.materials.length ? group.materials[0].concept : group.id;
+    const report = el("details", { class: "sub" });
+    report.append(el("summary", { text: "Report an attempt or ask to revisit (" + concept + ")" }));
+    const textKey = draftKey("report", concept), helpedKey = draftKey("helped", concept), noteKey = draftKey("revisit", concept);
+    const text = bindDraft(el("textarea", { class: "short", maxlength: "12000", placeholder: "What you tried, in your own words" }), textKey);
+    const helped = bindDraft(el("input", { type: "checkbox" }), helpedKey, "checked");
+    const rErr = el("span", { class: "err" });
+    const rBtn = el("button", { text: "Record attempt", onclick: () => {
+      const goalId = state.goalId, submittedText = text.value, submittedHelped = helped.checked;
+      act(rBtn, () => api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/report", { concept, text: submittedText, helped: submittedHelped }).then(() => {
+        settleDraft(textKey, submittedText);
+        if (!state.drafts.has(textKey)) { if (text.value === submittedText) text.value = ""; state.drafts.delete(helpedKey); if (helped.checked === submittedHelped) helped.checked = false; }
+      }), "Attempt recorded as you reported it.", rErr);
+    } });
+    const note = bindDraft(el("textarea", { class: "short", maxlength: "12000", placeholder: "What still feels unclear" }), noteKey);
+    const nBtn = el("button", { text: "Needs revisiting", onclick: () => {
+      const goalId = state.goalId, submittedNote = note.value;
+      act(nBtn, () => api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/revisit", { concept, note: submittedNote }).then(() => {
+        settleDraft(noteKey, submittedNote);
+        if (!state.drafts.has(noteKey) && note.value === submittedNote) note.value = "";
+      }), "Marked for revisiting.", rErr);
+    } });
+    report.append(text, el("div", { class: "row" }, [el("label", { class: "inline" }, [helped, "I needed help"]), rBtn]), note, el("div", { class: "row" }, [nBtn, rErr]));
+    root.append(report);
+  }
+  async function act(btn, fn, okMsg, errEl) {
+    btn.disabled = true;
+    if (errEl) errEl.textContent = "";
+    try { await fn(); toast(okMsg); await refreshGoal(); }
+    catch (err) { if (errEl) errEl.textContent = err.message; else toast(err.message); }
+    btn.disabled = false;
+  }
+
+  // --- Teachings --------------------------------------------------------------------------
+  function renderTeachings() {
+    const root = clear($("teachings"));
+    if (!state.goalId) return;
+    if (!state.teachings.length) { root.append(el("p", { class: "note", text: "Nothing taught yet. Dum cannot build until you teach something." })); return; }
+    for (const t of state.teachings.slice().reverse()) {
+      root.append(el("div", { class: "entry" }, [
+        el("div", {}, [who("wizard", "You, on " + t.concept), el("span", { class: "muted", text: "  " + when(t.createdAt) })]),
+        el("div", { class: "text", text: t.text }),
+      ]));
+    }
+  }
+  $("teachBtn").addEventListener("click", async () => {
+    setErr("teachErr", "");
+    if (!state.goalId) { setErr("teachErr", "Pick or create a goal first."); return; }
+    const goalId = state.goalId, concept = $("teachConcept").value, text = $("teachText").value;
+    const key = "teachText:" + goalId + ":";
+    try {
+      await api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/teach", { concept, text });
+      settleDraft(key, text);
+      if (state.goalId === goalId && !state.drafts.has(key) && $("teachText").value === text) $("teachText").value = "";
+      toast("Taught."); await refreshGoal();
+    } catch (err) { if (state.goalId === goalId) setErr("teachErr", err.message); }
+  });
+
+  // --- Context ----------------------------------------------------------------------------
+  function renderContext(ctx) {
+    const obs = clear($("observations"));
+    const al = clear($("attemptList"));
+    if (!ctx) {
+      $("goalContext").textContent = ""; $("progressJson").textContent = ""; $("goalBase").value = "";
+      if (!state.goalId) obs.append(el("li", { text: "No goal selected." }));
+      return;
+    }
+    for (const o of ctx.observations || []) obs.append(el("li", { text: o }));
+    if (state.dirty.goalBase.has(ctx.goal.id)) $("goalBase").value = state.dirty.goalBase.get(ctx.goal.id);
+    else if (document.activeElement !== $("goalBase")) $("goalBase").value = ctx.baseContext || "";
+    $("goalContext").textContent = ctx.context || "";
+    $("progressJson").textContent = JSON.stringify(ctx.progress, null, 2);
+    const graded = (ctx.attempts || []).filter((a) => a.exerciseId !== undefined);
+    if (!graded.length) al.append(el("p", { class: "note", text: "No graded answers recorded." }));
+    for (const a of graded.slice().reverse()) {
+      al.append(el("div", { class: "entry" }, [
+        el("div", { class: "muted", text: a.exerciseId + " at " + when(a.createdAt) + ": server graded " + (a.correct ? "correct" : "incorrect") }),
+        el("div", { class: "text", text: "Answer: " + a.answer }),
+      ]));
+    }
+  }
+  $("goalBase").addEventListener("input", () => { if (state.goalId) state.dirty.goalBase.set(state.goalId, $("goalBase").value); });
+  $("globalBase").addEventListener("input", () => { state.dirty.globalBase = $("globalBase").value; });
+  $("schedule").addEventListener("change", () => { if (state.goalId) state.dirty.schedule.set(state.goalId, $("schedule").value); });
+  $("saveGoalBase").addEventListener("click", async () => {
+    setErr("goalBaseErr", "");
+    const goalId = state.goalId, value = $("goalBase").value;
+    if (!goalId) { setErr("goalBaseErr", "Pick or create a goal first."); return; }
+    try {
+      await api("PUT", "/api/goals/" + encodeURIComponent(goalId) + "/context", { context: value });
+      // Clean only if nothing was typed during the save; a newer edit stays dirty.
+      if (state.dirty.goalBase.get(goalId) === value) state.dirty.goalBase.delete(goalId);
+      toast("Goal context saved."); await refreshGoal();
+    } catch (err) { if (state.goalId === goalId) setErr("goalBaseErr", err.message); }
+  });
+  $("saveGlobalBase").addEventListener("click", async () => {
+    setErr("globalBaseErr", "");
+    const value = $("globalBase").value;
+    try {
+      await api("PUT", "/api/context", { context: value });
+      if (state.dirty.globalBase === value) state.dirty.globalBase = null;
+      toast("Global context saved."); await refreshGlobal();
+    } catch (err) { setErr("globalBaseErr", err.message); }
+  });
+
+  // --- Build and jobs ---------------------------------------------------------------------
+  $("buildBtn").addEventListener("click", async () => {
+    setErr("buildErr", "");
+    if (!state.goalId) { setErr("buildErr", "Pick or create a goal first."); return; }
+    try { await api("POST", goalPath("jobs"), {}); toast("Build queued."); await refreshGoal(); }
+    catch (err) { setErr("buildErr", err.message); }
+  });
+  $("scheduleBtn").addEventListener("click", async () => {
+    setErr("buildErr", "");
+    if (!state.goalId) { setErr("buildErr", "Pick or create a goal first."); return; }
+    const goalId = state.goalId, v = $("schedule").value;
+    try {
+      await api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/schedule", { intervalMinutes: v === "" ? null : Number(v) });
+      if (state.dirty.schedule.get(goalId) === v) state.dirty.schedule.delete(goalId);
+      toast("Schedule saved."); await refreshGoal();
+    } catch (err) { if (state.goalId === goalId) setErr("buildErr", err.message); }
+  });
+  function jobTitle(j) { return j.result && j.result.title ? j.result.title : (j.correction ? "Correction: " + j.correction.slice(0, 40) : "Build " + j.id.slice(0, 8)); }
+  function renderJobs() {
+    const root = clear($("jobs"));
+    if (!state.goalId) return;
+    if (!state.jobs.length) { root.append(el("p", { class: "note", text: "No builds yet." })); return; }
+    for (const j of state.jobs.slice().reverse()) {
+      const card = el("div", { class: "job" + (state.showJob && state.showJob.id === j.id ? " current" : ""), onclick: () => openJob(j.id) });
+      card.append(el("div", { class: "state " + (j.state === "ready" ? "ready" : j.state === "failed" ? "failed" : ""), text: String(j.state) }));
+      card.append(el("div", { class: "title", text: jobTitle(j) }));
+      card.append(el("div", { class: "muted", text: when(j.createdAt) }));
+      if (j.parentId) card.append(el("div", { class: "muted", text: "revision of " + j.parentId.slice(0, 8) }));
+      if (j.error) card.append(el("div", { class: "err", text: j.error }));
+      root.append(card);
+    }
+  }
+  function schedulePoll() {
+    clearTimeout(state.pollTimer);
+    const busy = state.jobs.some((j) => j.state === "queued" || j.state === "running");
+    if (busy) state.pollTimer = setTimeout(() => refreshGoal().catch(() => {}), 4000);
+  }
+
+  // --- Presentation -----------------------------------------------------------------------
+  function family(job) {
+    const byId = new Map(state.jobs.map((j) => [j.id, j]));
+    let root = job; const seen = new Set();
+    while (root.parentId && byId.has(root.parentId) && !seen.has(root.id)) { seen.add(root.id); root = byId.get(root.parentId); }
+    const out = []; const walk = (j) => { if (out.includes(j)) return; out.push(j); for (const k of state.jobs) if (k.parentId === j.id) walk(k); };
+    walk(root); return out;
+  }
+  async function openJob(id) {
+    const summary = state.jobs.find((j) => j.id === id);
+    if (!summary) return;
+    const seq = ++state.openSeq, goalId = state.goalId;
+    let job = summary;
+    try { job = (await api("GET", "/api/jobs/" + encodeURIComponent(id))).job; } catch (err) { toast(err.message); }
+    // A newer open or a goal switch during the fetch wins; this response is dropped.
+    if (seq !== state.openSeq || state.goalId !== goalId) return;
+    state.showJob = job; state.panelIndex = 0;
+    if (job.state === "ready" && job.result) {
+      try {
+        const p = await api("GET", "/api/jobs/" + encodeURIComponent(id) + "/position");
+        if (seq !== state.openSeq) return;
+        if (Number.isInteger(p.panel)) state.panelIndex = p.panel;
+      } catch {}
+      if (seq !== state.openSeq) return;
+    }
+    setJobHash(id);
+    renderJobs(); renderShow();
+    $("showCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  /**
+   * Opens the job named by a #job= fragment: fetch it, select its own goal, then open it like a click.
+   * Resolves true when handled (or superseded by a newer action), false when the link failed and the
+   * caller may fall back to a default goal.
+   */
+  async function openDeepLink(id) {
+    const seq = ++state.openSeq;
+    const fail = (msg) => { if (seq !== state.openSeq) return true; toast(msg); clearJobHash(); return false; };
+    if (state.jobs.some((j) => j.id === id)) { await openJob(id); return true; }
+    let job;
+    try { job = (await api("GET", "/api/jobs/" + encodeURIComponent(id))).job; }
+    catch (err) { return fail("The linked build could not be opened: " + err.message); }
+    if (seq !== state.openSeq) return true;
+    const goalId = job && job.id === id && typeof job.goalId === "string" ? job.goalId : null;
+    if (!goalId || !state.goals.some((g) => g.id === goalId)) return fail("The linked build does not belong to any goal here.");
+    if (goalId !== state.goalId) {
+      await selectGoal(goalId, { keepHash: true });
+      if (seq !== state.openSeq || state.goalId !== goalId) return true;
+    }
+    if (!state.jobs.some((j) => j.id === id)) return fail("The linked build is not in this goal's build list.");
+    await openJob(id);
+    return true;
+  }
+  function renderShow() {
+    const job = state.showJob; const card = $("showCard");
+    if (!job) { card.classList.add("hidden"); return; }
+    card.classList.remove("hidden");
+    $("showTitle").textContent = jobTitle(job) + "  (" + job.state + ")";
+    const link = $("jobLink");
+    if (UUID.test(job.id)) { link.href = jobHref(job.id); link.classList.remove("hidden"); } else link.classList.add("hidden");
+    const vs = clear($("versions"));
+    family(job).forEach((j, i) => vs.append(el("button", { class: j.id === job.id ? "current" : "", text: "v" + (i + 1), title: j.id, onclick: () => openJob(j.id) })));
+    const panelBox = clear($("panel"));
+    const ptl = clear($("panelTeachingList"));
+    const mach = clear($("machinery"));
+    $("demoWrap").classList.add("hidden"); $("demo").removeAttribute("src");
+    $("verifyCmd").textContent = ""; $("verifyOut").textContent = "";
+    $("correctionWrap").classList.toggle("hidden", job.state !== "ready");
+    if (job.state !== "ready" || !job.result) {
+      panelBox.className = "panel";
+      panelBox.append(el("p", { class: "note", text: job.error ? "This build failed: " + job.error : "This build is " + job.state + ". The strip appears when it is ready." }));
+      $("counter").textContent = ""; return;
+    }
+    const r = job.result; const panels = Array.isArray(r.panels) ? r.panels : [];
+    const snapTeachings = job.snapshot && Array.isArray(job.snapshot.teachings) ? job.snapshot.teachings : state.teachings;
+    if (!panels.length) { panelBox.append(el("p", { class: "note", text: "This build has no panels." })); $("counter").textContent = ""; }
+    else {
+      state.panelIndex = Math.max(0, Math.min(state.panelIndex, panels.length - 1));
+      const p = panels[state.panelIndex];
+      const src = p.image ? artifactUrl(job, p.image) : null;
+      panelBox.className = "panel" + (src ? " has-image" : "");
+      if (src) panelBox.append(el("img", { src, alt: p.caption || "Panel " + (state.panelIndex + 1) }));
+      const textCol = el("div");
+      if (p.code) textCol.append(el("details", { class: "code" }, [el("summary", { text: "Code in this panel" }), el("pre", { text: p.code })]));
+      textCol.append(el("div", { class: "caption" }, [who("intern", "Dum"), el("div", { text: p.caption || "" })]));
+      panelBox.append(textCol);
+      $("counter").textContent = (state.panelIndex + 1) + " / " + panels.length;
+      $("prevBtn").disabled = state.panelIndex === 0; $("nextBtn").disabled = state.panelIndex >= panels.length - 1;
+      const ids = Array.isArray(p.teachingIds) ? p.teachingIds : [];
+      if (!ids.length) ptl.append(el("p", { class: "note", text: "None recorded for this panel." }));
+      for (const tid of ids) {
+        const t = snapTeachings.find((x) => x.id === tid);
+        ptl.append(el("div", { class: "entry" }, [who("wizard", t ? t.concept : "teaching " + String(tid)), el("div", { class: "text", text: t ? t.text : "(not found in this job's snapshot)" })]));
+      }
+    }
+    const demo = r.demoPath ? artifactUrl(job, r.demoPath) : null;
+    if (demo) { $("demoWrap").classList.remove("hidden"); $("demo").src = demo; }
+    if (r.verification) { $("verifyCmd").textContent = "$ " + (r.verification.command || ""); $("verifyOut").textContent = r.verification.output || ""; }
+    const items = Array.isArray(r.supportingMachinery) ? r.supportingMachinery : [];
+    if (!items.length) mach.append(el("li", { class: "muted", text: "None listed." }));
+    for (const item of items) mach.append(el("li", { text: String(item) }));
+  }
+  function move(delta) {
+    const job = state.showJob; if (!job || job.state !== "ready" || !job.result || !job.result.panels) return;
+    const n = job.result.panels.length; const next = Math.max(0, Math.min(state.panelIndex + delta, n - 1));
+    if (next === state.panelIndex) return;
+    state.panelIndex = next; renderShow();
+    api("PUT", "/api/jobs/" + encodeURIComponent(job.id) + "/position", { panel: next }).catch(() => {});
+  }
+  $("prevBtn").addEventListener("click", () => move(-1));
+  $("nextBtn").addEventListener("click", () => move(1));
+  document.addEventListener("keydown", (e) => {
+    if ($("showCard").classList.contains("hidden")) return;
+    const t = e.target; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+    if (e.key === "ArrowLeft") { e.preventDefault(); move(-1); }
+    if (e.key === "ArrowRight") { e.preventDefault(); move(1); }
+  });
+  $("correctBtn").addEventListener("click", async () => {
+    setErr("correctErr", "");
+    if (!state.showJob) return;
+    const goalId = state.goalId, jobId = state.showJob.id, correction = $("correction").value;
+    const key = "correction:" + goalId + ":";
+    try {
+      await api("POST", "/api/jobs/" + encodeURIComponent(jobId) + "/correction", { correction });
+      settleDraft(key, correction);
+      if (state.goalId === goalId && !state.drafts.has(key) && $("correction").value === correction) $("correction").value = "";
+      toast("New version queued. This one stays."); await refreshGoal();
+    } catch (err) { if (state.goalId === goalId) setErr("correctErr", err.message); }
+  });
+
+  // --- Boot -------------------------------------------------------------------------------
+  async function boot() {
+    try {
+      state.config = await api("GET", "/api/config");
+      if (state.config.authRequired) $("logoutBtn").classList.remove("hidden");
+      await loadGlyphs();
+      const goals = await api("GET", "/api/goals");
+      state.goals = goals.goals || [];
+      await refreshGlobal();
+      // A valid #job= fragment picks the goal and the job; otherwise the first goal, as before.
+      const link = parseJobHash(location.hash);
+      if (link && link.error) { toast(link.error); clearJobHash(); }
+      const handled = link && link.jobId ? await openDeepLink(link.jobId) : false;
+      if (!handled) await selectGoal(state.goals.length ? state.goals[0].id : null);
+    } catch (err) {
+      if ($("login").classList.contains("hidden")) toast(err.message);
+    }
+  }
+  // Link navigation (a pasted link, Back, Forward). Our own pushState calls never fire this event.
+  window.addEventListener("hashchange", () => {
+    if (!$("login").classList.contains("hidden")) return;
+    const link = parseJobHash(location.hash);
+    if (link === null) {
+      if (state.showJob) { ++state.openSeq; state.showJob = null; renderJobs(); renderShow(); }
+      return;
+    }
+    if (link.error) { toast(link.error); return; }
+    if (state.showJob && state.showJob.id === link.jobId) return;
+    openDeepLink(link.jobId).catch((err) => toast(err.message));
+  });
+  boot();
+})();
+</script>
+</body>
+</html>

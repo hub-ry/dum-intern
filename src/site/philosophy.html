@@ -3,58 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1b1733">
   <title>philosophy — dum intern</title>
-  <meta name="description" content="Why Dum only automates what you already know: a chess story and the research on learning by teaching.">
+  <meta name="description" content="Why Dum asks you to learn an idea before you teach it, and why it keeps corrections visible instead of announcing mastery.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
 </head>
 <body>
 
+<a class="skip-link" href="#main">Skip to content</a>
+
 <!--NAV-->
 
-<main>
+<main id="main" class="page">
   <h1>Philosophy</h1>
 
-  <p>Someone on r/cscareerquestions asked:
-     <a href="https://www.reddit.com/r/cscareerquestions/comments/1ll3g9y/im_doing_almost_everything_with_ai_during_my/" target="_blank" rel="noreferrer">“I’m doing almost everything with AI during my internship. What do I do?”</a>
-     The work was getting done. They just couldn't have done it without the AI.</p>
+  <p>Getting a result from a model and understanding it are different things. Study an idea, try it, then explain it to Dum. Your explanation guides the creation; the underlying model already knows programming.</p>
 
-  <p>Dum's answer is to let AI handle the parts you already understand and make you learn the rest.
-     Its skill tree starts empty. It won't write code for a skill until you've explained it
-     in your own words or written it yourself.</p>
+  <h2>Learn, then teach</h2>
+  <p>Explaining something forces you to find the edges of what you know. When you have to tell Dum why a loop with an empty list runs zero times, or why five counts as "at least five", you either know it or you find out that you don't. That gap is the point. The lesson and the exercise come first so you have something real to say.</p>
+  <p>Dum's lessons are small on purpose. One idea at a time is easier to explain, easier to check, and easier to come back to.</p>
 
-  <h2>Where the idea came from</h2>
+  <h2>Corrections stay visible</h2>
+  <p>Dum doesn't tell you that you've mastered anything. It shows you what it built from your words, whether verification passed, and when a corrected version was needed, both versions sit side by side. You read the result and judge for yourself. A creation that needed a correction is still a useful record, often more useful than one that went right the first time.</p>
 
-  <p>I read a post on r/chess from a guy who had been stuck around 1800 for years.
-     Over a few months he got to 2000, and he wasn't playing much. Most of that time
-     went into teaching a friend who was rated around 400.</p>
+  <h2>Small claims</h2>
+  <p>The workshop covers a few ideas well instead of claiming to cover everything. Verification runs the creation in an isolated container, which is a real check but not a guarantee. The example on this site comes from sample teaching, not from a learner's progress. We'd rather describe exactly what Dum does than promise what it might do.</p>
 
-  <p>When you teach a beginner, you have to put into words the things you'd been doing
-     by feel. Dum is built around that. You're the teacher, and Dum is the beginner.</p>
-
-  <h2>What the research says</h2>
-
-  <p>Learning by teaching has a name: the protégé effect. In two studies at Stanford,
-     students put more effort into learning when they were teaching a computer character
-     than when they were learning for themselves
-     (<a href="https://link.springer.com/article/10.1007/s10956-009-9180-4" target="_blank" rel="noreferrer">Chase et al., 2009</a>).</p>
-
-  <p>Anthropic ran a trial with 52 mostly junior developers learning a Python library they
-     hadn't used before. Afterwards, the ones who had an AI assistant scored 50% on a quiz
-     about it. The ones who coded by hand scored 67%. The biggest gap was on debugging, and
-     the AI group wasn't significantly faster. The AI users who asked follow-up questions
-     and requested explanations scored 65% or higher
-     (<a href="https://www.anthropic.com/research/AI-assistance-coding-skills" target="_blank" rel="noreferrer">Shen and Tamkin, 2026</a>).</p>
-
-  <p>In a field experiment with nearly a thousand high school math students, GPT-4 raised
-     grades while students had it. Once it was taken away, students who'd used a plain
-     ChatGPT-style version did 17% worse than students who never had it. A version with
-     prompts designed to protect learning mostly avoided that drop
-     (<a href="https://doi.org/10.1073/pnas.2422633122" target="_blank" rel="noreferrer">Bastani et al., 2025</a>).</p>
-
-  <p>So Dum takes on the work you already know how to do, and asks you questions about the rest.</p>
+  <p class="reader-footnote">See <a href="/docs">how it works</a> for the details, or <a href="/demo/">read the example creation</a>.</p>
 </main>
+
+<footer class="site-footer">
+  <a href="/" class="footer-brand">dum intern</a>
+  <a href="/docs">how it works</a>
+  <a href="/philosophy">philosophy</a>
+  <a href="/demo/">example</a>
+  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+</footer>
 
 </body>
 </html>

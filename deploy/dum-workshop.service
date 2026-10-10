@@ -1,0 +1,17 @@
+[Unit]
+Description=Dum private teaching workshop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ryanhubbart/code2/dum-intern
+EnvironmentFile=%h/.config/dum-workshop/environment
+ExecStart=/usr/local/bin/node --import tsx src/workshop/server.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,46 @@
+# /etc/systemd/system/dum-notes.service on hub. Installed by deploy/deploy-notes.sh.
+# Independent static notes service. Runs the same read-only server code as
+# dum-public.service, from the same root-owned /opt/dum-public install, but
+# serves a separate public root (/var/lib/dum-notes) on a separate loopback port.
+# It shares nothing else with dum-public: no state, no env, no tunnel config.
+[Unit]
+Description=Dum notes (static, loopback only)
+After=network-online.target
+Wants=network-online.target
+# Only a real, explicitly published note index may start this service.
+# No index, no service: nothing here generates a placeholder page.
+ConditionPathExists=/var/lib/dum-notes/index.html
+
+[Service]
+Type=simple
+User=skill-tree
+WorkingDirectory=/opt/dum-public
+# Node 24 runs the TypeScript directly: no build step, no dependencies.
+ExecStart=/usr/local/bin/node /opt/dum-public/src/public/server.ts
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8071
+Environment=DUM_PUBLIC_ROOT=/var/lib/dum-notes
+Restart=on-failure
+RestartSec=5
+
+# The authenticated private workshop publishes the notes root explicitly.
+# This static service writes nothing and cannot modify data or its own code.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadOnlyPaths=/opt/dum-public /var/lib/dum-notes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

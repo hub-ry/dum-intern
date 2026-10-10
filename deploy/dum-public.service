@@ -1,0 +1,39 @@
+# /etc/systemd/system/dum-public.service on hub. Installed by deploy/deploy.sh.
+# Serves the public static site from the root-owned, read-only /opt/dum-public
+# on loopback; cloudflared forwards the public hostname to it.
+[Unit]
+Description=Dum public site (static, behind cloudflared)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=skill-tree
+WorkingDirectory=/opt/dum-public
+# Node 24 runs the TypeScript directly: no build step, no dependencies.
+ExecStart=/usr/local/bin/node /opt/dum-public/src/public/server.ts
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8070
+Restart=on-failure
+RestartSec=5
+
+# The service writes nothing. No state directory, no writable paths.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadOnlyPaths=/opt/dum-public
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

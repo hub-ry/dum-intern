@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1b1733">
+  <title>example creation — dum intern</title>
+  <meta name="description" content="Read a verified example of what Dum makes: six screenshots from a corrected creation about loops and conditions, with captions and code.">
+  <link rel="stylesheet" href="/site/site.css">
+  <link rel="icon" type="image/png" href="/site/favicon.png">
+  <link rel="apple-touch-icon" href="/site/favicon.png">
+  <script defer src="./reader.js"></script>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!--NAV-->
+
+<main id="main" class="reader-page">
+  <header class="reader-head">
+    <h1 id="reader-title">Example creation</h1>
+    <p class="reader-lede">Screenshots taken while the creation was verified, one per tested step. Flip through them like pages. Nothing here runs the generated code.</p>
+  </header>
+
+  <p class="reader-disclaimer">A verified example built from sample teaching—not a learner progress record.</p>
+
+  <section class="reader" id="reader" tabindex="0" aria-labelledby="reader-title" aria-describedby="reader-help">
+    <p class="reader-status" id="reader-status" role="status">Loading the example…</p>
+    <div class="reader-stage" id="reader-stage" hidden></div>
+    <div class="reader-bar" id="reader-bar" hidden>
+      <button class="button button-secondary" id="reader-prev" type="button" disabled>Previous</button>
+      <span class="reader-counter" id="reader-counter" aria-live="polite"></span>
+      <button class="button button-secondary" id="reader-next" type="button" disabled>Next</button>
+    </div>
+    <div class="reader-caption"><img src="/site/dum.svg" width="21" height="24" alt=""> Dum</div>
+    <p class="reader-caption" id="reader-caption" hidden></p>
+    <details class="reader-code" id="reader-code" hidden>
+      <summary>Matching code</summary>
+      <pre><code id="reader-code-text"></code></pre>
+    </details>
+  </section>
+  <p class="game-help" id="reader-help">With the reader focused, use <kbd>←</kbd> and <kbd>→</kbd> to turn pages, <kbd>Home</kbd> and <kbd>End</kbd> to jump to the first or last.</p>
+
+  <section class="reader-meta" id="reader-meta" hidden aria-label="About this creation">
+    <div>
+      <h2>Verification</h2>
+      <p class="verified-flag" id="reader-verified" hidden>verified in an offline container</p>
+      <p id="reader-verification"></p>
+    </div>
+    <div>
+      <h2>Supporting machinery</h2>
+      <ul id="reader-machinery"></ul>
+    </div>
+  </section>
+
+  <p class="reader-footnote">Want to know how this was built and checked? Read <a href="/docs">how it works</a>.</p>
+</main>
+
+<footer class="site-footer">
+  <a href="/" class="footer-brand">dum intern</a>
+  <a href="/docs">how it works</a>
+  <a href="/philosophy">philosophy</a>
+  <a href="/demo/">example</a>
+  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+</footer>
+
+</body>
+</html>

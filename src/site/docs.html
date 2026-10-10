@@ -3,784 +3,102 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>docs — dum intern</title>
-  <meta name="description" content="How Dum works: the circle and its column of goals, the panels, steps, skipping and trust, the bubble, goal alignment, decision cards and handoffs, sessions, trail and story, goals, the skill tree and evidence, voice and keyboard, direct changes with revert, the look, the Wizard, Settings, backends and verified models, privacy.">
+  <meta name="theme-color" content="#1b1733">
+  <title>how it works — dum intern</title>
+  <meta name="description" content="How Dum works today: a private workshop where you study one idea, try it, teach it to Dum, and read back a verified creation.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
   <link rel="apple-touch-icon" href="/site/favicon.png">
 </head>
 <body>
 
+<a class="skip-link" href="#main">Skip to content</a>
+
 <!--NAV-->
 
-<main>
-  <h1>Docs</h1>
+<main id="main" class="page">
+  <h1>How it works</h1>
 
-  <p>Dum is a Mac app you delegate to. It sits on your screen as a small floating circle with
-     Dum's face. It follows what you're learning across your goals, keeps track of the skills
-     you've shown you have, and writes code when you tell it to, but only with those skills. The
-     point is that you could take the AI away and still understand the architecture, start
-     implementing, and ask precise questions.</p>
+  <p class="page-lede">Dum is a small intern you teach. You learn one idea, explain it in your own words, and Dum turns your explanation into a creation you can read back. This page describes what exists today, nothing more.</p>
 
-  <p>The loop goes like this. You say what you need done. Dum checks that you and it agree on
-     what your goal means. The Wizard lays out a few things you could hand off now, and
-     marks the ones you'd have to learn first. You choose one, check the handoff, and press
-     <em>Do this</em>. Dum does it, you review the result, and all of it goes on the session's
-     trail.</p>
-
-  <p>Two characters talk to you. Dum is the intern you work with. The Wizard helps you decide
-     when you're choosing a direction or the next thing to hand off. It doesn't chime in
-     otherwise.</p>
-
-  <ul>
-    <li><a href="#start">Getting started</a></li>
-    <li><a href="#circle">The circle, the column and the panels</a></li>
-    <li><a href="#steps">Steps, skipping and trust</a></li>
-    <li><a href="#delegating">Delegating</a></li>
-    <li><a href="#context">Sessions, the trail and the story</a></li>
-    <li><a href="#zones">Goals</a></li>
-    <li><a href="#skills">Skills and evidence</a></li>
-    <li><a href="#talking">Talking to Dum</a></li>
-    <li><a href="#changes">Changes</a></li>
-    <li><a href="#look">The look</a></li>
-    <li><a href="#projects">Suggested projects</a></li>
-    <li><a href="#wizard">The Wizard</a></li>
-    <li><a href="#settings">Settings and debug chat</a></li>
-    <li><a href="#backends">Who powers Dum</a></li>
+  <ul class="toc" aria-label="On this page">
+    <li><a href="#public">What's public</a></li>
+    <li><a href="#lessons">Lessons</a></li>
+    <li><a href="#loop">The loop</a></li>
+    <li><a href="#creation">What a creation is</a></li>
+    <li><a href="#verification">Verification</a></li>
+    <li><a href="#runtime">Runtime</a></li>
+    <li><a href="#model">Model access</a></li>
     <li><a href="#privacy">Privacy</a></li>
+    <li><a href="#schedules">Schedules</a></li>
   </ul>
 
-  <h2 id="start">Getting started</h2>
+  <h2 id="public">What's public and what isn't</h2>
+  <p>Dum's workshop runs on its owner's machine, a host we call the hub. That's where lessons, teaching and creations live. It isn't open to the public, and this site has no login or workshop prompts.</p>
+  <p>What you can read here is the project itself and one <a href="/demo/">verified example creation</a>. The example came from sample teaching about loops and conditions. It shows what Dum produces. It isn't a record of anyone's learning progress.</p>
 
-  <p>See <a href="/install">installation</a>. Dum needs macOS 13 or later. Voice needs macOS 14
-     or later on Apple Silicon; everything else works from the keyboard on Intel too.</p>
-
-  <p>Dum has no Dock icon and no menu bar icon. On first launch Dum's panel opens and asks
-     <em>What do you want to work toward?</em> Type an answer or say it. It becomes your first
-     goal: the answer is the goal's text, and its first few words are the name, which you can
-     change later. Nothing is sent to a model for this.</p>
-
-  <p>Because the look is on by default, macOS asks for Screen Recording permission the first time
-     Dum looks. You can say no; see <a href="#look">the look</a> for what changes.</p>
-
-  <p>Next, Dum needs someone to power it. A banner says <em>Dum isn't powered yet</em> with a
-     <em>Who powers Dum?</em> button. Goals, skills, notes and commands like <code>:tree</code>
-     work without a backend. Messages to Dum, goal alignment, decision cards,
-     <code>:projects</code> and <code>:submit</code> don't. Your goal is kept, and alignment picks
-     up once Dum is powered. See <a href="#backends">who powers Dum</a>.</p>
-
-  <h2 id="circle">The circle, the column and the panels</h2>
-
-  <p>The circle floats above your other apps, on every Space. Click it and it unfolds into a
-     column of up to seven circles on one translucent capsule:</p>
-
+  <h2 id="lessons">Lessons</h2>
+  <p>The guided lessons are deliberately small, and there are only a few right now:</p>
   <ul>
-    <li><strong>Dum</strong>, with Dum's face: your goals.</li>
-    <li>Up to three <strong>goals</strong>: the ones you pinned, or with none pinned the three
-        most recently updated, the active one first. Each shows its progress, and a mark while it
-        has a step.</li>
-    <li>The <strong>skill tree</strong>.</li>
-    <li>The <strong>Monitor</strong>: whether Dum is recording, and what it noticed.</li>
-    <li><strong>Settings</strong>.</li>
+    <li>Visiting every item with <code>for...of</code></li>
+    <li>Choosing with <code>if</code> and <code>else</code></li>
+    <li>Loops and conditions together</li>
   </ul>
+  <p>Materials and reasoning exercises sit together in the study zone. Predict a result, check it, and try again with another example; writing syntax is optional. You can record other teaching too, but the guided path is these three ideas.</p>
 
-  <p>Click a circle and the column folds into it and opens that circle's panel. The panel's
-     top-left corner sits at the circle, or flips left or up when there's no room. The column folds
-     back by itself after 8 seconds without the pointer over it, and <code>Esc</code> folds it too.
-     The <em>Open Dum</em> shortcut, <code>⌘⇧D</code> by default, opens or hides the panel from
-     anywhere.</p>
-
-  <p>Drag the circle to move it. Dum remembers one spot per display and puts the circle back
-     there next time. To move the circle without a mouse, use <em>Move circle</em> in Settings:
-     the arrow keys move it 10 points, Shift and an arrow 1 point,
-     <code>Return</code> keeps it there and <code>Esc</code> puts it back. You can also pick a
-     display from the list.</p>
-
-  <p>The face tells you what Dum is doing: idle, looking, thinking, listening while you talk, or
-     a <code>!</code> badge when something needs you, such as a decision waiting, a rejected API
-     key, a voice error, or Dum's background process having stopped. A dashed ring means the look
-     is paused. The circle is a labeled button, and its label says the same thing in words.</p>
-
-  <h3>The panels</h3>
-
-  <p>Every panel uses the same dark theme.</p>
-
-  <ul>
-    <li><strong>Dum</strong>: <em>What do you want to work toward?</em> and your goals as a
-        nested list, each with its progress and step. Typing a goal makes it, opens it and pins it
-        to the column while fewer than three are pinned. Click a row to open the goal; the pin and
-        skip icons show when you hover over it.</li>
-    <li><strong>A goal</strong>: its name and progress, the <a href="#steps">step cloud</a>, the
-        chat with a one-line message box, and a <em>Path</em> strip of the goal's skills with ▶ on
-        each. <em>Stop</em> shows only while Dum is working. <em>More</em> has Edit goal, New goal
-        inside, Delete goal, Suggested projects, Changes and Memory.</li>
-    <li><strong>Skill tree</strong>: <em>Graph</em> or <em>Tree</em>, a track filter,
-        <em>Tidy</em> and <em>▶ Play</em>; see <a href="#skills">skills</a>.</li>
-    <li><strong>Monitor</strong>: a big status, <em>● Recording</em>, <em>Paused</em> or
-        <em>Not recording:</em> and why; the look model, the last check, whether pictures are on,
-        and <em>Pause</em>/<em>Resume</em>. Under it, the live context log: notes about what you're
-        doing, app switches, looks that were skipped and why, errors, pauses and the Wizard's
-        chimes. The log is kept in memory only, up to 200 entries.</li>
-    <li><strong>Settings</strong>: see <a href="#settings">Settings</a>.</li>
-  </ul>
-
-  <p>A goal's records and its editor open over the goal panel; <code>Esc</code> returns to where
-     you were. Switching to another app hides the panel. <code>Esc</code> backs out one step at a
-     time, then hides the panel; <code>⌘W</code> hides it straight away. Both give focus back to
-     the app you were in. Your draft stays.</p>
-
-  <h3>The bubble</h3>
-
-  <p>The bubble is a thought cloud with small puffs trailing toward the circle. It has no
-     buttons, you can't click it, and clicks go through to whatever is under it.</p>
-
-  <ul>
-    <li><strong>The step.</strong> Beside the circle, the active goal's <a href="#steps">step</a>
-        and the goal's name. It doesn't time out: it stays until the step is done, skipped or
-        replaced, and hides only while Dum's panel is visible and focused.</li>
-    <li><strong>The Wizard.</strong> When the look sees you stuck, such as the same error again,
-        undoing and redoing, searching the same thing again, or staring at a failing test, the
-        Wizard's one-sentence nudge shows beside the circle in a purple cloud for 20 seconds. It
-        chimes at most once a minute, and every chime also goes in the Monitor's log.</li>
-    <li><strong>Replies.</strong> Near your cursor, every reply from Dum, typed or spoken, and
-        every finished <em>Do this</em>, unless Dum's panel is visible and focused. It's one
-        sentence of what Dum said, plus one line from the Wizard when the Wizard spoke, and it
-        stays 15 seconds. A question Dum asks you shows as that question; a decision card waiting
-        for you shows <em>A decision is waiting for you in Dum.</em> The full reply is in the
-        goal's chat.</li>
-    <li><strong>Voice.</strong> Near your cursor, <em>Listening…</em>, <em>Transcribing…</em>
-        and your text.</li>
-  </ul>
-
-  <h2 id="steps">Steps, skipping and trust</h2>
-
-  <p>Every goal has exactly one next step, one sentence. Dum works it out from where the goal
-     stands, in this order:</p>
-
-  <ol>
-    <li><em>Say what finishing this goal looks like.</em> (<a href="#delegating">alignment</a>)</li>
-    <li><em>Pick a project theme or idea.</em></li>
-    <li>The chosen project's next milestone.</li>
-    <li>The next skill on the goal's path: <em>Explain what X is for, in your own words</em>,
-        then <em>Write X yourself, without AI</em>.</li>
+  <h2 id="loop">The loop</h2>
+  <ol class="steps">
+    <li><strong>Study</strong> Read one short lesson on one idea.</li>
+    <li><strong>Try it</strong> Predict what happens in the study zone, inspect the feedback, and try again.</li>
+    <li><strong>Teach Dum</strong> Write down the idea in your own words. This text is what gets sent to the model.</li>
+    <li><strong>Creation</strong> Dum builds a small, self-contained interactive page from your teaching, then verifies it.</li>
+    <li><strong>Correction</strong> Explain what to change and request another build. A revised version never replaces the original; failed verification stays visible.</li>
+    <li><strong>Revisit</strong> Come back later and read the creation again. Every job has a stable deep link in the private workshop.</li>
   </ol>
 
-  <p>The goal's step cloud has a <em>Pick … for me</em> button, such as <em>Pick the project idea
-     for me</em>, which sends Dum a fixed request as if you typed it, and <em>Skip</em>. When the
-     step is a skill, that skill's graph card has <em>Pick … for me</em> too. A step goes away once
-     it's done.</p>
+  <h2 id="creation">What a creation is</h2>
+  <p>A creation is a self-contained HTML page generated from your teaching and goal context, with output constrained by a JSON schema. The host never executes its JavaScript. An isolated browser verifier exercises it and captures screenshots. The reader pairs those images with captions and matching source excerpts. In the private workshop, you can also use the demo inside a sandboxed frame on a separate origin.</p>
+  <p>The public example is exactly this: six screenshots from the corrected creation of one job, with the captions and code the backend recorded. Reading saved pages makes no model calls.</p>
 
-  <p>There's always a way to skip. Skipping a skill step trusts that skill: it's added to your
-     tree as your word that you can write it, at build level, the same as <code>:skill</code>.
-     It counts for the gate, so Dum may write it for you, and it shows as <em>trusted</em> with a
-     dashed ring, never as proven. Beginner skills skip in one click; others ask <em>Sure? Dum will
-     treat X as known and write it for you.</em> Skipping a whole goal, with the skip icon in the
-     Dum panel and a confirm, trusts every skill on its path you don't hold yet, prerequisites
-     first; <em>Undo skip</em> clears the mark and leaves the trusted skills. <em>Undo trust</em>
-     on a skill's card removes it.</p>
+  <h2 id="verification">Verification</h2>
+  <p>Each creation is checked with a browser automation script inside an isolated Docker container. The container has no network, a read-only filesystem and no privileges. The script performs the declared clicks and input changes and compares what it sees with what the creation claims. The screenshots you read were captured during that run.</p>
+  <div class="note">
+    <p>This isolation is about offline execution and keeping generated code away from the host. It's not a universal security guarantee, and the generated page should still be treated as untrusted code.</p>
+  </div>
 
-  <p>▶ on a skill, in the Path strip or on a graph card, makes it the active goal's step.
-     <em>▶ Play</em> in the skill tree picks the next one for you and says why:
-     <em>Next: X.</em> followed by the reason.</p>
-
-  <h2 id="delegating">Delegating</h2>
-
-  <h3>Goal alignment</h3>
-
-  <p>Every goal starts with alignment, so you and Dum agree on what it means. It's the goal's
-     first <a href="#steps">step</a>, and you can skip it like any other. It runs when you create a
-     goal and when you change a goal's text. Renaming a goal doesn't count. If you edit a goal
-     you're not in, the alignment card names that goal and leaves the one you're in alone.</p>
-
-  <ol>
-    <li>Dum reflects your goal back as something you want to become able to do.</li>
-    <li>It asks at most two questions, and only ones whose answer changes the plan. Each says why
-        it matters. Answer in the card.</li>
-    <li>The Wizard offers directions to choose from. Each is a learning project or a decision,
-        with the skills it builds, why it advances your goal, its tradeoff, and
-        <em>Based on</em>: the context it used.</li>
-  </ol>
-
-  <p><em>Use this direction</em> or <em>Use my own direction</em> opens a short form: what you'll
-     be able to do, how you'll know it worked, and any assumptions you accept. <em>Agree this
-     direction</em> saves it. <em>Revise</em> asks again; <em>Not now</em> puts it off. Current
-     context shows <em>Alignment needed</em> until you agree one.</p>
-
-  <p>A direction records intent. It writes no file, isn't a schedule, and doesn't let Dum do
-     anything it couldn't before. Chat, Settings and commands you're allowed to give all work
-     without one.</p>
-
-  <h3>Decision cards</h3>
-
-  <p>Say what you need done next and press <em>Help me decide</em>. Dum restates your outcome, may
-     ask a question, and the Wizard compares two or three ways to get there. Each option names the
-     task, the expected result, what you'll review, the skills it needs, why it helps and its
-     tradeoff, and what it's based on. Dum, not the model, checks each option against your skills
-     and labels it:</p>
-
+  <h2 id="runtime">Runtime</h2>
+  <p>The workshop uses Node 24, TypeScript, tsx, and zod. Its default local setup listens on two separate origins:</p>
   <ul>
-    <li><strong>Can delegate now.</strong> <em>Choose</em> turns it into a handoff.</li>
-    <li><strong>Learn first.</strong> It needs a skill you haven't proven yet. <em>Suggest a
-        project to learn it</em> asks for <a href="#projects">suggested projects</a> for that
-        skill.</li>
-    <li><strong>Needs a detail.</strong> Something it can't guess. <em>Give this detail</em>
-        puts you in the message box.</li>
+    <li><code>127.0.0.1:8770</code> serves the workshop app and its API, with authentication whenever a token is set.</li>
+    <li><code>127.0.0.1:8771</code> serves finished artifacts, such as screenshots and the creation's own page, from a separate origin so they can't touch the app.</li>
   </ul>
+  <p>Private-network access requires a workshop token. Neither port is exposed by this public site. The public site uses a separate, dependency-free static server.</p>
 
-  <p><em>Revise</em> asks again, <em>Use my own plan</em> puts you in the message box, and
-     <em>Dismiss</em> clears the card. A dismissed card doesn't come back until you ask again. You
-     can always ignore the cards and type your own request.</p>
-
-  <h3>The handoff</h3>
-
-  <p>Choosing an option makes a handoff card with three fields: <em>Task</em>, <em>Expected
-     result</em> and <em>What you'll review</em>. Choosing writes nothing. <em>Edit</em> changes the
-     fields, <em>Dismiss</em> drops it, and <em>Do this</em> tells Dum to do it.</p>
-
-  <ul>
-    <li>Nothing runs until you press <em>Do this</em>, and a handoff runs once.</li>
-    <li>If your goal, direction, notes or session changed since you chose it, the card says
-        <em>Needs refresh</em>; <em>Refresh handoff</em> rebinds it to what's current.</li>
-    <li>If the message box has unsent text, the card says so. <em>Do this</em> never sends it
-        along.</li>
-    <li>Every file Dum writes goes through the same gate and save check as any other
-        <a href="#changes">change</a>. A skill taken back after you chose stops it.</li>
-    <li><code>⌘.</code> stops it. Changes already made stay listed with Revert.</li>
-  </ul>
-
-  <h3>Review</h3>
-
-  <p>When it's done the card shows what happened and each change's diff, with <em>Revert</em> and
-     <em>open the change record</em>. <em>Reviewed…</em> asks whether it met the expected result
-     and saves your verdict on the session's trail. A verdict can be that it didn't help. It never
-     counts as evidence of a skill.</p>
-
-  <h2 id="context">Sessions, the trail and the story</h2>
-
-  <p>Dum keeps a record of how you work in each goal. The panels don't show these records
-     right now; they stay on disk, and the <a href="#circle">Monitor</a> shows what the look
-     noticed as it happens.</p>
-
-  <h3>Sessions</h3>
-
-  <p>A session is one stretch of work in one goal. It starts when you're active in the goal and
-     ends when you leave the goal, quit, or go 30 minutes without
-     activity. Changing what Dum works from also starts a new one: the mode, the backend, the
-     goal's text, language or notes, personal context, an agreed direction, or a correction.</p>
-
-  <h3>The trail</h3>
-
-  <p>A trail is the skills a session visited, in order. Coming back to a skill after leaving it
-     is a new visit, marked as a revisit. A line between two visits means "came next", not "is a
-     prerequisite of". Agreed directions and each handoff step (commanded, then done, blocked,
-     failed, cancelled or interrupted, then reviewed) are marked on it. Something Dum couldn't
-     place on your tree is kept as a gap. A visit isn't credit: only
-     <a href="#skills">evidence</a> moves a skill.</p>
-
-  <h3>The story</h3>
-
-  <p>The story reads your sessions goal by goal. It's a cache over the saved sessions, kept in
-     <code>~/.dum/zones/&lt;zone&gt;/story/</code>, and the sessions stay the record.</p>
-
-  <h2 id="zones">Goals</h2>
-
-  <p>A goal is something you're learning, like <code>Programming › Data Structures</code>. It's
-     not a folder or a Git repository. Goals are the only scope Dum has.</p>
-
-  <ul>
-    <li>Each goal has a name, its text in your words, and an optional language. Leave the
-        language empty and the goal uses its parent's.</li>
-    <li>Goals nest, up to 16 levels deep. Names must differ between siblings.</li>
-    <li>The Dum panel lists them all, nested. A goal's <em>More</em> menu has <em>Edit
-        goal</em>, <em>New goal inside</em> and <em>Delete goal</em>. There's no way to move a goal
-        to a new parent.</li>
-    <li>A goal can have notes: background Dum reads in this goal and the goals inside it, up to
-        16 KiB per goal, in <code>~/.dum/zones/&lt;zone&gt;/context.md</code>. Notes are context.
-        They never unlock a skill or give Dum access to a file.</li>
-  </ul>
-
-  <p>Opening a goal makes it the active context. Do it from the column, the Dum panel or with
-     <code>⌘K</code>. Switching stops whatever Dum was doing in the old goal and ends its session.
-     Earlier conversation in the new goal comes back as history; a question Dum asked last time
-     isn't waiting for an answer any more.</p>
-
-  <p>A goal inherits its ancestors' text, nearest language and notes, up to
-     64 KiB of notes in total, keeping the nearest goals first. It doesn't inherit their
-     conversation, memory, direction, handoffs, sessions, suggested projects, change history,
-     followed folders or step skips. Those belong to one goal. Your skills belong to none: there's
-     one tree, and a skill you prove in one goal counts in all of them.</p>
-
-  <p>Deleting a goal also deletes the goals inside it. Your skills, memory notes and evidence
-     stay, and the goal's files stay on disk in <code>~/.dum/zones/</code> for you to look at.</p>
-
-  <h2 id="skills">Skills and evidence</h2>
-
-  <p>Your skills are plain Markdown files in <code>~/.dum/skills/</code>, one per skill. You can
-     read, edit or delete them; they open in Obsidian. A skill is scoped to a language or to
-     none, so <code>printing</code> in Python doesn't count in Go.</p>
-
-  <p>The skill tree circle opens your curated tracks: basics for C, C++, Go, Java,
-     JavaScript, Python, Rust and TypeScript, plus graphics, interview, systems and a language-free
-     builder track. Each skill shows as built, recognized, open (everything under it is built) or
-     locked, and a skill you skipped also shows as trusted. Skills you add that aren't on a track
-     still get up to three mapped prerequisites.</p>
-
-  <p><em>Graph</em> lays the skills out left to right by prerequisite depth, one band per track.
-     Drag the background to pan, scroll or pinch to zoom, and drag a node; it springs back toward
-     its place, and <em>Tidy</em> puts everything back. Built is filled, recognized half-filled,
-     open outlined with a glow, locked dim with a lock, trusted has a dashed ring and a
-     <em>trusted</em> tag, and the next skill pulses. Arrow keys walk the graph, <code>Return</code>
-     opens a skill's card and <code>Esc</code> closes it. The card has <em>▶ Work on this</em>,
-     <em>Skip, trust me</em> and <em>Undo trust</em>. <em>Tree</em> is the rung list with your
-     progress and the web tree link.</p>
-
-  <h3>Recognize, build, apply</h3>
-
-  <ul>
-    <li><strong>Recognize.</strong> You explained what the skill is and what it's for, in your own
-        words. Dum quotes the sentence it's crediting, and the quote has to come from your message
-        in that request. Its prerequisites have to be recognized too.</li>
-    <li><strong>Build.</strong> You wrote it yourself, unaided. Share the files, Dum reviews them,
-        then asks whether you wrote them yourself without AI or copied code. Only
-        <code>y</code> or <code>yes</code> records the build; anything else keeps the review and
-        records nothing. When you hand in a <a href="#projects">suggested project</a>, the
-        <code>--unaided</code> flag is that yes. A build also needs its prerequisites built.</li>
-    <li><strong>Apply.</strong> You built it and then reasoned about when and why to use it. The
-        same reasoning without a build only records recognition.</li>
-  </ul>
-
-  <p>Screens, files Dum reads, suggestions, memory, goal notes, trail visits, handoff reviews and
-     code Dum wrote never count as evidence. A saved file doesn't prove you wrote it; your own yes
-     does, and it can be wrong. Reviews are model judgments, so check them.</p>
-
-  <p>You can also add a skill you already have with <code>:skill name</code> or
-     <code>:skill name in python</code>. That records a self-report that you can write it unaided,
-     and it isn't reviewed. <code>:skill -name</code> takes a skill off the tree.</p>
-
-  <h3>The gate</h3>
-
-  <p>The gate decides what Dum may write for you. It's checked in code, not just asked of the
-     model. Concepts (language features, data structures, algorithms) need build. Tools (one
-     library, framework, API or command) need recognize. Skills on a curated track always count
-     as concepts. Every prerequisite under a skill has to hold too, so if you take an early rung
-     back, the skills that rest on it lock again, though their notes stay.</p>
-
-  <p><code>:boundary</code> shows what Dum may do
-     right now: what it may write, what it may use as a tool, what's closed, and which files it may
-     read and change.</p>
-
-  <h3>"not yet"</h3>
-
-  <p>If Dum just credited you with something you don't think you've earned, say
-     <code>not yet</code>, or <code>not yet recursion</code> to name the skill. The skill goes
-     back to where it was, and Dum holds it there across goals and restarts. Only a reviewed
-     unaided build or a <code>:skill</code> self-report lifts the hold.</p>
-
-  <p>The bar at the top of the skill tree's <em>Tree</em> view reads newbie, intern, good and cracked at 0, 8, 24 and 64
-     built skills with their prerequisites intact. Messages and recognition don't move it. It's a
-     joke label, not a rating.</p>
-
-  <h2 id="talking">Talking to Dum</h2>
-
-  <p>Type in the one-line message box at the bottom of a goal's chat. <code>Return</code> sends.
-     <em>Stop</em> shows only while Dum is working. There's one conversation and one draft per
-     goal.</p>
-
-  <h3>Voice</h3>
-
-  <p>Hold <code>⌃⌥Space</code> and talk; let go to stop. Speech is turned into text on your Mac
-     by a bundled copy of OpenSuperWhisper. Set it up once under <em>Set up voice</em> in
-     Settings: allow the microphone (the prompt is attributed to Dum), then pick and download a
-     speech model, because none is bundled. The <a href="/install#voice">install page</a> has the
-     steps. The text lands in your draft. It never sends itself.</p>
-
-  <p>While you use voice the bubble shows <em>Listening…</em>, then <em>Transcribing…</em>, then
-     the draft for 20 seconds; press <code>⌘⇧↩</code> to send it, or open Dum to edit it. Dum's
-     reply then shows in the bubble like any other reply (see <a href="#circle">the bubble</a>).</p>
-
-  <ul>
-    <li>Voice won't start over a draft that isn't empty. Send it, edit it or clear it first.</li>
-    <li>A recording stops after two minutes and is thrown away.</li>
-    <li>The audio is a temporary file, deleted when transcription finishes or fails.</li>
-    <li>You can also start and stop voice with the <em>Voice</em> button.</li>
-    <li>Voice comes with the packaged app (<code>npm run desktop:mac</code>) on Apple Silicon with
-        macOS 14 or later. Running Dum straight from a checkout with <code>npm run desktop</code>
-        has no voice.</li>
-    <li>If another app owns the shortcut, macOS refuses it silently and the press does nothing.
-        Change the Hold-to-talk shortcut in Settings.</li>
-  </ul>
-
-  <h3>Keyboard only</h3>
-
-  <p>Everything works without the mouse.</p>
-
-  <ul>
-    <li><code>Return</code> sends, <code>Shift-Return</code> adds a line, <code>⌘.</code> stops
-        Dum (or the debug chat, when your focus is in it).</li>
-    <li><code>Esc</code> backs out one step: an open confirm, chooser, menu or form first, then
-        an open record or the goal editor, then it hides the panel. On the column it folds
-        the column. It never stops Dum, answers a question or dismisses a card.</li>
-    <li><code>⌘K</code> opens another goal and filters as you type. <code>⌘W</code> hides the
-        panel.</li>
-    <li>The skill graph: arrow keys walk along prerequisites and columns, <code>Return</code>
-        opens a skill's card, <code>Esc</code> closes it.</li>
-    <li>The trail: arrow keys move between visits, <code>Home</code> and <code>End</code>
-        jump.</li>
-    <li>The three global shortcuts (Open Dum, Hold to talk, Send the draft) can be changed in
-        Settings. Each needs <code>⌘</code>, <code>⌃</code> or <code>⌥</code>.</li>
-  </ul>
-
-  <h3>Sharing</h3>
-
-  <p>Dum can't see your files unless you show it. When you hand in a suggested project
-     (<em>More</em> → <em>Suggested projects</em>), you pick the files or folder in a macOS dialog.
-     A share lasts for one message: once Dum finishes answering, it can't read the files again.
-     Text it already read stays in the conversation. A share you don't send expires after five
-     minutes.</p>
-
-  <h3>Commands</h3>
-
-  <ul>
-    <li><code>:tree</code> or <code>:skills</code>: your skill tree.</li>
-    <li><code>:inspect file</code> or <code>:inspect file:10-40</code>: show Dum a file you
-        shared or follow.</li>
-    <li><code>:projects</code>: <a href="#projects">suggested projects</a>.</li>
-    <li><code>:submit p1 file --unaided</code>: hand in your work on a project.</li>
-    <li><code>not yet</code>: undo the skill just recorded.</li>
-    <li><code>:skill x</code>, <code>:skill -x</code>: add or remove a skill.</li>
-    <li><code>:memory</code>, <code>:remember note</code>: this goal's notes.</li>
-    <li><code>:context</code>: the personal background used for suggestions.</li>
-    <li><code>:evidence</code>: what each skill rests on.</li>
-    <li><code>:boundary</code>: what Dum may do right now.</li>
-    <li><code>:log</code>: everything said in this goal.</li>
-    <li><code>:help</code>: this list.</li>
-  </ul>
-
-  <p><em>Mode</em> in Settings is <em>understand</em> or <em>anti-vibe</em>. Both use the
-     same gate. Anti-vibe asks for your approach first, then Dum does the unlocked parts.</p>
-
-  <p class="note">Voice, the circle's click-through corners and dragging, giving focus back to
-     your previous app, and the circle and bubble over full-screen apps and other Spaces use macOS
-     APIs that haven't been tried on a real Mac yet.</p>
-
-  <h2 id="changes">Changes</h2>
-
-  <p>Ask Dum to change a file, or hand it off, and if you hold the skills it writes the change
-     straight into the file. There's no yes/no step. You see the diff afterward, with a
-     <em>Revert</em> button.</p>
-
-  <ul>
-    <li>Dum only writes files you shared with the message or that sit in a folder you follow in
-        this goal. A new file can only go inside a shared or followed folder.</li>
-    <li>Each change names the skills it uses. If one is locked, nothing is written and Dum says
-        which skill and why.</li>
-    <li>Dum reads a file before changing it, and writes only if the file is byte-for-byte what
-        it read. If you saved in your editor since, the change is refused and Dum reads it
-        again. It never writes over a save it hasn't seen.</li>
-    <li>A new file is never created over one that appeared in the meantime. Yours is kept.</li>
-  </ul>
-
-  <p>The diff shows in the conversation or on the handoff card, and <em>More</em> →
-     <em>Changes</em> lists every change in the goal, newest first. <em>Revert</em> puts the file
-     back the way it was, or deletes a file Dum created. It works after the share has ended. If
-     you've edited the file since Dum wrote it, Revert refuses and your edits stay.</p>
-
-  <p>Each change is kept in <code>~/.dum/zones/&lt;zone&gt;/changes/</code> with the file before,
-     after, and the full patch. <em>open the change record</em> opens the patch.</p>
-
-  <p>Dum doesn't run your programs, tests or builds. Run them in your own terminal.</p>
-
-  <h2 id="look">The look</h2>
-
-  <p>Dum is always on. While you're in a goal it looks every 3 seconds, without a model, and
-     calls the look model whenever the screen changed. The look keeps Dum's picture of what you're
-     doing current; it doesn't interrupt you with tips. It never reads keystrokes, the clipboard
-     or your editor's unsaved text.</p>
-
-  <h3>What it reads every 3 seconds</h3>
-
-  <ul>
-    <li><strong>Apps</strong>: which app is in front, its name and window number. Not window
-        titles.</li>
-    <li><strong>Screen</strong>: a 320-pixel-wide image of the display your cursor is on, shrunk
-        to a 64 × 40 grid of gray levels and compared with the last one. Cells covered by Dum's own
-        circle, column, panel or bubble are skipped, so the circle moving or animating doesn't count.
-        Only the number of changed cells leaves the main app process. The image isn't kept or
-        saved.</li>
-    <li><strong>Followed folders</strong>: whether any file's size or timestamps changed. A file
-        that changed is read in full. New files are picked up about every 15 seconds.</li>
-  </ul>
-
-  <h3>What makes it call the look model</h3>
-
-  <ul>
-    <li>Any 3-second look where the screen changed.</li>
-    <li>You saved, added or removed a file in a followed folder, and it stayed quiet for two
-        looks.</li>
-    <li>You switched apps or windows and stayed for two looks.</li>
-    <li>The screen was busy for a bit, then went still.</li>
-  </ul>
-
-  <p>They all share the same stream of calls and the same caps.</p>
-
-  <h3>What one call sends</h3>
-
-  <p>Each call starts fresh. When the screen changed, your look model gets one fresh picture of
-     the display your cursor is on, 1280 pixels wide, with Dum's own windows painted out, and a
-     line about what it saw last, never older pictures. The goal's context goes too. A saved file
-     adds its diff, and an app switch adds the app's name. Nothing you type or copy is sent.</p>
-
-  <h3>What it keeps</h3>
-
-  <ul>
-    <li>The latest observation, in memory only. It isn't saved. Each new note also goes in the
-        Monitor's context log.</li>
-    <li>A short note in the goal's memory, only when what you're doing meaningfully changes: at
-        most one a minute, and never one that nearly repeats the last five.</li>
-    <li>The skills it noticed you working on, as visits on the session's
-        <a href="#context">trail</a>. A guess it isn't sure of becomes a gap, never a visit, and
-        none of it counts as evidence.</li>
-  </ul>
-
-  <p>The look doesn't publish advice.</p>
-
-  <h3>The caps</h3>
-
-  <ul>
-    <li>One call at a time, at least 3 seconds apart.</li>
-    <li>At most 1,200 calls an hour.</li>
-    <li>An identical frame is never sent twice.</li>
-    <li>A call that hasn't answered after 45 seconds is stopped, and it still counts.</li>
-    <li>A minute between file triggers, 90 seconds between typing pauses, two minutes between app
-        triggers, and the same app window doesn't trigger again for 10 minutes.</li>
-    <li>Up to four file diffs and 96 KiB per call. A frame over 3.75 MB isn't sent.</li>
-  </ul>
-
-  <p>Look calls are billed to your own API key, like every other call. Dum doesn't estimate the
-     cost.</p>
-
-  <h3>When it doesn't call</h3>
-
-  <p>No call and no frame while the look is paused, while it's blocked (Dum is answering you or
-     waiting on your answer, you're recording voice, the Mac is asleep or locked, or there's no
-     goal yet), without a backend, while a Dum window is in front, or with the screen look off.
-     With the screen look off, saved files and app switches still call, without a picture.</p>
-
-  <h3>Screen look and permission</h3>
-
-  <p>Settings → <em>Look</em> has two switches, <em>Apps</em> and <em>Screen</em>, both on in a new
-     install, with the Screen Recording status and an <em>Open Screen Recording settings</em>
-     button. If you say no to the permission, Dum looks at app switches and saved files only, until
-     you allow it.</p>
-
-  <p>Frames also need a look model that is verified for pictures. With <code>haiku</code> or any
-     other unverified Claude model the look runs on text and Settings says <em>No pictures: …
-     isn't verified for pictures yet</em>. Settings → <em>Agent</em> → <em>Verify for pictures (one
-     small call)</em> fixes that; see <a href="#backends">who powers Dum</a>.</p>
-
-  <h3>Pausing</h3>
-
-  <p><em>Pause</em> and <em>Resume</em> are in the Monitor. It stays paused until you resume or
-     restart Dum. While it's paused the circle shows a dashed ring and the Monitor says
-     <em>Paused</em>.</p>
-
-  <h3>Followed folders</h3>
-
-  <p>A followed folder belongs to one goal. Dum may read the saved files in it, notices when you
-     save, and can write <a href="#changes">changes</a> there. Up to eight folders per goal.</p>
-
-  <ul>
-    <li>Only text files up to 256 KiB are read, up to 2,000 files per folder.</li>
-    <li>Hidden files and folders are skipped, which includes <code>.git</code> and
-        <code>.env</code>, and so are <code>node_modules</code>, <code>dist</code>,
-        <code>build</code> and <code>target</code>.</li>
-    <li>Credential-looking files are skipped: SSH keys, <code>.pem</code> and <code>.key</code>
-        files, token and secret files, and the like. That's by name; a secret pasted into an
-        ordinary source file isn't detected.</li>
-    <li>Your home folder, the whole disk, system folders and <code>~/Library</code> can't be
-        followed.</li>
-  </ul>
-
-  <p>Without a backend Dum still watches and sends nothing, and the look's status says
-     <em>no backend</em>.</p>
-
-  <p class="note">Noticing app switches, the Screen Recording prompt, the 1280-pixel capture on
-     Retina displays, masking Dum's windows out of real captures, and the real cost per hour
-     haven't been tried on a real Mac yet.</p>
-
-  <h2 id="projects">Suggested projects</h2>
-
-  <p>Dum doesn't run courses or quizzes. When you want practice, or an option says <em>Learn
-     first</em>, it suggests projects that fit a skill's scope and your goal.</p>
-
-  <ul>
-    <li><code>:projects new</code> suggests projects for this goal; <code>:projects recursion</code>
-        sizes them to one skill. Add <code>in go</code> for a language. The skill tree's
-        <em>Tree</em> view has a <em>suggest projects</em> button on each skill, and <em>More</em>
-        → <em>Suggested projects</em> has <em>Suggest projects for this goal</em>.</li>
-    <li>Each project says what done means, roughly how many active hours it takes, how hard it is,
-        why it fits, and an ordered list of milestones, prerequisites first.</li>
-    <li>Projects are sorted by estimated time, then difficulty. A second model call checks each
-        one covers what it claims; up to four come back.</li>
-    <li>Suggestions use the goal's text and notes, your tree, the goal's memory, and your personal
-        context file if you turned it on in Settings.</li>
-    <li><code>:projects start p1</code> marks one you're working on, until you <code>:projects
-        stop</code> or pass every milestone unaided.</li>
-    <li><code>:submit p1 main.go --unaided</code> hands in your work, as does <em>Hand it in</em> in
-        Suggested projects. Each milestone is reviewed on its own, in prerequisite order. Without
-        <code>--unaided</code>, or the <em>I wrote this myself</em> box, you get the review but no
-        build credit.</li>
-  </ul>
-
-  <p>Choosing or starting a project unlocks nothing. Time estimates are model guesses.</p>
-
-  <h2 id="wizard">The Wizard</h2>
-
-  <p>The Wizard helps you decide. It speaks at goal alignment and when you press <em>Help me
-     decide</em>, as cards in the goal's chat. Dum can also ask it for you: when a message of yours has Dum
-     weighing two or more approaches, Dum hands the choice to the Wizard. The transcript shows
-     <em>Dum asked the Wizard: </em>and the reason, in the Wizard's voice, and a normal decision
-     card lands once Dum's turn ends. That happens at most once per message, and a card you
-     dismiss doesn't come back until you send again. The Wizard doesn't teach, quiz, review your
-     code or post tips you didn't ask for. Dum owns the outcome and the handoff; the Wizard lays
-     out the choices and their tradeoffs, and you choose.</p>
-
-  <p>It can only cite context Dum gave it, shown under <em>Based on</em>, and only skills from your
-     tree. When it backs a tradeoff with an outside fact, the claim and the link come from a fixed
-     catalog of primary sources: Git, SQLite, Python, Node and Effective Go docs, the Rust Book,
-     cppreference, MDN and the HTTP RFC. Its own sentences pass a word screen that drops dates,
-     statistics, quotes, unsourced names and claims about what everyone does. The screen is a
-     filter, not a fact-checker. Whether an option can be delegated is decided by Dum's gate, not
-     by the Wizard.</p>
-
-  <h2 id="settings">Settings and debug chat</h2>
-
-  <p>Settings is its own circle in the column and its own panel. It has exactly this, top to bottom:</p>
-
-  <ul>
-    <li><strong>Agent</strong>: the backend, the three models and your API key. A Claude model
-        that isn't verified for pictures has a <em>Verify for pictures (one small call)</em>
-        button next to its role; see <a href="#backends">who powers Dum</a>.</li>
-    <li><strong>Look</strong>: the Apps and Screen switches, Screen Recording status and
-        <em>Open Screen Recording settings</em>.</li>
-    <li><strong>Mode</strong>: <em>Understand</em> or <em>Anti-vibe</em>; see
-        <a href="#talking">talking to Dum</a>.</li>
-    <li><strong>Shortcuts</strong>: Open Dum, Hold to talk and Send the draft. Click a field and
-        press the new shortcut.</li>
-    <li><strong>Move circle</strong>: pick a display, or nudge it with the arrow keys.</li>
-    <li><strong>Open at login</strong>: starts the circle and Dum's host, not a panel.</li>
-    <li><strong>Use personal context</strong>: background about you that shapes decisions and
-        suggested projects, with the files it read. It never adds skills.</li>
-    <li><strong>Set up voice</strong>, with its status.</li>
-    <li><strong>Debug chat</strong>.</li>
-    <li>The version, and <strong>Quit Dum</strong>.</li>
-  </ul>
-
-  <p>The sections start closed, except one that needs fixing: no backend chosen, a shortcut that
-     couldn't be set, or Screen Recording denied. Pause is in the Monitor, and the web tree is in
-     the skill tree's Tree view.</p>
-
-  <h3>Debug chat</h3>
-
-  <p>Debug chat answers questions about Dum itself, like <em>which look model is running?</em> or
-     <em>why didn't the look call just now?</em>. It reads Dum's status, its recent events and a
-     short reference, and nothing else. It can't change settings, goals, files or skills, never
-     sees your goal's conversation, and works with no goal at all. It has <em>Send</em>,
-     <em>Stop</em>, <em>New debug session</em> and <em>Clear</em>.</p>
-
-  <ul>
-    <li>Each Send is one call to your chosen backend. Without one, it says so and opens Agent.</li>
-    <li>The events it reads are kept in memory only: the last 500, 512 KiB, or 30 minutes,
-        whichever is smallest. Keys, tokens and provider error bodies are never recorded, and
-        anything that looks like a key is redacted from your question and the reply.</li>
-    <li>Nothing is saved to disk. A debug session expires after 30 idle minutes.</li>
-  </ul>
-
-  <h2 id="backends">Who powers Dum</h2>
-
-  <p><em>Who powers Dum?</em> picks the backend and three models: <em>Dum's model</em> for the
-     conversation and handoffs, the <em>Helper model</em> for the Wizard, screenshots and project
-     suggestions, and the <em>Look model</em> for <a href="#look">the look</a>. All three come from
-     the same backend. The look model has to take pictures. Change them later under Settings →
-     <em>Agent</em>.</p>
-
-  <h3>Backends</h3>
-
-  <ul>
-    <li><strong>Claude.</strong> Your own Anthropic API key, in every build. That's the only way
-        Dum connects to Claude. Defaults are <code>opus</code> at high effort for Dum,
-        <code>fable</code> at high effort for the helper and <code>haiku</code> at low effort for
-        the look. Dum ships with its own Claude Code, so you don't install anything.</li>
-    <li><strong>ChatGPT.</strong> Built, but switched off in current builds.</li>
-  </ul>
-
-  <p>Model lists come live from the backend. For Claude that means the ids Claude's catalog
-     lists, including aliases like <code>opus</code>, <code>fable</code> and <code>haiku</code>,
-     each of which runs some specific model today. Dum verifies models by that resolved model, not
-     the alias. Dum's model has to support function calling. Pictures, for the look and shared
-     screenshots, go only to a model whose resolved id is verified for pictures. Models Dum hasn't
-     verified are marked <em>untested</em>, and the look runs on text with them; its status says
-     why.</p>
-
-  <p><code>opus</code> and <code>fable</code> are verified out of the box. For any other Claude
-     model, <code>haiku</code> included, Settings → <em>Agent</em> shows <em>Verify for pictures
-     (one small call)</em> next to that role. It sends one 2×2 PNG and the line <em>Reply with the
-     single word OK.</em> to that model on your key. Success records the resolved id in
-     <code>~/.dum/verified-models.json</code> on this Mac, and the look starts sending frames.
-     Failure records nothing and the reason stays next to the button. Dum won't verify while it's
-     mid-request. If an alias later moves to a model you haven't verified, pictures stop until you
-     verify that one.</p>
-
-  <p>An Anthropic key has to be scoped to a workspace. A key created outside one fails with
-     <em>must include the anthropic-workspace-id header</em>; Dum doesn't add that header. Create
-     the key inside a workspace at console.anthropic.com.</p>
-
-  <p>There's no fallback. If the backend you picked fails, Dum tells you; it never quietly
-     switches to another one.</p>
-
-  <p>Your API key is encrypted with Electron's safe storage, which uses the macOS Keychain, and
-     kept in Dum's app data, never in settings.</p>
-
-  <p class="note">Key encryption hasn't been tried on a real Mac yet.</p>
+  <h2 id="model">Model access</h2>
+  <p>Builds use the Claude Code command line tool with an authenticated subscription. It's invoked in print mode with no tools, no hooks and no MCP servers, and asked for output matching a strict JSON schema. With that setup no API key is required. The example creation was generated by <code>claude-fable-5-1</code>. Teaching Dum doesn't retrain any model.</p>
 
   <h2 id="privacy">Privacy</h2>
-
-  <h3>What stays on your Mac</h3>
-
   <ul>
-    <li>Your skill tree, goals, conversations, memory, evidence, directions, handoffs, sessions,
-        story, suggested projects and change records, all as plain files in
-        <code>~/.dum/</code>.</li>
-    <li>Settings, where the circle sits, your pinned goals, and the encrypted API key, in Dum's app data folder.</li>
-    <li>Voice: audio and transcription never leave the Mac.</li>
-    <li>The look's routine screen samples. Only frames sent with a model call leave, and none are
-        saved.</li>
-    <li>Debug events, in memory only.</li>
+    <li>Lessons, teaching text, job history and creations stay on the hub.</li>
+    <li>When a build runs, your teaching text and the lesson context are sent to the configured Claude CLI provider. Generation isn't offline, so don't treat it as fully private.</li>
+    <li>Verification runs offline in the container.</li>
+    <li>Reading saved creations, here or in the workshop, makes no model calls.</li>
+    <li>No account is needed to read this site. The jumping game keeps no score history. Cloudflare handles public delivery.</li>
   </ul>
 
-  <h3>What goes to the backend</h3>
+  <h2 id="schedules">Schedules</h2>
+  <p>A goal can have an optional interval schedule. It queues new creations from your existing teaching while the hub is running, even when your laptop is closed. Scheduled builds use the model just like manual builds. Leave scheduling off to build only when you press Build now.</p>
 
-  <p>Your messages, the goal's text and notes, your skills and boundary, recent conversation, and
-     the text of files Dum reads from shares and followed folders. For goal alignment and decision
-     cards: the goal, the agreed direction, the context they cite (notes, memory, the latest
-     observation, recent conversation) and the skills that could apply. For the look: the goal's
-     context, the previous observation in words, the front app's name, diffs of saved files, and
-     one fresh screen frame per call while the screen look is on. For decisions and suggestions:
-     your personal context file, if you turned it on. For debug chat: your question and Dum's
-     redacted diagnostics, never goal data.</p>
-
-  <ul>
-    <li><strong>Claude</strong>: sent to Anthropic, through Claude Code, under your own API
-        key.</li>
-  </ul>
-
-  <p>The web tree is off unless you link it in the skill tree's <em>Tree</em> view → <em>Web
-     tree</em>. Then only your skills and removals go to that server: no goals, sessions, story,
-     conversations, holds or files. Anyone with the link can see and edit the tree there.</p>
-
-  <p>Using Dum outside programming? See <a href="/subjects">other subjects</a>.</p>
-
+  <p class="reader-footnote">Code and the full history of changes are in the <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source repository</a>. For the thinking behind the learn-then-teach order, see the <a href="/philosophy">philosophy</a> page.</p>
 </main>
+
+<footer class="site-footer">
+  <a href="/" class="footer-brand">dum intern</a>
+  <a href="/docs">how it works</a>
+  <a href="/philosophy">philosophy</a>
+  <a href="/demo/">example</a>
+  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+</footer>
 
 </body>
 </html>
