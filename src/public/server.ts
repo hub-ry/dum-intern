@@ -129,11 +129,8 @@ function route(rawUrl: string): Route {
 
   let segments = parsed;
 
-  // /site/x and /site/assets/x are long-standing aliases for /x.
-  if (segments[0] === "site") {
-    segments = segments.slice(1);
-    if (segments[0] === "assets") segments = segments.slice(1);
-  }
+  // /site/x is a long-standing alias for /x.
+  if (segments[0] === "site") segments = segments.slice(1);
 
   const first = segments[0] ?? "";
   const firstBase = first.endsWith(".html") ? first.slice(0, -".html".length) : first;

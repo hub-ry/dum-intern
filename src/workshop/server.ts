@@ -24,7 +24,8 @@ import type { Socket } from "node:net";
 import { WorkshopStore, WorkshopRunner, WorkshopError } from "./runtime.js";
 import type { Attempt, ExerciseConcept, Goal, Job, Material, Progress, Teaching } from "./runtime.js";
 import { COMBINED_CONCEPT, CONDITIONS_CONCEPT, LOOPS_CONCEPT } from "./materials.js";
-import { NotesProjectionError, PublicNotes } from "./public-notes.js";
+import { MAX_AMBITION, MAX_CONCEPT, MAX_CONTEXT, MAX_EXERCISE_ID, MAX_TEXT, MAX_TITLE } from "./validate.ts";
+import { MAX_NOTE_BODY_BYTES, NotesProjectionError, PublicNotes } from "./public-notes.js";
 
 // ---------------------------------------------------------------------------------------------
 // Configuration
@@ -49,9 +50,30 @@ export type WorkshopHandle = {
   stop(): Promise<void>;
 };
 
-const MAX_BODY = 32 * 1024;
 const BODY_TIMEOUT_MS = 10_000;
 const MAX_ANSWER_CHARS = 200;
+const MAX_PASSWORD_CHARS = 512;
+const MAX_NUMBER_CHARS = 32;
+
+const MAX_JSON_BYTES_PER_CHAR = 6;
+const BODY_FRAMING_BYTES = 1024;
+function bodyLimit(fields: Record<string, number>): number {
+  let bytes = BODY_FRAMING_BYTES;
+  for (const [key, chars] of Object.entries(fields)) bytes += (key.length + chars) * MAX_JSON_BYTES_PER_CHAR;
+  return bytes;
+}
+const LOGIN_BODY = bodyLimit({ password: MAX_PASSWORD_CHARS });
+const CONTEXT_BODY = bodyLimit({ context: MAX_CONTEXT });
+const GOAL_BODY = bodyLimit({ title: MAX_TITLE, ambition: MAX_AMBITION });
+const GRADED_ATTEMPT_BODY = bodyLimit({ exerciseId: MAX_EXERCISE_ID, answer: MAX_ANSWER_CHARS });
+const REPORT_BODY = bodyLimit({ concept: MAX_CONCEPT, text: MAX_TEXT, helped: "false".length });
+const STUDIED_BODY = bodyLimit({ concept: MAX_CONCEPT });
+const REVISIT_BODY = bodyLimit({ concept: MAX_CONCEPT, note: MAX_TEXT });
+const TEACH_BODY = bodyLimit({ concept: MAX_CONCEPT, text: MAX_TEXT });
+const JOB_BODY = bodyLimit({});
+const SCHEDULE_BODY = bodyLimit({ intervalMinutes: MAX_NUMBER_CHARS });
+const CORRECTION_BODY = bodyLimit({ correction: MAX_TEXT });
+const POSITION_BODY = bodyLimit({ panel: MAX_NUMBER_CHARS });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SAFE_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 const HOSTNAME = /^(?:\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*\.?)$/;
@@ -173,7 +195,12 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extra: Rec
 
 type Body = Record<string, unknown>;
 
-function readJsonBody(req: IncomingMessage, optional = false): Promise<Body> {
+function tooLarge(limit: number): HttpError {
+  const shown = limit % 1024 === 0 ? `${limit / 1024} KiB` : `${limit} bytes`;
+  return new HttpError(413, `Request body is too large (limit ${shown}).`);
+}
+
+function readJsonBody(req: IncomingMessage, limit: number, optional = false): Promise<Body> {
   return new Promise((resolvePromise, reject) => {
     const type = (req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
     const declared = Number(req.headers["content-length"] ?? "0");
@@ -181,7 +208,7 @@ function readJsonBody(req: IncomingMessage, optional = false): Promise<Body> {
       if (optional && (!type || declared === 0)) return resolvePromise({});
       return reject(new HttpError(415, "Send a JSON body with Content-Type: application/json."));
     }
-    if (Number.isFinite(declared) && declared > MAX_BODY) return reject(new HttpError(413, "Request body is too large (limit 32 KiB)."));
+    if (Number.isFinite(declared) && declared > limit) return reject(tooLarge(limit));
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
@@ -194,7 +221,7 @@ function readJsonBody(req: IncomingMessage, optional = false): Promise<Body> {
     const timer = setTimeout(() => finish(() => { req.destroy(); reject(new HttpError(408, "Timed out reading the request body.")); }), BODY_TIMEOUT_MS);
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY) return finish(() => { req.destroy(); reject(new HttpError(413, "Request body is too large (limit 32 KiB).")); });
+      if (size > limit) return finish(() => { req.destroy(); reject(tooLarge(limit)); });
       chunks.push(chunk);
     });
     req.on("error", (err) => finish(() => reject(err)));
@@ -617,9 +644,9 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       if (typeof origin !== "string" || !originMatches(origin, h, port)) throw new HttpError(403, "Login must come from this page.");
       const key = clientKey(req);
       if (loginBlocked(key)) throw new HttpError(429, "Too many failed logins. Wait a few minutes and try again.");
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, LOGIN_BODY);
       const password = field(body, "password");
-      if (password.length > 512 || !sameSecret(password, token)) {
+      if (password.length > MAX_PASSWORD_CHARS || !sameSecret(password, token)) {
         noteLoginFailure(key);
         throw new HttpError(401, "That is not the workshop token.");
       }
@@ -668,7 +695,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       if (seg.length === 2) {
         if (method === "GET") return sendJson(res, 200, { notes: pub.list() });
         if (method === "POST") {
-          const body = await readJsonBody(req);
+          const body = await readJsonBody(req, MAX_NOTE_BODY_BYTES);
           return publish(201, () => pub.create(body));
         }
         throw new HttpError(405, "Method not allowed.");
@@ -677,7 +704,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
         const noteId = requireUuid(seg[2], "note");
         if (method === "GET") return sendJson(res, 200, { note: pub.get(noteId) });
         if (method === "PUT") {
-          const body = await readJsonBody(req);
+          const body = await readJsonBody(req, MAX_NOTE_BODY_BYTES);
           return publish(200, () => pub.revise(noteId, body));
         }
         throw new HttpError(405, "Method not allowed.");
@@ -689,7 +716,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     if (path === "/api/context") {
       if (method === "GET") return sendJson(res, 200, { global: store.getGlobalContext() });
       if (method === "PUT") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, CONTEXT_BODY);
         return sendJson(res, 200, { global: store.updateGlobalContext(field(body, "context")) });
       }
       throw new HttpError(405, "Method not allowed.");
@@ -705,7 +732,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     if (path === "/api/goals") {
       if (method === "GET") return sendJson(res, 200, { goals: store.listGoals() });
       if (method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, GOAL_BODY);
         const goal = store.createGoal({ title: field(body, "title"), ambition: field(body, "ambition") });
         return sendJson(res, 201, { goal });
       }
@@ -719,7 +746,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       const sub = seg[3];
 
       if (sub === "attempt" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, GRADED_ATTEMPT_BODY);
         const exerciseId = field(body, "exerciseId");
         const answer = normalizeAnswer(field(body, "answer"));
         if (!answer) throw new HttpError(400, "\"answer\" must not be empty.");
@@ -731,39 +758,39 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       }
       if (sub === "attempts" && method === "GET") return sendJson(res, 200, { attempts: store.listAttempts(goalId) });
       if (sub === "report" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, REPORT_BODY);
         const out = store.attempt(goalId, { concept: field(body, "concept"), text: field(body, "text"), helped: boolField(body, "helped") });
         return sendJson(res, 201, out);
       }
       if (sub === "studied" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, STUDIED_BODY);
         return sendJson(res, 201, { evidence: store.markStudied(goalId, field(body, "concept")) });
       }
       if (sub === "revisit" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, REVISIT_BODY);
         return sendJson(res, 201, { evidence: store.markRevisit(goalId, { concept: field(body, "concept"), note: field(body, "note") }) });
       }
       if (sub === "progress" && method === "GET") return sendJson(res, 200, { progress: store.progress(goalId) });
       if (sub === "teach" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, TEACH_BODY);
         return sendJson(res, 201, { teaching: store.teach(goalId, { concept: field(body, "concept"), text: field(body, "text") }) });
       }
       if (sub === "teachings" && method === "GET") return sendJson(res, 200, { teachings: store.listTeachings(goalId) });
       if (sub === "context") {
         if (method === "GET") return sendJson(res, 200, goalContextView(goalId));
         if (method === "PUT") {
-          const body = await readJsonBody(req);
+          const body = await readJsonBody(req, CONTEXT_BODY);
           store.updateGoal(goalId, { context: field(body, "context") });
           return sendJson(res, 200, goalContextView(goalId));
         }
         throw new HttpError(405, "Method not allowed.");
       }
       if (sub === "jobs" && method === "POST") {
-        await readJsonBody(req, true);
+        await readJsonBody(req, JOB_BODY, true);
         return sendJson(res, 202, { job: summarizeJob(store.enqueue(goalId, {})) });
       }
       if (sub === "schedule" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, SCHEDULE_BODY);
         const v = body.intervalMinutes;
         if (v !== null && typeof v !== "number") throw new HttpError(400, "\"intervalMinutes\" must be a number or null.");
         const goal = store.setSchedule(goalId, { intervalMinutes: v });
@@ -784,7 +811,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       if (seg.length !== 4) throw new HttpError(404, "No such route.");
       const sub = seg[3];
       if (sub === "correction" && method === "POST") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, CORRECTION_BODY);
         const parent = store.getJob(jobId);
         const job = store.enqueue(parent.goalId, { parentId: parent.id, correction: field(body, "correction") });
         return sendJson(res, 202, { job: summarizeJob(job) });
@@ -792,7 +819,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       if (sub === "position") {
         if (method === "GET") return sendJson(res, 200, { panel: store.getPosition(jobId) });
         if (method === "PUT") {
-          const body = await readJsonBody(req);
+          const body = await readJsonBody(req, POSITION_BODY);
           const panel = body.panel;
           if (typeof panel !== "number") throw new HttpError(400, "\"panel\" must be a number.");
           return sendJson(res, 200, { panel: store.savePosition(jobId, panel) });

@@ -748,22 +748,34 @@ a { color: var(--ink); }
   $("goalBase").addEventListener("input", () => { if (state.goalId) state.dirty.goalBase.set(state.goalId, $("goalBase").value); });
   $("globalBase").addEventListener("input", () => { state.dirty.globalBase = $("globalBase").value; });
   $("schedule").addEventListener("change", () => { if (state.goalId) state.dirty.schedule.set(state.goalId, $("schedule").value); });
+  const saveQueues = new Map();
+  function queueSave(url, send) {
+    const q = saveQueues.get(url) || { tail: Promise.resolve(), seq: 0 };
+    saveQueues.set(url, q);
+    const seq = ++q.seq;
+    const run = q.tail.then(send);
+    q.tail = run.catch(() => {});
+    return run.then(() => q.seq === seq, (err) => { if (q.seq === seq) throw err; return false; });
+  }
   $("saveGoalBase").addEventListener("click", async () => {
     setErr("goalBaseErr", "");
     const goalId = state.goalId, value = $("goalBase").value;
     if (!goalId) { setErr("goalBaseErr", "Pick or create a goal first."); return; }
+    const url = "/api/goals/" + encodeURIComponent(goalId) + "/context";
     try {
-      await api("PUT", "/api/goals/" + encodeURIComponent(goalId) + "/context", { context: value });
+      if (!await queueSave(url, () => api("PUT", url, { context: value }))) return;
       // Clean only if nothing was typed during the save; a newer edit stays dirty.
       if (state.dirty.goalBase.get(goalId) === value) state.dirty.goalBase.delete(goalId);
+      if (state.goalId !== goalId) return;
       toast("Goal context saved."); await refreshGoal();
     } catch (err) { if (state.goalId === goalId) setErr("goalBaseErr", err.message); }
   });
   $("saveGlobalBase").addEventListener("click", async () => {
     setErr("globalBaseErr", "");
     const value = $("globalBase").value;
+    const url = "/api/context";
     try {
-      await api("PUT", "/api/context", { context: value });
+      if (!await queueSave(url, () => api("PUT", url, { context: value }))) return;
       if (state.dirty.globalBase === value) state.dirty.globalBase = null;
       toast("Global context saved."); await refreshGlobal();
     } catch (err) { setErr("globalBaseErr", err.message); }
@@ -780,9 +792,11 @@ a { color: var(--ink); }
     setErr("buildErr", "");
     if (!state.goalId) { setErr("buildErr", "Pick or create a goal first."); return; }
     const goalId = state.goalId, v = $("schedule").value;
+    const url = "/api/goals/" + encodeURIComponent(goalId) + "/schedule";
     try {
-      await api("POST", "/api/goals/" + encodeURIComponent(goalId) + "/schedule", { intervalMinutes: v === "" ? null : Number(v) });
+      if (!await queueSave(url, () => api("POST", url, { intervalMinutes: v === "" ? null : Number(v) }))) return;
       if (state.dirty.schedule.get(goalId) === v) state.dirty.schedule.delete(goalId);
+      if (state.goalId !== goalId) return;
       toast("Schedule saved."); await refreshGoal();
     } catch (err) { if (state.goalId === goalId) setErr("buildErr", err.message); }
   });
