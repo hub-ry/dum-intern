@@ -874,6 +874,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
         return res.end();
       }
       const stream = opened.handle.createReadStream({ autoClose: true });
+      res.once("close", () => stream.destroy());
       stream.on("error", () => res.destroy());
       stream.pipe(res);
     })().catch((err) => fail(res, err));
