@@ -8,6 +8,10 @@
 // (nested answers and shares belong to it); otherwise it names the next request, fresh after each
 // Send, Do this or decision turn, and each zone epoch. Alignment uses its own per-zone binding and
 // debug chat its own; neither ever carries the active zone's grants.
+//
+// The router also owns which panel the working window draws, the goals pinned to the circle's column
+// (persisted by settings.ts), and what the bubble shows: replies, the active goal's step and the
+// Wizard jumping in. The bubble itself asks for nothing.
 
 import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
@@ -16,7 +20,7 @@ import { z } from "zod";
 import { DesktopPreferencesSchema, parseRequest } from "./protocol.ts";
 import { DIAGNOSTIC_LIMITS } from "../diagnostic-types.ts";
 import { sameBinding, type Drafts } from "./draft.ts";
-import { BUBBLE_TTL, bubbleLines, type Bubble } from "./surfaces.ts";
+import { BUBBLE_TTL, bubbleLines, firstSentence, type Bubble } from "./surfaces.ts";
 import type { AgentSetup } from "./agent-setup.ts";
 import type { Captures } from "./capture.ts";
 import type { DictationHelper } from "./dictation.ts";
@@ -29,11 +33,12 @@ import type { DebugView, DiagnosticCode, DiagnosticOutcome, MainStatus, Sanitize
 import type { HostLookStatus, ScreenPermission } from "../observe-types.ts";
 import type { InputBinding, RequestBinding, ShareGrant } from "../share-types.ts";
 import type { SharedImage } from "../store-types.ts";
+import type { StepView } from "../step-types.ts";
 import type { ZoneId, ZoneRegistry } from "../zone-types.ts";
 import type { VoiceEvent, VoiceState } from "./native-protocol.ts";
 import type {
-  CircleDisplays, CircleReason, CircleReply, CircleRequest, CircleState, CircleView, DesktopPreferences, DraftState, PersonalView, Reply,
-  Request, Role, Snapshot, ViewName, ZoneCreate,
+  CircleDisplays, CircleReason, CircleReply, CircleRequest, CircleSlot, CircleState, CircleView, DesktopPreferences,
+  DraftState, PanelRef, PersonalView, Reply, Request, Role, Snapshot, ZoneCreate,
 } from "./protocol.ts";
 
 /** A frame's URL is Dum's own UI page: the same file, any query (the view), nothing else. */
@@ -56,7 +61,8 @@ export type Host = Pick<HostController,
   | "decisionHelp" | "decisionDismiss" | "selectHandoff" | "editHandoff" | "dismissHandoff" | "runHandoff" | "readHandoff" | "reviewHandoff"
   | "contextUseRead" | "contextReload" | "contextIgnoreObservation"
   | "newSession" | "trailRead" | "trailSource" | "trailMap" | "storyRead"
-  | "debugOpen" | "debugSend" | "debugStop" | "debugReset" | "diagnosticMain">;
+  | "debugOpen" | "debugSend" | "debugStop" | "debugReset" | "diagnosticMain"
+  | "goalSkip" | "stepSkip" | "play">;
 
 /** Operating-system actions main performs for the router. Every argument comes from main, never the renderer. */
 export type Native = {
@@ -73,15 +79,19 @@ export type Native = {
   hotkeyError(): string;
   /** Each global shortcut's registration problem by category; null when it is registered. */
   shortcuts(): MainStatus["shortcuts"];
-  /** Capture the external app, place beside the circle, show and focus the composer. */
+  /** Capture the external app, place the current panel at the circle's corner, show and focus it. */
   showWindow(): Promise<void>;
   /** Hide and FocusReturn.dismiss() once. */
   dismissWindow(): Promise<void>;
   windowVisible(): boolean;
   /** Whether the working window has keyboard focus: a reply there is already in front of them. */
   windowFocused(): boolean;
-  /** Show the working window on one in-window view. */
-  openView(view: ViewName): void;
+  /** Re-place and resize the working window, if it shows, for the router's current panel. */
+  placePanel(): void;
+  /** Whether the circle's column is out. */
+  circleExpanded(): boolean;
+  /** Fold the column back into one circle; nothing when it's already one. */
+  circleCollapse(): void;
   /** Main samples the cursor and bounds; returns the gesture id. */
   circleBegin(): string;
   circleEnd(gestureId: string): Promise<void>;
@@ -100,7 +110,7 @@ export type RouterPorts = {
   host: Host;
   captures: Captures;
   drafts: Drafts;
-  settings: Pick<DesktopSettings, "get" | "set">;
+  settings: Pick<DesktopSettings, "get" | "set" | "pinned" | "setPinned">;
   agent: AgentSetup;
   native: Native;
   dictation: Pick<DictationHelper, "status" | "configure" | "setup" | "start" | "stop" | "cancel">;
@@ -128,6 +138,8 @@ export type RouterPorts = {
 type WindowRequest = Request;
 type Extra = Omit<Extract<Reply, { ok: true }>, "ok" | "snapshot">;
 
+/** The bubble's one sentence while a decision waits; the decision itself stays in the window. */
+const DECISION_WAITING = "A decision is waiting for you in Dum.";
 const IDLE_VOICE: VoiceState = { phase: "idle", recordingId: null, status: "" };
 const NO_CONTEXT_USE: ContextUseView = {
   subject: null, contextRevision: null, correctionRevision: 0, counts: { used: 0, omitted: 0, missing: 0, stale: 0 }, cursor: null,
@@ -196,12 +208,56 @@ function attention(s: Snapshot, hostFailure: string, keyRejected: boolean): Circ
   return null;
 }
 
+/** One or two uppercase initials of a goal's name, for its disk. */
+export function goalMark(name: string): string {
+  const words = name.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const mark = words.slice(0, 2).map((w) => Array.from(w)[0]!).join("").toLocaleUpperCase();
+  return Array.from(mark).slice(0, 4).join("") || "G";
+}
+
+/**
+ * The column: Dum, then the pinned goals (at most three), or with none pinned the three most
+ * recently updated live goals with the active one first, then the skill tree, the monitor and settings.
+ */
+export function circleSlots(s: Snapshot): CircleSlot[] {
+  const live = s.zones.zones.filter((z) => z.deletedAt === null);
+  const byId = new Map(live.map((z) => [z.id, z]));
+  const pinned = s.pinned.flatMap((id) => byId.get(id) ?? []).slice(0, 3);
+  const active = s.zones.activeZoneId;
+  const chosen = pinned.length ? pinned
+    : [...live].sort((a, b) => Number(b.id === active) - Number(a.id === active) || b.updatedAt.localeCompare(a.updatedAt)).slice(0, 3);
+  const goals = new Map(s.goals.map((g) => [g.id, g]));
+  // The look is recording the screen: screen look on, not paused, allowed, and someone powers Dum.
+  const recording = s.settings.look.screen && !s.look.paused && (s.look.permission === "granted" || s.look.permission === "not-required")
+    && s.settings.agent !== null;
+  return [
+    { ref: { kind: "dum" }, label: "Dum: your goals", mark: "D", progress: 0, waiting: false },
+    ...chosen.map((z): CircleSlot => {
+      const g = goals.get(z.id);
+      const total = g?.progress.total ?? 0;
+      return {
+        ref: { kind: "goal", id: z.id },
+        label: `Goal: ${z.name}`,
+        mark: goalMark(z.name),
+        progress: total ? Math.min(1, (g?.progress.done ?? 0) / total) : 0,
+        waiting: (g?.step ?? null) !== null,
+      };
+    }),
+    { ref: { kind: "tree" }, label: "Skill tree", mark: "T", progress: 0, waiting: false },
+    { ref: { kind: "monitor" }, label: recording ? "Monitor: recording" : "Monitor: not recording", mark: "M", progress: 0, waiting: recording },
+    { ref: { kind: "settings" }, label: "Settings", mark: "S", progress: 0, waiting: false },
+  ];
+}
+
 /**
  * Main computes the circle's face from typed fields only, never status prose. Priority:
- * listening → needs attention → thinking → looking → idle.
+ * listening → needs attention → thinking → looking → idle. The face is Dum's slot's; `expanded` is main's.
  */
-export function circleView(s: Snapshot, hostFailure: string, keyRejected = false): CircleView {
-  const face = (state: CircleState, reason: CircleReason): CircleView => ({ state, reason, paused: s.look.paused, open: s.window.visible });
+export function circleView(s: Snapshot, hostFailure: string, keyRejected = false, expanded = false): CircleView {
+  const slots = circleSlots(s);
+  const showing = s.window.visible ? s.panel : null;
+  const face = (state: CircleState, reason: CircleReason): CircleView =>
+    ({ state, reason, paused: s.look.paused, open: s.window.visible, expanded, slots, showing });
   if (s.voice.phase === "recording") return face("listening", "recording");
   if (s.voice.phase === "transcribing") return face("listening", "transcribing");
   const needs = attention(s, hostFailure, keyRejected);
@@ -229,6 +285,8 @@ export class Router {
   private keyRejected = false;
   /** Exact stored credential values, refreshed before each debug send and after a key change. */
   private secrets: readonly string[] = [];
+  /** The panel they chose; null follows the active goal (or Dum's panel with none). */
+  private chosenPanel: PanelRef | null = null;
   /** The status main last told this host, as JSON; "" when the host has none from us. */
   private reported = "";
 
@@ -266,8 +324,71 @@ export class Router {
     const now = this.live();
     this.o.captures.invalidate(now?.zoneId ? (now as RequestBinding) : null);
     this.last = now;
+    this.prunePins();
     this.follow(view);
+    this.o.bubble.step(this.activeStep());
+    this.o.bubble.wizard(view?.wizard ?? null);
     this.diagnose([]);
+  }
+
+  /** Which panel the working window draws: the chosen one while its goal lives, else the active goal's, else Dum's. */
+  panel(): PanelRef {
+    const view = this.o.host.view;
+    const chosen = this.chosenPanel;
+    if (chosen?.kind === "goal") return view?.registry.zones.some((z) => z.id === chosen.id && z.deletedAt === null) ? chosen : { kind: "dum" };
+    if (chosen) return chosen;
+    const active = view?.activeZone?.id;
+    return active ? { kind: "goal", id: active } : { kind: "dum" };
+  }
+
+  /**
+   * Switch the working window to `ref` and re-place it at the circle. A goal that isn't the active
+   * one is entered first, at the registry revision main last saw.
+   */
+  async openPanel(ref: PanelRef): Promise<void> {
+    if (ref.kind === "goal") {
+      const view = this.o.host.view;
+      if (!view?.registry.zones.some((z) => z.id === ref.id && z.deletedAt === null)) throw new Error("That goal doesn't exist any more");
+      if (view.registry.activeZoneId !== ref.id) await this.o.host.openZone(ref.id, view.registry.revision);
+    }
+    this.chosenPanel = ref;
+    this.o.native.placePanel();
+  }
+
+  /** A circle in the column was picked, by mouse or keyboard: fold the column, open its panel, show the window. */
+  async pick(ref: PanelRef): Promise<void> {
+    const wanted = JSON.stringify(ref);
+    if (!circleSlots(this.snapshot()).some((slot) => JSON.stringify(slot.ref) === wanted)) throw new Error("That circle isn't in the column any more");
+    this.o.native.circleCollapse();
+    await this.openPanel(ref);
+    await this.o.native.showWindow();
+  }
+
+  /** The active goal's step, from the host's goals. */
+  private activeStep(): StepView | null {
+    const view = this.o.host.view;
+    const id = view?.activeZone?.id;
+    return id ? view?.goals?.find((g) => g.id === id)?.step ?? null : null;
+  }
+
+  /** Pins on live goals only, once the host has said which goals live. */
+  private pins(): ZoneId[] {
+    const pinned = this.o.settings.pinned();
+    const registry = this.o.host.view?.registry;
+    if (!registry) return pinned;
+    const live = new Set(registry.zones.flatMap((z) => (z.deletedAt === null ? [z.id] : [])));
+    return pinned.filter((id) => live.has(id));
+  }
+
+  /** Deleted goals come off the pins; a failed write retries on the next change. */
+  private prunePins(): void {
+    const pins = this.pins();
+    if (pins.length === this.o.settings.pinned().length) return;
+    try {
+      this.o.settings.setPinned(pins);
+    } catch {
+      // Still pruned in every snapshot; the file catches up on the next successful write.
+    }
   }
 
   snapshot(): Snapshot {
@@ -303,12 +424,19 @@ export class Router {
       platform: this.o.platform,
       version: this.o.version,
       canAttach: view?.canAttach ?? false,
+      goals: view?.goals ?? [],
+      step: this.activeStep(),
+      next: view?.next ?? null,
+      panel: this.panel(),
+      pinned: this.pins(),
+      lookLog: view?.lookLog ?? [],
+      wizard: view?.wizard ?? null,
     };
   }
 
-  /** The circle's face, for its restricted channel. */
+  /** The circle's face and column, for its restricted channel. */
   circle(): CircleView {
-    return circleView(this.snapshot(), this.o.hostFailure(), this.keyRejected);
+    return circleView(this.snapshot(), this.o.hostFailure(), this.keyRejected, this.o.native.circleExpanded());
   }
 
   /** Main's sanitized facts for the host: on initialize and whenever they change. */
@@ -344,7 +472,7 @@ export class Router {
 
   /**
    * Validate and apply one request from `role`'s surface. The working window gets a Reply, the
-   * circle a CircleReply, the bubble nothing. Failures come back as a message; nothing throws across IPC.
+   * circle a CircleReply; the bubble is refused. Failures come back as a message; nothing throws across IPC.
    */
   handle(raw: unknown, role: "window"): Promise<Reply>;
   handle(raw: unknown, role: "circle"): Promise<CircleReply>;
@@ -470,8 +598,11 @@ export class Router {
     this.secrets = [...(await this.o.secrets())];
   }
 
+  /** A reply and the step are already in front of them while the working window is visible and focused. */
   windowChanged(): void {
-    if (this.o.native.windowVisible() && this.o.native.windowFocused() && this.o.bubble.current?.kind === "reply") this.o.bubble.dismiss();
+    const front = this.o.native.windowVisible() && this.o.native.windowFocused();
+    if (front && this.o.bubble.current?.kind === "reply") this.o.bubble.dismiss();
+    this.o.bubble.windowFront(front);
   }
 
   /** The bubble follows the request they sent, typed or spoken: status while it works, then what Dum said. */
@@ -494,10 +625,9 @@ export class Router {
       this.next = randomUUID();
     }
     if (asking) {
-      // A decision itself stays in the window; a plain question is shown. Both say where the answer goes.
+      // A decision itself stays in the window; a plain question is the one sentence shown.
       const deciding = prompt.purpose !== undefined;
-      const lines = bubbleLines(deciding ? said : [...said, ...asked], wizard);
-      this.reply([...lines, deciding ? "Decision waiting - answer it in Dum" : "Dum is waiting for your answer in Dum"]);
+      this.reply(bubbleLines([deciding ? DECISION_WAITING : asked.at(-1) ?? prompt.question], wizard));
       return;
     }
     if (done) {
@@ -505,15 +635,19 @@ export class Router {
       const result = handoff?.requestId === sent.requestId ? handoff.result : null;
       const output = said.length ? said
         : notes.length || result ? [...notes, ...(result ? [result] : [])]
-        : state.stage.kind === "info" ? [state.stage.title, state.stage.body] : [];
+        : state.stage.kind === "info" ? [state.stage.body || state.stage.title] : [];
       if (output.length || wizard) this.reply(bubbleLines(output, wizard));
       else bubble.dismiss();
       return;
     }
-    this.reply(said.length ? bubbleLines(said, wizard) : [state.status.slice(0, 200) || "Dum is working…"]);
+    this.reply(said.length ? bubbleLines(said, wizard) : [firstSentence(state.status) || "Dum is working…"]);
   }
 
   private reply(lines: string[]): void {
+    if (!lines.length) {
+      this.o.bubble.dismiss();
+      return;
+    }
     const unchanged = lines.length === this.lastReply.length && lines.every((line, i) => line === this.lastReply[i]);
     this.lastReply = lines;
     if (this.o.native.windowVisible() && this.o.native.windowFocused()) {
@@ -534,7 +668,7 @@ export class Router {
   private zoneBinding<B extends InputBinding>(binding: B): B & { zoneId: ZoneId } {
     const live = this.live();
     if (!live || binding.zoneId === null || binding.zoneId !== live.zoneId || binding.zoneEpoch !== live.zoneEpoch) {
-      throw new Error("That was meant for a zone that isn't open any more - nothing happened");
+      throw new Error("That was meant for a goal that isn't open any more - nothing happened");
     }
     return binding as B & { zoneId: ZoneId };
   }
@@ -680,9 +814,34 @@ export class Router {
       case "circle-toggle":
         await native.circleToggle();
         return null;
+      case "circle-pick":
+        await this.pick(r.slot);
+        return null;
+      case "circle-collapse":
+        native.circleCollapse();
+        return null;
       case "circle-view":
         return null;
     }
+  }
+
+  /**
+   * "Pick … for me": the step must still be that goal's current one. The goal is entered if it isn't
+   * the active one, its canonical draft becomes the step's pick prompt, and that goes out exactly like
+   * a typed Send; refused while a request runs.
+   */
+  private async stepPick(zoneId: ZoneId, stepId: string): Promise<void> {
+    const { host, drafts } = this.o;
+    const view = host.view;
+    const step = view?.goals?.find((g) => g.id === zoneId)?.step ?? null;
+    if (!view || !step || step.id !== stepId) throw new Error("That step changed - nothing was sent");
+    if (!step.pick) throw new Error("That step has nothing for Dum to pick - nothing was sent");
+    if (this.submitting || view.runningRequestId) throw new Error("Dum is still working on your last request - nothing was sent");
+    if (view.registry.activeZoneId !== zoneId || view.activeZone?.id !== zoneId) await host.openZone(zoneId, view.registry.revision);
+    const live = this.live();
+    if (!live || live.zoneId !== zoneId) throw new Error("Dum couldn't open that goal - nothing was sent");
+    const draft = drafts.set(step.pick.prompt, drafts.current(live).revision, live, live);
+    await this.send(live, draft.revision);
   }
 
   private async apply(r: WindowRequest): Promise<Extra> {
@@ -703,9 +862,9 @@ export class Router {
       case "zone-delete": {
         const registry = host.view?.registry;
         const zone = registry?.zones.find((z) => z.id === r.id && z.deletedAt === null);
-        if (!registry || !zone) throw new Error("That zone doesn't exist any more");
+        if (!registry || !zone) throw new Error("That goal doesn't exist any more");
         const inside = subtree(registry, r.id).length - 1;
-        const detail = `${inside ? `This also deletes ${inside} zone${inside === 1 ? "" : "s"} inside it. ` : ""}Your skills, proof and notes stay; the zone's files are kept for inspection.`;
+        const detail = `${inside ? `This also deletes ${inside} goal${inside === 1 ? "" : "s"} inside it. ` : ""}Your skills, proof and notes stay; the goal's files are kept for inspection.`;
         if (!(await native.confirm(`Delete "${zone.name}"?`, detail, "Delete"))) return {};
         const deleted = await host.deleteZone(r.id, r.expectedRevision);
         drafts.drop(deleted.deletedIds);
@@ -727,8 +886,9 @@ export class Router {
         await host.interrupt();
         return {};
       case "view":
-        // The window switches its own views; the host loads what that view shows.
-        await host.selectView(r.view);
+        // Settings is its own panel now; other views switch inside the window, and the host loads what they show.
+        if (r.view === "settings") await this.openPanel({ kind: "settings" });
+        else await host.selectView(r.view);
         return {};
       case "command": {
         const binding = this.requestBinding(r.binding);
@@ -972,6 +1132,34 @@ export class Router {
         return {};
       case "quit":
         native.quit();
+        return {};
+      // Goals, steps and play.
+      case "panel":
+        await this.openPanel(r.panel);
+        return {};
+      case "goal-pin": {
+        const pins = this.pins();
+        if (!r.pinned) {
+          this.o.settings.setPinned(pins.filter((id) => id !== r.id));
+          return {};
+        }
+        if (pins.includes(r.id)) return {};
+        if (!host.view?.registry.zones.some((z) => z.id === r.id && z.deletedAt === null)) throw new Error("That goal doesn't exist any more");
+        if (pins.length >= 3) throw new Error("You can pin up to three goals - unpin one first");
+        this.o.settings.setPinned([...pins, r.id]);
+        return {};
+      }
+      case "goal-skip":
+        await host.goalSkip(r.id, r.skip);
+        return {};
+      case "step-skip":
+        await host.stepSkip(r.zoneId, r.stepId, r.confirmed);
+        return {};
+      case "step-pick":
+        await this.stepPick(r.zoneId, r.stepId);
+        return {};
+      case "play":
+        await host.play(r.skill);
         return {};
     }
   }

@@ -26,11 +26,11 @@ test("model labels name the backend, model and effort, and set only on change", 
   s.subscribe(() => void changes++);
   s.setModel("intern", { backend: "claude", model: "claude-opus-5-5", effort: "high" });
   s.setModel("intern", { backend: "claude", model: "claude-opus-5-5", effort: "high" });
-  s.setModel("helper", { backend: "local", model: "qwen3:8b", effort: null });
+  s.setModel("helper", { backend: "claude", model: "fable", effort: null });
   assert.equal(changes, 2, "the same label twice is no change");
   assert.deepEqual(s.getSnapshot().models, {
     intern: { backend: "claude", model: "claude-opus-5-5", effort: "high" },
-    helper: { backend: "local", model: "qwen3:8b", effort: null },
+    helper: { backend: "claude", model: "fable", effort: null },
     look: null,
   });
   s.setModel("intern", null);

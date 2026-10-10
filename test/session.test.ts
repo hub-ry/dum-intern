@@ -32,7 +32,7 @@ function fakeBackend() {
   let closed = 0;
   let script: Script = async function* () { yield { type: "end", error: null, interrupted: false }; };
   const backend: AgentBackend = {
-    id: "local",
+    id: "claude",
     label: "Fake",
     models: async () => [],
     capabilities: async (selector) => ({ model: selector.model, images: false, noImages: "it can't see pictures", interrupt: true, runtimeActionCheck: true }),
@@ -50,13 +50,13 @@ function fakeBackend() {
       return session;
     },
   };
-  const agent = createRegistry([backend], new Set(["local"]));
+  const agent = createRegistry([backend], new Set(["claude"]));
   agent.set({
-    backend: "local",
-    login: "none",
-    intern: { backend: "local", model: "fake-intern", effort: null },
-    helper: { backend: "local", model: "fake-helper", effort: null },
-    look: { backend: "local", model: "fake-look", effort: null },
+    backend: "claude",
+    login: "anthropic-key",
+    intern: { backend: "claude", model: "fake-intern", effort: null },
+    helper: { backend: "claude", model: "fake-helper", effort: null },
+    look: { backend: "claude", model: "fake-look", effort: null },
   });
   return { agent, opened, inputs, closes: () => closed, play: (s: Script) => { script = s; } };
 }
@@ -129,8 +129,8 @@ test("the zone's context and the request's shares reach the system prompt, and o
     assert.doesNotMatch(o.systemPrompt, /propose_plan|propose_change|create_file|run_command|course|wizard_aside/);
     assert.equal(o.actions.some((a) => a.name === "wizard_aside"), false, "no unprompted Wizard action");
     assert.equal(o.actions.some((a) => a.name === "decision_help"), false, "no Wizard action while the host offers no decide hook");
-    assert.deepEqual(o.selector, { backend: "local", model: "fake-intern", effort: null });
-    assert.equal(o.login, "none");
+    assert.deepEqual(o.selector, { backend: "claude", model: "fake-intern", effort: null });
+    assert.equal(o.login, "anthropic-key");
     assert.equal(o.cwd, join(s.home, "zones", s.zone.id, "runtime"));
     assert.ok(existsSync(o.cwd), "the zone's empty runtime directory is the session's cwd");
     assert.equal("binding" in o || "zone" in o, false, "the backend gets transport options only");
@@ -138,7 +138,7 @@ test("the zone's context and the request's shares reach the system prompt, and o
     assert.match(s.fake.inputs[0]!.text, /THEIR REQUEST:\nwhat should I build next\?$/);
     assert.equal(s.fake.closes(), 1, "one session per request, closed when it ends");
     assert.ok(grant.files.length === 1);
-    assert.deepEqual(s.store.getSnapshot().models.intern, { backend: "local", model: "fake-intern", effort: null });
+    assert.deepEqual(s.store.getSnapshot().models.intern, { backend: "claude", model: "fake-intern", effort: null });
   } finally { s.done(); }
 });
 

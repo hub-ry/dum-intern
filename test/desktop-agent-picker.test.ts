@@ -9,7 +9,6 @@ const status = (over: Partial<BackendStatus> & Pick<BackendStatus, "id">): Backe
   label: over.id, installed: true, methods: [], ready: null, loginRunning: false, message: "", ...over,
 });
 const claude = (over: Partial<BackendStatus> = {}) => status({ id: "claude", methods: ["anthropic-key"], ...over });
-const local = (over: Partial<BackendStatus> = {}) => status({ id: "local", methods: ["none"], ...over });
 const model = (id: string, over: Partial<ModelOption> = {}): ModelOption => ({ id, label: id, resolved: id, efforts: [], images: true, actions: true, verified: false, ...over });
 
 const CLAUDE_MODELS = [
@@ -32,21 +31,12 @@ test("an unreleased backend is never offered, even signed in", () => {
   assert.deepEqual(rows.map((r) => r.id), ["claude"]);
 });
 
-test("ready rows sort first and a single ready row is preselected", () => {
-  const rows = backendRows([claude(), local({ ready: "none" })]);
-  assert.deepEqual(rows.map((r) => r.id), ["local", "claude"]);
-  assert.equal(preselectedBackend(rows, null), "local");
-});
-
-test("two ready rows preselect nothing unless one was chosen before", () => {
-  const rows = backendRows([claude({ ready: "anthropic-key" }), local({ ready: "none" })]);
-  assert.equal(preselectedBackend(rows, null), null);
-  const chosen: AgentChoice = {
-    backend: "local", login: "none",
-    intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "m", effort: null }, look: { backend: "local", model: "m", effort: null },
-  };
-  assert.equal(preselectedBackend(rows, chosen), "local");
+test("a single ready row is preselected, and a saved backend still listed wins", () => {
+  assert.equal(preselectedBackend(backendRows([claude({ ready: "anthropic-key" })]), null), "claude");
   assert.equal(preselectedBackend(backendRows([claude()]), null), null);
+  const s = { backend: "claude" as const, model: "opus", effort: "high" };
+  const chosen: AgentChoice = { backend: "claude", login: "anthropic-key", intern: s, helper: s, look: s };
+  assert.equal(preselectedBackend(backendRows([claude()]), chosen), "claude");
 });
 
 test("the intern list holds only models with function calling; the helper list holds all", () => {
@@ -76,17 +66,17 @@ test("a default missing from the live catalog is not preselected", () => {
 });
 
 test("other backends preselect nothing until chosen, then keep the saved selector", () => {
-  const models = [model("qwen", { efforts: ["low", "high"] }), model("llava", { actions: false })];
-  assert.equal(preselectedSelector("local", "intern", models, null), null);
+  const models = [model("gpt-a", { efforts: ["low", "high"] }), model("gpt-eyes", { actions: false })];
+  assert.equal(preselectedSelector("chatgpt", "intern", models, null), null);
   const chosen: AgentChoice = {
-    backend: "local", login: "none",
-    intern: { backend: "local", model: "qwen", effort: "high" }, helper: { backend: "local", model: "llava", effort: null }, look: { backend: "local", model: "llava", effort: null },
+    backend: "chatgpt", login: "chatgpt",
+    intern: { backend: "chatgpt", model: "gpt-a", effort: "high" }, helper: { backend: "chatgpt", model: "gpt-eyes", effort: null }, look: { backend: "chatgpt", model: "gpt-eyes", effort: null },
   };
-  assert.deepEqual(preselectedSelector("local", "intern", models, chosen), chosen.intern);
-  assert.deepEqual(preselectedSelector("local", "helper", models, chosen), chosen.helper);
-  assert.deepEqual(preselectedSelector("local", "look", models, chosen), chosen.look);
+  assert.deepEqual(preselectedSelector("chatgpt", "intern", models, chosen), chosen.intern);
+  assert.deepEqual(preselectedSelector("chatgpt", "helper", models, chosen), chosen.helper);
+  assert.deepEqual(preselectedSelector("chatgpt", "look", models, chosen), chosen.look);
   // A saved intern that lost function calling isn't offered as the intern.
-  assert.equal(preselectedSelector("local", "intern", models, { ...chosen, intern: chosen.helper }), null);
+  assert.equal(preselectedSelector("chatgpt", "intern", models, { ...chosen, intern: chosen.helper }), null);
 });
 
 test("the look list holds only image-capable models and labels untested ones", () => {
@@ -101,7 +91,7 @@ test("an unverified look model carries a text-only warning", () => {
   assert.equal(lookWarning(null), "");
 });
 
-test("on a catalog shaped like Claude's, the look preselects haiku at low effort", () => {
+test("a fresh Claude choice on a catalog shaped like Claude's puts haiku on the look at low effort", () => {
   const efforts = ["low", "medium", "high", "xhigh", "max"];
   const alias = (id: string, resolved: string) => model(id, { resolved, efforts, verified: true });
   const catalog = [
@@ -111,14 +101,17 @@ test("on a catalog shaped like Claude's, the look preselects haiku at low effort
   assert.deepEqual(preselectedSelector("claude", "look", catalog, null), { backend: "claude", model: "haiku", effort: "low" });
   assert.deepEqual(preselectedSelector("claude", "intern", catalog, null), { backend: "claude", model: "opus", effort: "high" });
   assert.deepEqual(preselectedSelector("claude", "helper", catalog, null), { backend: "claude", model: "fable", effort: "high" });
+  const picks = { intern: preselectedSelector("claude", "intern", catalog, null), helper: preselectedSelector("claude", "helper", catalog, null), look: preselectedSelector("claude", "look", catalog, null) };
+  const fresh = buildChoice("claude", preselectedLogin(backendRows([claude()])[0]!, null), picks);
+  assert.equal(fresh?.look.model, "haiku");
 });
 
 test("a choice is complete only with all three roles on the chosen backend", () => {
   const s = { backend: "claude" as const, model: "claude-opus-5-5", effort: "high" };
   const all = { intern: s, helper: s, look: s };
   assert.equal(buildChoice("claude", null, all), null);
-  assert.equal(buildChoice("local", "none", all), null);
+  assert.equal(buildChoice("chatgpt", "chatgpt", all), null);
   assert.equal(buildChoice("claude", "anthropic-key", { ...all, look: null }), null);
-  assert.equal(buildChoice("claude", "anthropic-key", { ...all, look: { ...s, backend: "local" } }), null);
+  assert.equal(buildChoice("claude", "anthropic-key", { ...all, look: { ...s, backend: "chatgpt" } }), null);
   assert.deepEqual(buildChoice("claude", "anthropic-key", all), { backend: "claude", login: "anthropic-key", intern: s, helper: s, look: s });
 });

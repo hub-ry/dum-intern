@@ -1,11 +1,13 @@
-// Where Dum's surfaces go, how the circle tells a click from a drag, and how long the cursor bubble
-// stays (docs/circle-design.md §2, §3, §7). Pure logic with injected clocks and focus, so placement,
-// gestures, display changes, TTLs and focus return are tested without Electron. Coordinates are DIP
-// in Electron's global screen space: origins can be negative, and nothing here multiplies by a scale
-// factor.
+// Where Dum's surfaces go, how the circle tells a click from a drag, how the column of circles and
+// its panels are laid out, and how long the bubble stays (docs/circle-design.md, "Superseded parts
+// (goals column)"). Pure logic with injected clocks and focus, so placement, gestures, display
+// changes, TTLs and focus return are tested without Electron. Coordinates are DIP in Electron's
+// global screen space: origins can be negative, and nothing here multiplies by a scale factor.
 
+import { STEP_LIMITS, type StepView } from "../step-types.ts";
 import type { FocusBridge } from "./native-protocol.ts";
-import type { BubbleView } from "./protocol.ts";
+import type { WizardChime } from "../observe-types.ts";
+import type { BubbleView, PanelRef } from "./protocol.ts";
 
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
@@ -45,20 +47,44 @@ export const CIRCLE = {
   placements: 16,
 } as const;
 
-/** The working window: fixed size, shrunk to the work area; its narrow layout works down to WINDOW_MIN. */
-export const WINDOW_SIZE: Size = { width: 640, height: 720 };
-export const WINDOW_MIN: Size = { width: 360, height: 480 };
-/** Gap between the circle and the working window beside it. */
-export const WINDOW_GAP = 12;
+/**
+ * The expanded column: the circle's window grown down into one slot per circle, `pitch` apart, each
+ * a 56 DIP disk, on one shared capsule background `pad` inside the window.
+ */
+export const COLUMN = {
+  pitch: 64,
+  /** Dum, up to three goals, the skill tree, the monitor, settings. */
+  slots: 7,
+  pad: 2,
+  /** With no pointer over it this long, the column folds back into one circle. */
+  idleMs: 8_000,
+  /** The page's fold animation; main shrinks the window back to the circle after it. */
+  foldMs: 280,
+} as const;
 
-/** A ready voice draft stays 20 s. A reply is read, not heard, so it stays 15 s. */
-export const BUBBLE_TTL = { ready: 20_000, reply: 15_000, error: 8_000 } as const;
+/** Each panel's size before it is shrunk to the work area. */
+export const PANEL_SIZE: Record<PanelRef["kind"], Size> = {
+  dum: { width: 400, height: 560 },
+  goal: { width: 440, height: 640 },
+  tree: { width: 760, height: 560 },
+  monitor: { width: 400, height: 560 },
+  settings: { width: 400, height: 560 },
+};
+/** The circle floats over the panel's corner: every panel keeps this square clear at both top corners. */
+export const PANEL_CLEAR = 36;
+/**
+ * The thought cloud beside the circle (step and wizard bubbles): the cloud itself, plus a strip on
+ * the circle's side where its puffs trail off toward the circle.
+ */
+export const THOUGHT = { cloud: { width: 340, height: 150 }, puffs: 40, gap: 4 } as const;
+
+/**
+ * A ready voice draft stays 20 s. A reply is read, not heard, so it stays 15 s. The Wizard jumping in
+ * stays 20 s. A step stays until it changes.
+ */
+export const BUBBLE_TTL = { ready: 20_000, reply: 15_000, error: 8_000, wizard: 20_000 } as const;
 /** Recording has a two-minute ceiling; nothing in the bubble outlives it. */
 const RECORDING_MS = 2 * 60_000;
-export const BUBBLE_LINES = 8;
-export const BUBBLE_CHARS = 600;
-/** The last line of a cut reply; the bubble is click-through, so it only points at the Open shortcut. */
-export const BUBBLE_OPEN = "Open Dum for the full reply";
 
 /** `size` shrunk to fit inside `area` with the margin on every side. */
 function fit(size: Size, area: Rect): Size {
@@ -188,20 +214,72 @@ export function insideDisk(point: Point, circle: Rect): boolean {
   return dx * dx + dy * dy <= CIRCLE.radius * CIRCLE.radius;
 }
 
+/** The center of the circle's disk. */
+export function diskCenter(circle: Rect): Point {
+  return { x: circle.x + circle.width / 2, y: circle.y + circle.height / 2 };
+}
+
 /**
- * The working window beside the circle: right of it with a 12 DIP gap, vertically centered on it;
- * left when the right doesn't fit; otherwise the side with more room, clamped (it may then overlap
- * the circle). Shrunk to the work area with 8 DIP margins.
+ * A panel opened from the circle: its top-left corner at the disk's center, so the circle sits on
+ * the corner. Flipped to put its top-right corner there when there's no room on the right, and its
+ * bottom corner when there's no room below; shrunk to the work area and clamped.
  */
-export function placeWindow(circle: Rect, area: Rect, wanted: Size): Rect {
-  const size = fit(wanted, area);
-  const y = circle.y + circle.height / 2 - size.height / 2;
-  const right = circle.x + circle.width + WINDOW_GAP;
-  const left = circle.x - WINDOW_GAP - size.width;
-  const roomRight = area.x + area.width - MARGIN - right;
-  const roomLeft = circle.x - WINDOW_GAP - (area.x + MARGIN);
-  const x = roomRight >= size.width ? right : roomLeft >= size.width ? left : roomRight >= roomLeft ? right : left;
-  return clampInto({ x, y, ...size }, area);
+export function placePanel(disk: Point, area: Rect, size: Size): Rect {
+  const s = fit(size, area);
+  const x = disk.x + s.width <= area.x + area.width - MARGIN ? disk.x : disk.x - s.width;
+  const y = disk.y + s.height <= area.y + area.height - MARGIN ? disk.y : disk.y - s.height;
+  return clampInto({ x, y, ...s }, area);
+}
+
+/**
+ * The expanded column for `slots` circles: the circle's window grown down from where the circle is,
+ * shifted up when that would leave the work area. The first slot is the circle's own place unless shifted.
+ */
+export function columnRect(circle: Rect, area: Rect, slots: number): Rect {
+  const height = Math.max(1, Math.min(slots, COLUMN.slots)) * COLUMN.pitch;
+  const bottom = area.y + area.height - CIRCLE.inset;
+  const y = Math.max(area.y + CIRCLE.inset, Math.min(circle.y, bottom - height));
+  return { x: circle.x, y: Math.round(y), width: CIRCLE.window, height };
+}
+
+/** The center of slot `index` in a column. */
+export function slotCenter(column: Rect, index: number): Point {
+  return { x: column.x + column.width / 2, y: column.y + COLUMN.pitch / 2 + index * COLUMN.pitch };
+}
+
+/** Which of the column's `slots` disks the pointer is on; null between disks or outside. */
+export function slotAt(point: Point, column: Rect, slots: number): number | null {
+  for (let i = 0; i < Math.min(slots, COLUMN.slots); i++) {
+    const c = slotCenter(column, i);
+    const dx = point.x - c.x;
+    const dy = point.y - c.y;
+    if (dx * dx + dy * dy <= CIRCLE.radius * CIRCLE.radius) return i;
+  }
+  return null;
+}
+
+/** The pointer is on the column's shared background (a capsule around every disk), not its transparent corners. */
+export function insideColumn(point: Point, column: Rect): boolean {
+  const r = column.width / 2 - COLUMN.pad;
+  const top = column.y + COLUMN.pad + r;
+  const bottom = Math.max(top, column.y + column.height - COLUMN.pad - r);
+  const cx = column.x + column.width / 2;
+  const cy = Math.min(Math.max(point.y, top), bottom);
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  return dx * dx + dy * dy <= r * r;
+}
+
+/**
+ * The thought cloud beside the circle, top-aligned with it: right of it, or left of it when the
+ * circle is near the right edge; then clamped. `toward` is the window's side facing the circle.
+ */
+export function placeThought(circle: Rect, area: Rect): { rect: Rect; toward: "left" | "right" } {
+  const size = fit({ width: THOUGHT.cloud.width + THOUGHT.puffs, height: THOUGHT.cloud.height }, area);
+  const right = circle.x + circle.width + THOUGHT.gap;
+  const fits = right + size.width <= area.x + area.width - MARGIN;
+  const x = fits ? right : circle.x - THOUGHT.gap - size.width;
+  return { rect: clampInto({ x, y: circle.y, ...size }, area), toward: fits ? "left" : "right" };
 }
 
 type Live = { id: string; start: Point; bounds: Rect; at: number; dragging: boolean; onDisk: boolean };
@@ -221,10 +299,13 @@ export class CircleGesture {
     return this.live?.id ?? null;
   }
 
-  /** A primary press. One on the transparent padding never toggles or drags. */
-  begin(pointer: Point, bounds: Rect): string {
+  /**
+   * A primary press. One on the transparent padding never toggles or drags; `onDisk` is the hit test
+   * for what the window shows (the circle's disk by default, the column's background when expanded).
+   */
+  begin(pointer: Point, bounds: Rect, onDisk = insideDisk(pointer, bounds)): string {
     const id = crypto.randomUUID();
-    this.live = { id, start: { ...pointer }, bounds: { ...bounds }, at: this.now(), dragging: false, onDisk: insideDisk(pointer, bounds) };
+    this.live = { id, start: { ...pointer }, bounds: { ...bounds }, at: this.now(), dragging: false, onDisk };
     return id;
   }
 
@@ -273,44 +354,62 @@ export class CircleGesture {
 
 // -- the bubble ---------------------------------------------------------------------------------
 
-/** At most eight lines and 600 characters of what Dum and the Wizard actually said; never a summary. */
+/**
+ * The first sentence of `text`: up to the first sentence end or paragraph break, whitespace
+ * collapsed, at most `max` characters (ellipsized). "" when there's nothing.
+ */
+export function firstSentence(text: string, max: number = STEP_LIMITS.text): string {
+  const paragraph = text.trim().split(/\n\s*\n/)[0] ?? "";
+  const flat = paragraph.replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+  const sentence = /^.*?[.!?…](?=\s|$)/.exec(flat)?.[0] ?? flat;
+  return sentence.length > max ? `${sentence.slice(0, max - 1).trimEnd()}…` : sentence;
+}
+
+/** A reply in the bubble: one sentence of what Dum said, plus one "Wizard: …" sentence when the Wizard spoke. Never a summary. */
 export function bubbleLines(dum: readonly string[], wizard: string | null): string[] {
-  const out: string[] = [];
-  let budget = BUBBLE_CHARS;
-  let cut = false;
-  for (const text of [...dum, ...(wizard ? [`Wizard: ${wizard.replace(/\s+/g, " ").trim()}`] : [])]) {
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (out.length >= BUBBLE_LINES - 1 || budget <= 0) {
-        cut = true;
-        break;
-      }
-      const piece = trimmed.length > budget ? `${trimmed.slice(0, Math.max(0, budget - 1))}…` : trimmed;
-      if (piece !== trimmed) cut = true;
-      out.push(piece);
-      budget -= piece.length;
-    }
-  }
-  if (cut) out.push(BUBBLE_OPEN);
-  return out;
+  const said = firstSentence(dum.map((t) => t.trim()).filter(Boolean).join("\n\n"));
+  const aside = wizard ? firstSentence(wizard, STEP_LIMITS.text - "Wizard: ".length) : "";
+  return [...(said ? [said] : []), ...(aside ? [`Wizard: ${aside}`] : [])];
 }
 
 export type BubblePorts = {
-  /** Show `view`, or hide with null. `fresh` marks a new interaction, which anchors at the cursor once. */
+  /**
+   * Show `view`, or hide with null. `fresh` marks a new interaction: a voice or reply anchors at the
+   * cursor once; a step is always placed beside the circle.
+   */
   publish(view: BubbleView | null, fresh: boolean): void;
   now?(): number;
   /** One-shot timer; returns its cancel. */
   after?(ms: number, run: () => void): () => void;
 };
 
+type Passing = Extract<BubbleView, { kind: "voice" | "reply" }>;
+type Chime = Extract<BubbleView, { kind: "wizard" }>;
+
+function copy(view: BubbleView): BubbleView {
+  return view.kind === "step" ? { ...view, step: structuredClone(view.step) } : view.kind === "wizard" ? { ...view } : { ...view, lines: [...view.lines] };
+}
+
 /**
- * The cursor bubble's content and lifetime. It shows only while recording, transcribing or
- * answering, and goes away on its own after its TTL (BUBBLE_TTL).
+ * The bubble's content and lifetime. A voice status or a reply passes: it goes away on its own after
+ * its TTL (BUBBLE_TTL). The Wizard jumping in passes too, once per chime. The active goal's step
+ * stays: it shows whenever nothing passing is live and the working window isn't in front, until its
+ * id changes or it goes away. Voice wins over everything; between a reply and the Wizard, the newer.
  */
 export class Bubble {
-  private view: BubbleView | null = null;
+  private passing: Passing | null = null;
+  private chime: Chime | null = null;
+  /** Which of `passing` and `chime` came last. */
+  private chimeNewer = false;
+  /** The last chime id handed in, shown or not: a chime shows at most once. */
+  private chimeId: string | null = null;
+  private held: StepView | null = null;
+  private front = false;
+  private suspended = false;
+  private shown: BubbleView | null = null;
   private cancel: (() => void) | null = null;
+  private cancelChime: (() => void) | null = null;
   private readonly now: () => number;
   private readonly after: (ms: number, run: () => void) => () => void;
 
@@ -323,40 +422,112 @@ export class Bubble {
     });
   }
 
+  /** What is showing now, or null. */
   get current(): BubbleView | null {
-    return this.view ? { ...this.view, lines: [...this.view.lines] } : null;
+    return this.shown ? copy(this.shown) : null;
   }
 
   /** Recording or transcribing: no timer but the recording ceiling. */
   voice(lines: string[]): void {
-    this.show({ kind: "voice", lines, expiresAt: this.now() + RECORDING_MS });
+    this.pass({ kind: "voice", lines, expiresAt: this.now() + RECORDING_MS });
   }
 
   /** A voice draft is ready, or Dum is answering: shown until replaced or `ttl` passes. */
-  timed(kind: BubbleView["kind"], lines: string[], ttl: number): void {
-    this.show({ kind, lines, expiresAt: this.now() + ttl });
+  timed(kind: Passing["kind"], lines: string[], ttl: number): void {
+    this.pass({ kind, lines, expiresAt: this.now() + ttl });
   }
 
-  /** Explicit dismissal, zone switch, a decision, sleep or close. */
+  /** Explicit dismissal of what's passing: goal switch, a decision, voice cancel. A held step comes back. */
   dismiss(): void {
     this.cancel?.();
     this.cancel = null;
-    if (!this.view) return;
-    this.view = null;
-    this.ports.publish(null, false);
+    this.passing = null;
+    this.render();
   }
 
-  private show(view: BubbleView): void {
-    const fresh = this.view === null;
-    this.cancel?.();
-    this.view = view;
-    this.cancel = this.after(Math.max(0, view.expiresAt - this.now()), () => {
-      if (this.view !== view) return;
-      this.cancel = null;
-      this.view = null;
-      this.ports.publish(null, false);
+  /** The active goal's step, or null when there's none; the same id keeps the bubble as it is. */
+  step(step: StepView | null): void {
+    this.held = step ? structuredClone(step) : null;
+    this.render();
+  }
+
+  /**
+   * The Wizard's latest chime. A new id shows for BUBBLE_TTL.wizard, unless the working window is in
+   * front (its panel shows it) or Dum is asleep; either way that chime is spent.
+   */
+  wizard(chime: WizardChime | null): void {
+    if (!chime || chime.id === this.chimeId) return;
+    this.chimeId = chime.id;
+    if (this.front || this.suspended) return;
+    this.cancelChime?.();
+    const view: Chime = { kind: "wizard", text: chime.text, expiresAt: this.now() + BUBBLE_TTL.wizard };
+    this.chime = view;
+    this.chimeNewer = true;
+    this.cancelChime = this.after(BUBBLE_TTL.wizard, () => {
+      if (this.chime !== view) return;
+      this.cancelChime = null;
+      this.chime = null;
+      this.render();
     });
-    this.ports.publish({ ...view, lines: [...view.lines] }, fresh);
+    this.render(true);
+  }
+
+  /** The working window is visible and focused: the step and the Wizard are already in front of them, so they hide meanwhile. */
+  windowFront(front: boolean): void {
+    if (front === this.front) return;
+    this.front = front;
+    this.render();
+  }
+
+  /** Sleep, lock or quit: nothing shows until resumed. Anything passing is dropped, and nothing new passes meanwhile. */
+  suspend(on: boolean): void {
+    if (on) {
+      this.cancel?.();
+      this.cancelChime?.();
+      this.cancel = this.cancelChime = null;
+      this.passing = this.chime = null;
+    }
+    this.suspended = on;
+    this.render();
+  }
+
+  private pass(view: Passing): void {
+    if (this.suspended) return;
+    this.cancel?.();
+    this.passing = view;
+    this.chimeNewer = false;
+    this.cancel = this.after(Math.max(0, view.expiresAt - this.now()), () => {
+      if (this.passing !== view) return;
+      this.cancel = null;
+      this.passing = null;
+      this.render();
+    });
+    this.render(true);
+  }
+
+  private render(replaced = false): void {
+    const before = this.shown;
+    const chime = this.front ? null : this.chime;
+    const next: BubbleView | null = this.suspended ? null
+      : this.passing?.kind === "voice" ? this.passing
+      : this.passing && chime ? (this.chimeNewer ? chime : this.passing)
+      : this.passing ?? chime ?? (this.held && !this.front ? { kind: "step", step: this.held, expiresAt: 0 } : null);
+    if (!next) {
+      this.shown = null;
+      if (before) this.ports.publish(null, false);
+      return;
+    }
+    if (next.kind === "step") {
+      if (before?.kind === "step" && JSON.stringify(before.step) === JSON.stringify(next.step)) return;
+      this.shown = next;
+      this.ports.publish(copy(next), before?.kind !== "step" || before.step.id !== next.step.id);
+      return;
+    }
+    if (!replaced && before === next) return;
+    this.shown = next;
+    // A voice or reply after a cloud beside the circle starts a new cursor anchor; voice to reply keeps it.
+    const fresh = next.kind === "wizard" ? before !== next : before === null || before.kind === "step" || before.kind === "wizard";
+    this.ports.publish(copy(next), fresh);
   }
 }
 

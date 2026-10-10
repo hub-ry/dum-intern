@@ -10,12 +10,13 @@ import {
   HandoffEditInputSchema, HandoffReviewInputSchema, HandoffSelectInputSchema, HandoffViewSchema, IgnoreObservationInputSchema,
 } from "../delegation-types.ts";
 import { DebugBindingSchema, DebugTextSchema, DebugViewSchema, MainStatusSchema, SanitizedMainEventsSchema } from "../diagnostic-types.ts";
-import { HostLookStatusSchema, TickSchema } from "../observe-types.ts";
+import { HostLookStatusSchema, LOOK_LOG, LookLogEntrySchema, TickSchema, WizardChimeSchema } from "../observe-types.ts";
 import { IdSchema, InputBindingSchema, RequestBindingSchema, ShareGrantSchema, TokenSchema } from "../share-types.ts";
 import {
   SessionMetaSchema, StoryPageSchema, StoryQuerySchema, TrailMapInputSchema, TrailPageSchema, TrailQuerySchema, TrailSourceSchema, TrailViewSchema,
 } from "../trail-types.ts";
 import { ChangeReceiptSchema, FollowGrantSchema, ShaSchema, SkillRefSchema, ZoneContextSchema, ZoneRegistrySchema, ZoneSchema } from "../zone-types.ts";
+import { GoalViewSchema, NextSkillSchema, StepIdSchema, STEP_LIMITS } from "../step-types.ts";
 import {
   CommandNameSchema, ModeSchema, RecordSchema, RespondDecisionSchema, ShareKindSchema, SkillEditOpSchema, TreeSyncSchema, ViewNameSchema,
   ZoneContextTextSchema, ZoneCreateSchema, ZonePatchSchema, DesktopPreferencesSchema,
@@ -23,11 +24,12 @@ import {
 import type { CredentialNeed, ModelOption } from "../agent/types.ts";
 import type { ContextUsePage, ContextUseView, DecisionView, Direction, DirectionView, HandoffView } from "../delegation-types.ts";
 import type { DebugView } from "../diagnostic-types.ts";
-import type { HostLookStatus } from "../observe-types.ts";
+import type { HostLookStatus, LookLogEntry, WizardChime } from "../observe-types.ts";
 import type { ShareGrant } from "../share-types.ts";
 import type { SessionMeta, StoryPage, TrailPage, TrailSource, TrailView } from "../trail-types.ts";
 import type { ChangeReceipt, FollowGrant, Zone, ZoneContext, ZoneId, ZoneRegistry } from "../zone-types.ts";
 import type { State } from "../store-types.ts";
+import type { GoalView, NextSkill } from "../step-types.ts";
 import type { View } from "../web/view.ts";
 
 const text = z.string().max(48 * 1024);
@@ -118,6 +120,11 @@ export const HostRequestSchema = z.discriminatedUnion("op", [
   z.object({ ...op("debug-reset") }).strict(),
   /** Trusted main's sanitized events and, when they changed, its status; the host assigns sequence and time. */
   z.object({ ...op("diagnostic-main"), events: SanitizedMainEventsSchema, status: MainStatusSchema.nullable() }).strict(),
+  // Goals: skip a whole goal (or take the mark back), skip the goal's current step, and play.
+  z.object({ ...op("goal-skip"), zoneId: IdSchema, skip: z.boolean() }).strict(),
+  z.object({ ...op("step-skip"), zoneId: IdSchema, stepId: StepIdSchema, confirmed: z.boolean() }).strict(),
+  /** null: Dum picks the next skill. */
+  z.object({ ...op("play"), skill: SkillRefSchema.nullable() }).strict(),
 ]);
 export type HostRequest = z.infer<typeof HostRequestSchema>;
 
@@ -154,6 +161,10 @@ export type HostEvent =
     look: HostLookStatus;
     direction: DirectionView | null; decision: DecisionView | null; handoff: HandoffView | null; contextUse: ContextUseView;
     session: SessionMeta | null; trail: TrailView | null;
+    /** Every live goal (zone), registry order, each with its progress and one next step. */
+    goals: GoalView[]; next: NextSkill | null;
+    /** The Monitor's context log, oldest first, and the Wizard's latest chime: host memory only. */
+    lookLog: LookLogEntry[]; wizard: WizardChime | null;
   }
   /** Debug chat's own state, separate from any zone's. */
   | { type: "debug-state"; epoch: string; view: DebugView | null }
@@ -217,14 +228,14 @@ export const StateSchema = z.object({
 }).strict() satisfies z.ZodType<State>;
 
 const nodeView = z.object({
-  name: skillName, state: z.enum(["built", "recognized", "open", "locked"]), level: level.nullable(),
+  name: skillName, state: z.enum(["built", "recognized", "open", "locked"]), level: level.nullable(), trusted: z.boolean(),
   needs: z.array(skillName).max(200), requires: z.array(skillName).max(200), next: line, depth: z.number().int().nonnegative(),
 }).strict();
 export const ViewSchema = z.object({
   tracks: z.array(z.object({
     name: line, lang: langName, done: z.number().int().nonnegative(), total: z.number().int().nonnegative(), nodes: z.array(nodeView).max(2000),
   }).strict()).max(500),
-  off: z.array(z.object({ name: skillName, lang: langName, level }).strict()).max(5000),
+  off: z.array(z.object({ name: skillName, lang: langName, level, trusted: z.boolean() }).strict()).max(5000),
   count: z.number().int().nonnegative(),
   usableBuilt: z.number().int().nonnegative(),
 }).strict() satisfies z.ZodType<View>;
@@ -258,6 +269,8 @@ export const HostEventSchema = z.discriminatedUnion("type", [
     follows: z.array(FollowGrantSchema).max(64), changes: z.array(ChangeReceiptSchema).max(200), look: HostLookStatusSchema,
     direction: DirectionViewSchema.nullable(), decision: DecisionViewSchema.nullable(), handoff: HandoffViewSchema.nullable(),
     contextUse: ContextUseViewSchema, session: SessionMetaSchema.nullable(), trail: TrailViewSchema.nullable(),
+    goals: z.array(GoalViewSchema).max(STEP_LIMITS.goals), next: NextSkillSchema.nullable(),
+    lookLog: z.array(LookLogEntrySchema).max(LOOK_LOG.entries), wizard: WizardChimeSchema.nullable(),
   }).strict()
     .refine((e) => e.direction === null || e.direction.zoneId === e.activeZone?.id, "state carries only the active zone's alignment")
     .refine((e) => e.session === null || e.session.zoneId === e.activeZone?.id, "state carries only the active zone's session")

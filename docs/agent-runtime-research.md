@@ -1,5 +1,7 @@
 # Agent runtime research: making Dum agent-agnostic
 
+> **Note, 2026-10-10.** The local model backend (Ollama, LM Studio) was removed; Dum connects only through a cloud API key. The local sections below are history.
+
 Research date: 2026-10-08. Branch `revamp-zones`. This doc covers only the model runtime. Zones, the menu bar, the command bar and the voice bubble are designed in `docs/revamp-design.md`, written in parallel. §5 maps this work onto that design's slices.
 
 **Labels.** A linked claim was read in that primary source on the research date. **[unverified]** means a primary source could not confirm it. **[inference]** means a conclusion drawn from verified facts that no source states outright. Version numbers are the latest published on the research date.

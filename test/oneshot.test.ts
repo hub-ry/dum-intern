@@ -16,7 +16,7 @@ function fake(reply: (input: UserTurn, o: OpenOptions) => AsyncGenerator<AgentEv
   const inputs: UserTurn[] = [];
   let closed = 0;
   const backend: AgentBackend = {
-    id: "local",
+    id: "claude",
     label: "Fake",
     models: async () => [],
     capabilities: async (selector) => ({
@@ -34,13 +34,13 @@ function fake(reply: (input: UserTurn, o: OpenOptions) => AsyncGenerator<AgentEv
       };
     },
   };
-  const agent = createRegistry([backend], new Set(["local"]));
+  const agent = createRegistry([backend], new Set(["claude"]));
   agent.set({
-    backend: "local",
-    login: "none",
-    intern: { backend: "local", model: "big-intern", effort: "high" },
-    helper: { backend: "local", model: "small-helper", effort: null },
-    look: { backend: "local", model: "eyes", effort: null },
+    backend: "claude",
+    login: "anthropic-key",
+    intern: { backend: "claude", model: "big-intern", effort: "high" },
+    helper: { backend: "claude", model: "small-helper", effort: null },
+    look: { backend: "claude", model: "eyes", effort: null },
   });
   return { agent, opened, inputs, closes: () => closed };
 }
@@ -53,12 +53,12 @@ test("a one-shot runs on the helper selector with no actions, one turn and the c
   });
   assert.equal(await oneShot("what is 2 + 2?", { agent: f.agent, role: "helper", cwd: "/tmp/dum/zones/z/runtime" }), "the answer");
   const o = f.opened[0]!;
-  assert.deepEqual(o.selector, { backend: "local", model: "small-helper", effort: null });
+  assert.deepEqual(o.selector, { backend: "claude", model: "small-helper", effort: null });
   assert.deepEqual(o.actions, []);
   assert.equal(o.maxTurns, 1);
   assert.equal(o.cwd, "/tmp/dum/zones/z/runtime");
   assert.deepEqual(Object.keys(o).sort(), ["actions", "cwd", "login", "maxTurns", "selector", "signal", "systemPrompt"], "transport options only");
-  assert.equal(o.login, "none");
+  assert.equal(o.login, "anthropic-key");
   assert.match(o.systemPrompt, /no tools, files or web access/);
   assert.deepEqual(f.inputs, [{ text: "what is 2 + 2?" }]);
   assert.equal(f.closes(), 1);
@@ -94,7 +94,7 @@ test("a live look runs on the look selector, never the helper's", async () => {
     yield { type: "end", error: null, interrupted: false };
   });
   assert.equal(await oneShot("look", { agent: f.agent, role: "look", cwd: "/tmp", images: [PNG] }), "{}");
-  assert.deepEqual(f.opened[0]!.selector, { backend: "local", model: "eyes", effort: null });
+  assert.deepEqual(f.opened[0]!.selector, { backend: "claude", model: "eyes", effort: null });
   const blind = fake(async function* () { yield { type: "text", text: "never" }; }, false);
   await assert.rejects(oneShot("look", { agent: blind.agent, role: "look", cwd: "/tmp", images: [PNG] }), /eyes can't see pictures - choose a look model/);
   assert.equal(blind.opened.length, 0);

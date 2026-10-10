@@ -16,7 +16,7 @@ import { HostEventSchema, type HostEvent, type HostResult } from "../src/desktop
 import { DEFAULT_PREFERENCES } from "../src/desktop/protocol.ts";
 import { LOOK } from "../src/observe-types.ts";
 import * as skills from "../src/skills.ts";
-import type { AgentBackend, AgentChoice, AgentEvent, BackendId, CredentialSource } from "../src/agent/types.ts";
+import type { AgentBackend, AgentChoice, AgentEvent, CredentialSource } from "../src/agent/types.ts";
 import type { DecisionView, DirectionView } from "../src/delegation-types.ts";
 import type { RequestBinding } from "../src/share-types.ts";
 import type { Zone } from "../src/zone-types.ts";
@@ -25,10 +25,11 @@ const NOTE = "working on a counter loop in counter.py";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const ID = /"id":"([0-9a-f-]{36})"/;
 
-/** The look's scripted replies, one per call: a note with a topic, then a null note with a new topic. */
+/** The look's scripted replies, one per call: a note with a topic, then a null note with a new topic from someone stuck. */
+const STUCK = { why: "the same while loop runs forever again", hint: "Check whether count ever changes inside the loop." };
 const LOOKS = [
   { note: NOTE, topics: [{ topic: "a for loop", skill: { name: "for loops", lang: "python" }, confidence: 1, reason: "range(3) is visible" }] },
-  { note: null, topics: [{ topic: "a while loop", skill: { name: "while loops", lang: "python" }, confidence: 0.9, reason: "while count < 3 is visible" }] },
+  { note: null, topics: [{ topic: "a while loop", skill: { name: "while loops", lang: "python" }, confidence: 0.9, reason: "while count < 3 is visible" }], confused: STUCK },
 ];
 
 /** The Wizard's scripted decision cards: the goal is the first context ref, so options cite it. */
@@ -62,14 +63,14 @@ function wizardReply(prompt: string): string {
   });
 }
 
-/** A backend that answers from the turn's text. Only "claude" may ever open a session here. */
-function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend {
+/** A Claude backend that answers from the turn's text. */
+function fakeBackend(credential: CredentialSource): AgentBackend {
   const end: AgentEvent = { type: "end", error: null, interrupted: false };
   let looks = 0;
   const proven = new Set<string>();
   return {
-    id,
-    label: `Fake ${id}`,
+    id: "claude",
+    label: "Fake claude",
     async models(_login, signal) {
       const key = await credential("anthropic-key", signal);
       const id = key?.value ?? "no-key";
@@ -81,7 +82,6 @@ function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend 
       return { resolved: selector.model };
     },
     async open(o) {
-      if (id !== "claude") throw new Error(`the ${id} backend was never chosen`);
       return {
         async *turn(input) {
           if (!o.actions.length) {
@@ -140,7 +140,7 @@ function fakeBackend(id: BackendId, credential: CredentialSource): AgentBackend 
             yield end;
             return;
           }
-          yield { type: "text", text: `from ${id}` };
+          yield { type: "text", text: "from claude" };
           yield end;
         },
         async interrupt() {},
@@ -352,7 +352,7 @@ if (process.env.DUM_FAKE_HOST === "1") {
     epoch: process.env.DUM_HOST_EPOCH!,
     credentialMs: Number(process.env.DUM_TEST_CREDENTIAL_MS),
     frameMs: 500,
-    backends: ({ credential }) => [fakeBackend("claude", credential), fakeBackend("local", credential)],
+    backends: ({ credential }) => [fakeBackend(credential)],
   });
 } else {
   test("the tree and settings work before any backend, and nested zones open with no Git on PATH", { timeout: 60_000 }, () => withHosts(async (f, launch) => {
@@ -548,6 +548,11 @@ if (process.env.DUM_FAKE_HOST === "1") {
     assert.deepEqual(both.trail!.visits.map((v) => [v.skill.name, v.mapping]), [["for loops", "exact"], ["while loops", "inferred"]]);
     const memory = readFileSync(join(f.home, "zones", z.id, "memory.md"), "utf8");
     assert.equal(memory.split(NOTE).length - 1, 1, "only the first look left a memory note");
+    // The second look saw them stuck: the Wizard chimes once with its one-sentence nudge, and the context log has it all.
+    const chimed = await host.until((e) => e.wizard !== null);
+    assert.equal(chimed.wizard!.text, STUCK.hint);
+    assert.deepEqual(chimed.lookLog.filter((l) => l.kind === "note" || l.kind === "wizard").map((l) => [l.kind, l.text]), [["note", NOTE], ["wizard", STUCK.hint]]);
+    assert.equal(chimed.state!.transcript.some((e) => "text" in e && e.text === STUCK.hint), false, "a chime isn't a conversation line");
 
     // Ignore this observation: it leaves Current context and the next decision's inputs.
     const latest = both.look.seen!;
@@ -574,6 +579,8 @@ if (process.env.DUM_FAKE_HOST === "1") {
     }
     const seen = await host.until((e) => e.look.status === "no-backend" && e.look.lastTick !== null);
     assert.equal(seen.look.seen, null);
+    assert.deepEqual(seen.lookLog.map((l) => [l.kind, l.text]), [["skipped", "No model is chosen, so nothing was sent"]], "the context log says why nothing was sent");
+    assert.equal(seen.wizard, null);
     assert.equal(host.events.some((e) => e.type === "frame-request"), false, "no frame was asked for");
     const memory = join(f.home, "zones", z.id, "memory.md");
     assert.ok(!existsSync(memory) || !readFileSync(memory, "utf8").includes(NOTE), "no helper call wrote a note");

@@ -47,8 +47,10 @@ export class Creature {
   private timer = 0;
   private cols: number;
 
-  constructor(who: "dum" | "wizard", scale: number) {
-    this.sprite = SPRITES[who];
+  /** `recolor` swaps palette characters for other hex colours in this drawing only; the art is unchanged. */
+  constructor(who: "dum" | "wizard", scale: number, recolor: Record<string, string> = {}) {
+    const base = SPRITES[who];
+    this.sprite = { ...base, palette: new Map([...base.palette].map(([ch, hex]) => [ch, hex === null ? null : recolor[ch] ?? hex])) };
     this.canvas = document.createElement("canvas");
     this.canvas.className = `sprite sprite-${who}`;
     this.canvas.setAttribute("aria-hidden", "true");

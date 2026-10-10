@@ -18,7 +18,7 @@ export type SelectPorts = {
 
 const KEY_REFUSED = "That key wasn't saved. Check it and paste it again.";
 
-const LABELS: Record<BackendId, string> = { claude: "Claude", chatgpt: "ChatGPT", local: "On this Mac", copilot: "GitHub Copilot" };
+const LABELS: Record<BackendId, string> = { claude: "Claude", chatgpt: "ChatGPT", copilot: "GitHub Copilot" };
 
 /** How a row reads before or without a status: never anything a backend said that might echo a secret. */
 function unknown(id: BackendId): BackendStatus {

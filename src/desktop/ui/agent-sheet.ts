@@ -1,6 +1,6 @@
-// "Who powers Dum?": pick a released backend, save its API key or check the local server, then pick the
-// intern, helper and look models. The same view is Settings → Agent. The renderer never sees a key after
-// sending it, and main checks every choice again against the backend's sign-ins and the live catalog.
+// Settings → Agent ("Who powers Dum?"): pick a released backend, save its API key, then pick the
+// intern, helper and look models. The renderer never sees a key after sending it, and main checks
+// every choice again against the backend's sign-ins and the live catalog.
 
 import type { Snapshot } from "../protocol.ts";
 import { ROLES } from "../../agent/schema.ts";
@@ -18,9 +18,9 @@ type Verify = { key: string } & ({ state: "busy" } | { state: "done" } | { state
 export const VERIFY_LABEL = "Verify for pictures (one small call)";
 
 const ROLE_TEXT: Record<Role, { title: string; hint: string }> = {
-  intern: { title: "Dum's model", hint: "Holds the conversation, runs handoffs you command with Do this and answers the debug chat, so it needs function calling." },
-  helper: { title: "Helper model", hint: "Composes the Wizard's options when you ask for help deciding, and reads pictures you share. Shared pictures need a model that can see pictures." },
-  look: { title: "Look model", hint: "Gets one fresh screen frame for each changed 3-second tick while looking is on, and notes what you're working on. It never teaches or advises. A small fast model keeps it cheap." },
+  intern: { title: "Dum's model", hint: "Runs the conversation and handoffs; needs function calling." },
+  helper: { title: "Helper model", hint: "Writes the Wizard's options and reads shared pictures." },
+  look: { title: "Look model", hint: "Gets one screen frame per change. A small fast model keeps it cheap." },
 };
 
 export class AgentSheet {
@@ -35,19 +35,13 @@ export class AgentSheet {
   private key = "";
   private keyInput = h("input", { class: "input", type: "password", autocomplete: "off", spellcheck: "false", "aria-label": "Anthropic API key", "data-focus": "key", placeholder: "sk-ant-…" });
 
-  /** `setup` is the sheet a first model request opens; `settings` is Settings → Agent. */
-  constructor(private client: Client, private mode: "setup" | "settings", private done: () => void = () => {}) {
+  /** Settings → Agent. */
+  constructor(private client: Client) {
     this.el = h(
       "section",
-      { class: `agent-sheet agent-${mode}`, "aria-labelledby": `agent-title-${mode}` },
-      h(mode === "setup" ? "h2" : "h3", { id: `agent-title-${mode}`, tabindex: "-1", class: mode === "setup" ? null : "visually-hidden" }, mode === "setup" ? "Who powers Dum?" : "Agent"),
-      h(
-        "p",
-        { class: "hint" },
-        mode === "setup"
-          ? "Dum needs a model before it can answer. Pick who runs it. Nothing you've written is sent anywhere until this is done."
-          : "Who runs Dum and the Wizard. Changing it ends the open conversation, the way switching zones does. Removing a key removes only that key.",
-      ),
+      { class: "agent-sheet", "aria-labelledby": "agent-title" },
+      h("h3", { id: "agent-title", tabindex: "-1", class: "visually-hidden" }, "Agent"),
+      h("p", { class: "hint" }, "Who runs Dum and the Wizard. Changing it ends the open conversation."),
       this.body,
     );
   }
@@ -116,7 +110,7 @@ export class AgentSheet {
       { class: "backend-rows", role: "radiogroup", "aria-label": "Backend" },
       ...rows.map((r) => {
         const radio = h("input", {
-          type: "radio", name: `backend-${this.mode}`, value: r.id, checked: r.id === this.backend, "data-focus": `backend-${r.id}`,
+          type: "radio", name: "backend", value: r.id, checked: r.id === this.backend, "data-focus": `backend-${r.id}`,
           onchange: () => {
             this.backend = r.id;
             this.redraw();
@@ -127,7 +121,7 @@ export class AgentSheet {
           { class: `backend-row${r.id === this.backend ? " picked" : ""}` },
           radio,
           h("span", { class: "backend-label" }, r.label),
-          r.ready ? h("span", { class: "chip chip-ok" }, r.ready === "none" ? "ready" : "signed in") : !r.installed ? h("span", { class: "chip chip-bad" }, "unavailable") : h("span", { class: "chip chip-muted" }, "not set up"),
+          r.ready ? h("span", { class: "chip chip-ok" }, "signed in") : !r.installed ? h("span", { class: "chip chip-bad" }, "unavailable") : h("span", { class: "chip chip-muted" }, "not set up"),
           r.message ? h("span", { class: "backend-message hint" }, r.message) : null,
         );
       }),
@@ -153,7 +147,7 @@ export class AgentSheet {
               "label",
               { class: "check" },
               h("input", {
-                type: "radio", name: `method-${this.mode}-${row.id}`, value: m, checked: m === login, "data-focus": `method-${m}`,
+                type: "radio", name: `method-${row.id}`, value: m, checked: m === login, "data-focus": `method-${m}`,
                 onchange: () => {
                   this.login.set(row.id, m);
                   this.redraw();
@@ -166,31 +160,27 @@ export class AgentSheet {
         ),
       );
     }
-    if (!login) return box;
-    if (login === "anthropic-key") {
-      if (row.ready === login) {
-        box.append(
-          h("p", { class: "hint" }, "An API key is saved. Dum never shows it again. Calls are billed to your Anthropic account."),
-          h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", "data-focus": "signout", onclick: () => void this.client.call({ type: "agent-signout", backend: row.id, method: login }) }, "Remove key")),
-        );
-      }
-      const form = h(
-        "form",
-        { class: "inline-form" },
-        h("label", { class: "field" }, h("span", {}, row.ready === login ? "Replace the key" : "Anthropic API key"), this.keyInput),
-        h("button", { type: "submit", class: "btn primary" }, icon("key"), "Save key"),
+    if (login !== "anthropic-key") return box;
+    if (row.ready === login) {
+      box.append(
+        h("p", { class: "hint" }, "An API key is saved. Dum never shows it again. Calls are billed to your Anthropic account."),
+        h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", "data-focus": "signout", onclick: () => void this.client.call({ type: "agent-signout", backend: row.id, method: login }) }, "Remove key")),
       );
-      form.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const key = this.keyInput.value.trim();
-        this.keyInput.value = "";
-        if (!key) return this.keyInput.focus();
-        void this.client.call({ type: "agent-key", backend: "claude", key });
-      });
-      box.append(form, h("p", { class: "hint" }, "The key goes to Dum's encrypted store on this Mac and is used only for Dum's own Claude sessions."));
-      return box;
     }
-    box.append(h("p", { class: "hint" }, row.ready ? "Running on this Mac. Nothing leaves it." : "Start Ollama or LM Studio on this Mac, then check again. Dum installs neither."));
+    const form = h(
+      "form",
+      { class: "inline-form" },
+      h("label", { class: "field" }, h("span", {}, row.ready === login ? "Replace the key" : "Anthropic API key"), this.keyInput),
+      h("button", { type: "submit", class: "btn primary" }, icon("key"), "Save key"),
+    );
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const key = this.keyInput.value.trim();
+      this.keyInput.value = "";
+      if (!key) return this.keyInput.focus();
+      void this.client.call({ type: "agent-key", backend: "claude", key });
+    });
+    box.append(form, h("p", { class: "hint" }, "The key goes to Dum's encrypted store on this Mac and is used only for Dum's own Claude sessions."));
     return box;
   }
 
@@ -214,12 +204,8 @@ export class AgentSheet {
         { class: "actions" },
         h("button", {
           type: "button", class: "btn primary", "data-focus": "use", disabled: !choice || same,
-          onclick: async () => {
-            if (!choice) return;
-            const r = await this.client.call({ type: "agent-select", choice });
-            if (r.ok) this.done();
-          },
-        }, this.mode === "setup" ? "Use" : same ? "In use" : "Save"),
+          onclick: () => choice && void this.client.call({ type: "agent-select", choice }),
+        }, same ? "In use" : "Save"),
       ),
     );
     return box;

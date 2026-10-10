@@ -2,9 +2,9 @@
 
 import type { z } from "zod";
 
-export type BackendId = "claude" | "chatgpt" | "local" | "copilot";
+export type BackendId = "claude" | "chatgpt" | "copilot";
 /** How a backend authenticates. Claude connects only with the user's own Anthropic API key. */
-export type LoginMethod = "anthropic-key" | "chatgpt" | "github" | "none";
+export type LoginMethod = "anthropic-key" | "chatgpt" | "github";
 /**
  * "intern" is the conversation; "helper" is every bounded one-shot (suggested projects, Wizard decisions,
  * picture descriptions); "look" is the live look's calls, which need a model that sees pictures.
@@ -58,7 +58,7 @@ export type Capabilities = {
 export type BackendStatus = {
   id: BackendId;
   label: string;
-  /** Bundled binary runs, or the endpoint answers. */
+  /** This build can run the backend (for Claude, its bundled binary runs). */
   installed: boolean;
   /** The sign-in methods this backend takes. */
   methods: readonly LoginMethod[];
@@ -138,7 +138,7 @@ export type CredentialNeed = "anthropic-key" | "chatgpt-access";
 export type CredentialSource = (need: CredentialNeed, signal: AbortSignal) =>
   Promise<{ value: string; expiresAt: number | null } | null>;
 
-// Shared by the ChatGPT and local adapters.
+// The ChatGPT adapter's wire shapes, which Dum's own loop speaks.
 export type WireCall = { id: string; name: string; arguments: string };
 export type WireMessage =
   | { role: "user"; text: string; images?: readonly Picture[] }

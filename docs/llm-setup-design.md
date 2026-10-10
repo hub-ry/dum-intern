@@ -1,5 +1,7 @@
 # Dum LLM setup design
 
+> **Note, 2026-10-10.** The local model backend (Ollama, LM Studio) was removed; Dum connects only through a cloud API key. The local sections below are history.
+
 > **Note, 2026-10-08.** This design is history. Where it names the revamp's panel, command bar, tray or Wizard asides, those surfaces are gone. For the circle, the one window, the Settings list and debug chat, see [circle-design.md](circle-design.md); for the rules, [architecture.md](architecture.md); for current backend behavior, the README and the code. The text below is left as it was.
 
 Status: design for the revamp. No slice is implemented, and no native Mac or real-model check has been run for it. The owner's decisions of 2026-10-08 are folded into the body; §10 lists what is still open.

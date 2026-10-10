@@ -449,7 +449,7 @@ async function launch(dirs, appDir) {
     PATH: bin,
     NO_AT_BRIDGE: '1',
   };
-  for (const key of Object.keys(env)) if (/(?:API_KEY|TOKEN|PASSWORD|SECRET)|^(?:ANTHROPIC_|OPENAI_|GOOGLE_|GEMINI_|VERTEX_|ANTIGRAVITY_|CLAUDE_CODE_|OLLAMA_)/i.test(key)) delete env[key];
+  for (const key of Object.keys(env)) if (/(?:API_KEY|TOKEN|PASSWORD|SECRET)|^(?:ANTHROPIC_|OPENAI_|GOOGLE_|GEMINI_|VERTEX_|ANTIGRAVITY_|CLAUDE_CODE_)/i.test(key)) delete env[key];
   for (const key of ['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR']) delete env[key];
   if (bus) env.DBUS_SESSION_BUS_ADDRESS = bus.address;
   const executable = packaged ?? (await import('electron')).default;
@@ -657,9 +657,7 @@ async function firstRun(dirs) {
     assert.equal(s.agent.chosen, null);
     assert.deepEqual(s.settings.look, { apps: true, screen: true });
     assert.deepEqual(s.agent.backends.find((b) => b.id === 'claude')?.methods, ['anthropic-key'], 'Claude takes only an Anthropic API key');
-    // Local servers sit at fixed 127.0.0.1 ports that no profile setting isolates; say so when one answered.
-    const ready = s.agent.backends.filter((b) => b.ready !== null && b.id !== 'claude');
-    if (ready.length) limits.push(`[${current}] a local model server on this machine answered (${ready.map((b) => `${b.label}: ${b.message}`).join('; ')}); Agent setup listed it and read its model list, nothing was chosen, so no model was called`);
+    assert.deepEqual(s.agent.backends.map((b) => b.id), ['claude'], 'Claude is the only backend offered');
     return `backends ${s.agent.backends.map((b) => `${b.id}[${b.methods.join('|')}]`).join(', ')}`;
   }, { critical: true });
   if (linux) {

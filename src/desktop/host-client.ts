@@ -206,6 +206,18 @@ export class HostController {
   async skillEdit(edit: "add" | "remove", skill: SkillRef): Promise<void> {
     await this.call({ op: "skill-edit", edit, skill });
   }
+  /** Skip a whole goal: every unheld skill on its path becomes trusted. `false` takes back only the mark. */
+  async goalSkip(id: ZoneId, skip: boolean): Promise<void> {
+    await this.call({ op: "goal-skip", zoneId: id, skip });
+  }
+  /** Skip that goal's current step; refused if the step changed, or if it needs "Sure?" and `confirmed` is false. */
+  async stepSkip(zoneId: ZoneId, stepId: string, confirmed: boolean): Promise<void> {
+    await this.call({ op: "step-skip", zoneId, stepId, confirmed });
+  }
+  /** Work on this skill next in the active goal; null lets Dum pick. The result arrives with the next state. */
+  async play(skill: SkillRef | null): Promise<void> {
+    await this.call({ op: "play", skill });
+  }
   /** The page's URL after link or rotate; null otherwise. */
   async treeSync(sync: TreeSync): Promise<string | null> {
     return (await this.call({ op: "tree-sync", sync }))?.url ?? null;

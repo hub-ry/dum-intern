@@ -1,9 +1,10 @@
-// Settings, as a sheet inside Chat: exactly the §5 list. Agent; Look; Shortcuts; Open at login; Use
-// personal context; Set up voice; Debug chat; version and Quit. Disclosures start collapsed unless one
-// needs recovering. Mode lives in Chat, follow in Context, the web tree in Skills, Pause in Current context.
+// The Settings panel: a list of plain rows, "Agent · Claude", "Look · Haiku", "Mode · Understand", …
+// Pressing a row reveals its control beneath it, one at a time. Choices are segmented text, switches
+// are flat mechanical toggles. Rows start collapsed unless one needs recovering.
 
-import type { DesktopPreferences, Snapshot } from "../protocol.ts";
-import { h, icon, type Client } from "./dom.ts";
+import type { CircleDisplays, DesktopPreferences, Snapshot } from "../protocol.ts";
+import type { BackendId } from "../../agent/types.ts";
+import { h, type Client } from "./dom.ts";
 import { AgentSheet } from "./agent-sheet.ts";
 import { DebugView, NEEDS_AGENT } from "./debug-view.ts";
 
@@ -11,7 +12,7 @@ type Hotkey = "hotkey" | "voiceHotkey" | "sendDraftHotkey";
 
 const PERMISSION: Record<string, string> = {
   granted: "Screen Recording: allowed.",
-  denied: "Screen Recording: blocked in System Settings. Dum keeps watching app switches and saved files until you allow it.",
+  denied: "Screen Recording: blocked in System Settings.",
   restricted: "Screen Recording: restricted on this Mac.",
   "not-determined": "Screen Recording: macOS asks the first time Dum looks.",
   "not-required": "Screen Recording: no permission needed on this system.",
@@ -50,84 +51,189 @@ export function shortcutText(acc: string, mac: boolean): string {
   return acc.split("+").map((p) => sym[p] ?? p).join("");
 }
 
-function disclosure(title: string, ...body: (Node | null)[]): HTMLDetailsElement {
-  return h("details", { class: "group disclosure" }, h("summary", {}, icon("chevron"), h("span", {}, title)), ...body);
+/** One settings row: its name and current value; pressing it reveals `body` beneath. */
+function disclosure(title: string, value: HTMLElement, ...body: (Node | null)[]): HTMLDetailsElement {
+  return h("details", { class: "row disclosure" }, h("summary", {}, h("span", { class: "row-name" }, title), value), h("div", { class: "row-body" }, ...body));
+}
+
+/** A switch: a checkbox drawn as a flat mechanical toggle, its name on the left. */
+function toggleRow(input: HTMLInputElement, label: string, ...after: (Node | null)[]): HTMLElement {
+  input.className = "toggle";
+  input.setAttribute("role", "switch");
+  return h("div", { class: "row" }, h("label", { class: "toggle-row" }, h("span", { class: "row-name" }, label), input), ...after);
+}
+
+const BACKENDS: Record<BackendId, string> = { claude: "Claude", chatgpt: "ChatGPT", copilot: "Copilot" };
+
+const MODES: Record<DesktopPreferences["mode"], string> = {
+  understand: "Dum implements with skills you've unlocked; concepts need work you built yourself.",
+  "anti-vibe": "The same gates, with your approach first: say how you want it done, then delegate.",
+};
+
+/** Move circle: choose a display, or nudge it with arrows (Shift for 1 DIP), Enter commits, Esc restores. */
+class MoveCircle {
+  readonly el = h("div", { class: "move-circle", tabindex: "0", hidden: true, "aria-label": "Move the circle with the arrow keys" });
+  private displays: CircleDisplays | null = null;
+
+  constructor(private client: Client) {
+    this.el.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 1 : 10;
+      const move = e.key === "ArrowLeft" ? [-step, 0] : e.key === "ArrowRight" ? [step, 0] : e.key === "ArrowUp" ? [0, -step] : e.key === "ArrowDown" ? [0, step] : null;
+      if (move) {
+        e.preventDefault();
+        void this.call({ type: "circle-nudge", dx: move[0]!, dy: move[1]! });
+      } else if (e.key === "Enter" && e.target === this.el) {
+        e.preventDefault();
+        void this.commit();
+      }
+    });
+  }
+
+  get active(): boolean {
+    return !this.el.hidden;
+  }
+
+  async begin() {
+    this.el.hidden = false;
+    await this.call({ type: "circle-position", action: "begin" });
+    this.el.focus();
+  }
+
+  /** Esc: puts the circle back where it was. */
+  cancel() {
+    if (this.displays?.positioning) void this.client.call({ type: "circle-position", action: "cancel" }, true);
+    this.displays = null;
+    this.el.hidden = true;
+  }
+
+  private async commit() {
+    await this.call({ type: "circle-position", action: "commit" });
+    this.displays = null;
+    this.el.hidden = true;
+  }
+
+  private async call(request: Parameters<Client["call"]>[0]) {
+    const r = await this.client.call(request);
+    if (r.ok && r.displays) {
+      this.displays = r.displays;
+      this.draw();
+    }
+  }
+
+  private draw() {
+    const d = this.displays;
+    this.el.replaceChildren(
+      h("p", { class: "hint" }, "Arrows move it, Shift for small steps. Enter keeps it, Esc puts it back."),
+      h(
+        "ul",
+        { class: "display-list", "aria-label": "Displays" },
+        ...(d?.displays ?? []).map((x) =>
+          h("li", {}, h("button", { type: "button", class: `btn ghost small${x.current ? " picked" : ""}`, "aria-pressed": String(x.current), onclick: () => void this.call({ type: "circle-display", displayId: x.id }) }, x.label, x.primary ? " (main)" : "")),
+        ),
+      ),
+      h("div", { class: "actions" }, h("button", { type: "button", class: "btn primary small", onclick: () => void this.commit() }, "Keep it here")),
+    );
+  }
 }
 
 export class SettingsView {
-  readonly el = h("div", { class: "settings" });
+  readonly el: HTMLElement;
   private agentSheet: AgentSheet;
   private debug: DebugView;
   private agent: HTMLDetailsElement;
   private look: HTMLDetailsElement;
   private shortcuts: HTMLDetailsElement;
   private debugBox: HTMLDetailsElement;
+  private move: MoveCircle;
   private lookBoxes = { apps: h("input", { type: "checkbox" }), screen: h("input", { type: "checkbox" }) };
   private launchAtLogin = h("input", { type: "checkbox" });
   private personalContext = h("input", { type: "checkbox" });
-  private lookStatus = h("p", { class: "hint", role: "status" });
+  private modeChoices: Record<DesktopPreferences["mode"], HTMLButtonElement>;
+  private modeHint = h("p", { id: "mode-hint", class: "hint" });
+  private mode: HTMLDetailsElement;
+  private values = { agent: h("span", { class: "row-value" }), look: h("span", { class: "row-value" }), mode: h("span", { class: "row-value" }), shortcuts: h("span", { class: "row-value" }), voice: h("span", { class: "row-value" }), debug: h("span", { class: "row-value" }) };
   private screenStatus = h("p", { class: "hint" });
   private personalStatus = h("div", { class: "hint" });
-  private voiceStatus = h("p", { class: "hint", role: "status" });
   private hotkeyError = h("p", { class: "hint error-text", role: "alert" });
-  private versionLine = h("p", { class: "hint" });
+  private versionLine = h("span", { class: "label" });
   private recorders = new Map<Hotkey, HTMLInputElement>();
   private recording: HTMLInputElement | null = null;
   private recovered = "";
 
   constructor(private client: Client) {
-    this.agentSheet = new AgentSheet(client, "settings");
+    this.agentSheet = new AgentSheet(client);
     this.debug = new DebugView(client);
-    this.agent = disclosure("Agent", this.agentSheet.el);
+    this.move = new MoveCircle(client);
+    this.agent = disclosure("Agent", this.values.agent, this.agentSheet.el);
     this.look = disclosure(
       "Look",
-      h("p", { class: "hint" }, "Every 3 seconds Dum checks which app is in front, how much the screen changed and the folders you follow. It calls the look model only when something changed: one fresh frame of the screen for each eligible changed tick, plus a line about what it saw last, never older pictures. One call at a time. It never reads keystrokes, the clipboard or your editor, and it never teaches or advises."),
-      this.lookStatus,
-      h("label", { class: "check" }, this.lookBoxes.apps, h("span", {}, "Apps: notice when you switch apps")),
-      h("label", { class: "check" }, this.lookBoxes.screen, h("span", {}, "Screen: notice screen changes and send the look model one fresh frame per changed tick")),
+      this.values.look,
+      toggleRow(this.lookBoxes.apps, "Notice app switches"),
+      toggleRow(this.lookBoxes.screen, "Look at the screen"),
       this.screenStatus,
-      h("button", { type: "button", class: "btn ghost", onclick: () => void client.call({ type: "screen-permission" }) }, icon("external"), "Open Screen Recording settings"),
-      h("p", { class: "hint" }, "Pause and Resume are in Current context. Turning Screen off keeps app and file observation."),
+      h("button", { type: "button", class: "text-action", onclick: () => void client.call({ type: "screen-permission" }) }, "Open Screen Recording settings"),
     );
+    const choice = (mode: DesktopPreferences["mode"], label: string) =>
+      h("button", { type: "button", class: "seg", "aria-pressed": "false", onclick: () => void this.save({ mode }) }, label);
+    this.modeChoices = { understand: choice("understand", "Understand"), "anti-vibe": choice("anti-vibe", "Anti-vibe") };
+    this.mode = disclosure("Mode", this.values.mode, h("div", { class: "segmented", role: "group", "aria-label": "Mode", "aria-describedby": "mode-hint" }, this.modeChoices.understand, this.modeChoices["anti-vibe"]), this.modeHint);
     this.shortcuts = disclosure(
       "Shortcuts",
+      this.values.shortcuts,
       this.recorder("hotkey", "Open Dum"),
       this.recorder("voiceHotkey", "Hold to talk"),
       this.recorder("sendDraftHotkey", "Send the draft"),
-      h("p", { id: "hotkey-hint", class: "hint" }, "Click a field, then press the new shortcut. It needs ⌘, ⌃ or ⌥. Esc cancels. Send the draft only ever sends the zone's message, never the debug chat."),
+      h("p", { id: "hotkey-hint", class: "hint" }, "Click one, then press a shortcut with ⌘, ⌃ or ⌥."),
       this.hotkeyError,
     );
-    this.debugBox = disclosure("Debug chat", this.debug.el);
+    const voice = disclosure("Voice", this.values.voice, h("button", { type: "button", class: "text-action", onclick: () => void client.call({ type: "voice-setup" }) }, "Set up voice"));
+    this.debugBox = disclosure("Debug chat", this.values.debug, this.debug.el);
     this.debugBox.addEventListener("toggle", () => {
       if (this.debugBox.open) void this.debug.open();
-    });
-    this.el.addEventListener(NEEDS_AGENT, () => {
-      this.agent.open = true;
-      this.agentSheet.focus();
     });
     this.lookBoxes.apps.addEventListener("change", () => client.snap && void this.save({ look: { ...client.snap.settings.look, apps: this.lookBoxes.apps.checked } }));
     this.lookBoxes.screen.addEventListener("change", () => client.snap && void this.save({ look: { ...client.snap.settings.look, screen: this.lookBoxes.screen.checked } }));
     this.launchAtLogin.addEventListener("change", () => void this.save({ launchAtLogin: this.launchAtLogin.checked }));
     this.personalContext.addEventListener("change", () => void this.save({ personalContext: this.personalContext.checked }));
-    this.el.append(
+    const rows = [this.agent, this.look, this.mode, this.shortcuts, voice, this.debugBox];
+    // Only the row you opened stays open.
+    for (const row of rows) row.addEventListener("toggle", () => {
+      if (row.open) for (const other of rows) if (other !== row) other.open = false;
+    });
+    const body = h(
+      "div",
+      { class: "panel-body settings" },
       this.agent,
       this.look,
+      this.mode,
       this.shortcuts,
-      h("div", { class: "group" }, h("label", { class: "check" }, this.launchAtLogin, h("span", {}, "Open at login")), h("p", { class: "hint" }, "Starts the circle and Dum's host, not the window.")),
-      h(
-        "div",
-        { class: "group" },
-        h("label", { class: "check" }, this.personalContext, h("span", {}, "Use personal context")),
-        this.personalStatus,
-        h("p", { class: "hint" }, "Background about you that shapes decisions and suggested projects. It never adds skills. Edit the file yourself, then Reload context from Current context."),
-      ),
-      h("div", { class: "group" }, h("button", { type: "button", class: "btn ghost", onclick: () => void client.call({ type: "voice-setup" }) }, icon("mic"), "Set up voice"), this.voiceStatus),
+      h("div", { class: "row" }, h("button", { type: "button", class: "row-button", onclick: () => void this.move.begin() }, h("span", { class: "row-name" }, "Move circle")), this.move.el),
+      toggleRow(this.launchAtLogin, "Open at login"),
+      toggleRow(this.personalContext, "Use personal context", this.personalStatus),
+      voice,
       this.debugBox,
-      h("div", { class: "group settings-foot" }, this.versionLine, h("button", { type: "button", class: "btn danger", onclick: () => void client.call({ type: "quit" }) }, icon("power"), "Quit Dum")),
+      h("div", { class: "settings-foot" }, this.versionLine, h("button", { type: "button", class: "text-action quiet", onclick: () => void client.call({ type: "quit" }) }, "Quit Dum")),
+    );
+    body.addEventListener(NEEDS_AGENT, () => this.openAgent());
+    this.el = h(
+      "section",
+      { class: "panel panel-settings", "aria-labelledby": "settings-title" },
+      h("header", { class: "panel-head" }, h("h1", { id: "settings-title", tabindex: "-1" }, "Settings")),
+      body,
     );
   }
 
-  /** True when focus is in the debug chat, so ⌘. stops it rather than the zone. */
+  focus() {
+    this.el.querySelector<HTMLElement>("summary")?.focus();
+  }
+
+  /** "Who powers Dum?": opens Agent and puts focus in it. */
+  openAgent() {
+    this.agent.open = true;
+    this.agentSheet.focus();
+  }
+
+  /** True when focus is in the debug chat, so ⌘. stops it rather than the goal's conversation. */
   get debugFocused(): boolean {
     return this.debugBox.open && this.debug.el.contains(document.activeElement);
   }
@@ -136,13 +242,18 @@ export class SettingsView {
     void this.debug.stop();
   }
 
-  /** Closing Settings hides the debug chat; New or Clear starts a new one. */
+  /** Leaving Settings hides the debug chat and puts the circle back if a move was open. */
   closed() {
     this.debugBox.open = false;
+    if (this.move.active) this.move.cancel();
   }
 
-  /** Esc inside an open disclosure collapses it and puts focus on its title; true when it did. */
+  /** Esc: a circle move puts it back; inside an open disclosure, collapses it. True when it did either. */
   escape(): boolean {
+    if (this.move.active) {
+      this.move.cancel();
+      return true;
+    }
     const box = document.activeElement?.closest("details.disclosure");
     if (!(box instanceof HTMLDetailsElement) || !box.open || !this.el.contains(box)) return false;
     box.open = false;
@@ -162,7 +273,15 @@ export class SettingsView {
     if (!keep(this.lookBoxes.screen)) this.lookBoxes.screen.checked = s.settings.look.screen;
     if (!keep(this.launchAtLogin)) this.launchAtLogin.checked = s.settings.launchAtLogin;
     if (!keep(this.personalContext)) this.personalContext.checked = s.settings.personalContext;
-    this.lookStatus.textContent = s.look.paused ? "Looking is paused." : s.look.noPictures ? `No pictures: ${s.look.noPictures}` : "Looking is on.";
+    for (const [mode, btn] of Object.entries(this.modeChoices)) btn.setAttribute("aria-pressed", String(mode === s.settings.mode));
+    this.modeHint.textContent = MODES[s.settings.mode];
+    const chosen = s.agent.chosen;
+    this.values.agent.textContent = chosen ? BACKENDS[chosen.backend] : "Not set";
+    this.values.look.textContent = s.look.paused ? "Paused" : !s.settings.look.apps && !s.settings.look.screen ? "Off" : chosen ? s.look.resolved ?? chosen.look.model : "No model";
+    this.values.mode.textContent = s.settings.mode === "anti-vibe" ? "Anti-vibe" : "Understand";
+    this.values.shortcuts.textContent = shortcutText(s.settings.hotkey, mac);
+    this.values.voice.textContent = { idle: "Idle", recording: "Listening", transcribing: "Transcribing", ready: "Ready", error: "Error" }[s.voice.phase];
+    this.values.debug.textContent = s.debug ? s.debug.state : "";
     this.screenStatus.textContent = PERMISSION[s.look.permission] ?? `Screen Recording: ${s.look.permission}.`;
     const p = s.personal;
     this.personalStatus.replaceChildren(
@@ -170,8 +289,7 @@ export class SettingsView {
       ...(p.files.length ? [h("ul", { class: "personal-files" }, ...p.files.map((f) => h("li", {}, h("code", {}, f))))] : []),
       ...(p.warning ? [h("p", { class: "warn-text" }, p.warning)] : []),
     );
-    this.voiceStatus.textContent = s.voice.status || "Voice is idle.";
-    this.versionLine.textContent = `Dum ${s.version} · ${s.platform}`;
+    this.versionLine.textContent = `DUM ${s.version}`;
     // Recovery opens its disclosure once; after that it's yours to close.
     const recovery = [
       !s.agent.chosen ? "agent" : "",
@@ -201,7 +319,7 @@ export class SettingsView {
   }
 
   private recorder(name: Hotkey, label: string): HTMLElement {
-    const input = h("input", { class: "input hotkey", type: "text", readonly: true, "aria-label": label, "aria-describedby": "hotkey-hint" });
+    const input = h("input", { class: "line-input hotkey", type: "text", readonly: true, "aria-label": label, "aria-describedby": "hotkey-hint" });
     input.addEventListener("focus", () => {
       this.recording = input;
       input.value = "press a shortcut…";
@@ -221,6 +339,6 @@ export class SettingsView {
       void this.save({ [name]: acc });
     });
     this.recorders.set(name, input);
-    return h("label", { class: "field" }, h("span", {}, label), input);
+    return h("label", { class: "key-row" }, h("span", { class: "row-name" }, label), input);
   }
 }

@@ -24,6 +24,8 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
     if (v === null || v === undefined || v === false) continue;
     if (typeof v === "function") el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === "class") el.className = String(v);
+    // The page's CSP (style-src 'self') drops a style attribute; CSSOM writes are allowed.
+    else if (k === "style") el.style.cssText = String(v);
     else el.setAttribute(k, v === true ? "" : String(v));
   }
   for (const kid of kids) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
@@ -33,23 +35,16 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
 /** Hand-drawn 24px line icons. */
 const ICONS = {
   close: "M6 6l12 12M18 6L6 18",
-  hide: "M5 12h14",
-  gear: "M21.4 10.4v3.2h-2.6l-.8 2.1 1.8 1.8-2.3 2.3-1.8-1.8-2.1.8v2.6h-3.2v-2.6l-2.1-.8-1.8 1.8-2.3-2.3 1.8-1.8-.8-2.1H2.6v-3.2h2.6l.8-2.1-1.8-1.8 2.3-2.3 1.8 1.8 2.1-.8V2.6h3.2v2.6l2.1.8 1.8-1.8 2.3 2.3-1.8 1.8.8 2.1zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-  send: "M21 3L3 10.5l7.5 3 3 7.5zM21 3L10.5 13.5",
+  send: "M19 5v7a3 3 0 0 1-3 3H6M10 11l-4 4 4 4",
   stop: "M7 7h10v10H7z",
   screen: "M3 5h18v11H3zM8 20h8M12 16v4",
   tree: "M4 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M16 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M10 19a2 2 0 1 0 4 0a2 2 0 1 0-4 0M6 8v1a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4V8M12 13v4",
   memory: "M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6",
-  history: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 7v5l3 2",
-  context: "M8 8a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 21a8 8 0 0 1 16 0",
-  evidence: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0M8 12l3 3 5-6",
   boundary: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
-  tools: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
   refresh: "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5",
   warning: "M12 3l10 18H2zM12 10v5M12 18v.01",
   check: "M5 12.5l4.5 4.5L19 7",
-  plus: "M12 5v14M5 12h14",
   chevron: "M6 9l6 6 6-6",
   power: "M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0",
   lock: "M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11",
@@ -59,14 +54,14 @@ const ICONS = {
   mic: "M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3",
   undo: "M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
   pencil: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
-  trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
   file: "M6 3h8l4 4v14H6zM14 3v4h4",
   pause: "M8 5v14M16 5v14",
   play: "M7 5l12 7-12 7z",
   zones: "M3 6h7M3 12h7M3 18h7M14 6h7M14 12h4M14 18h4",
   move: "M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3",
   story: "M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2zM4 21a2 2 0 0 1 2-2h12v2M8 7h6M8 11h6",
-  bug: "M8 9a4 4 0 0 1 8 0v5a4 4 0 0 1-8 0zM12 9v9M4 13h4M16 13h4M5 8l3 2M19 8l-3 2M5 19l3-2M19 19l-3-2",
+  pin: "M9 3h6l-1 6 3 3H7l3-3zM12 12v9",
+  skip: "M5 5l9 7-9 7zM18 5v14",
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;
@@ -99,14 +94,6 @@ export function chip(text: string, tone: Tone): HTMLElement {
 /** "binary search (C++)", or the bare name for a language-free skill. */
 export function skillName(skill: { name: string; lang: string }): string {
   return skill.lang ? `${skill.name} (${skill.lang})` : skill.name;
-}
-
-/** A local time for an ISO timestamp: "14:05", or "3 Oct, 14:05" when it isn't today. */
-export function when(iso: string): string {
-  const d = new Date(iso);
-  return d.toDateString() === new Date().toDateString()
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");

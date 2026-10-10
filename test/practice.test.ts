@@ -14,6 +14,7 @@ import { createRegistry } from "../src/agent/registry.ts";
 import * as skills from "../src/skills.ts";
 import * as curriculum from "../src/curriculum.ts";
 import * as memory from "../src/memory.ts";
+import * as zones from "../src/zones.ts";
 import type { Context } from "../src/context.ts";
 import type { Resources, SourceSnapshot } from "../src/share-types.ts";
 import type { ZoneContext } from "../src/zone-types.ts";
@@ -513,5 +514,35 @@ test("generation or review that returns after Stop or close records and saves no
     await b.store.settled();
   } finally {
     b.done();
+  }
+});
+
+test("a project being built in another goal is offered to the generator first, and a continuation of it comes first and names it", async () => {
+  // Another goal's record: a project they're building. The new goal's zone must be in the registry to be scanned.
+  const s = setup(BASICS, {
+    reply: () => projects(
+      project({ title: "fresh scoreboard", duration: { minHours: 5, maxHours: 8 }, difficulty: "beginner" }),
+      project({ title: "scheduler: next stage", extends: "pickup-match scheduler", duration: { minHours: 30, maxHours: 50 } }),
+      project({ title: "made-up continuation", extends: "a project they never had" }),
+    ),
+    audit: () => audits(check(project(), 1), check(project(), 2), check(project(), 3)),
+  });
+  try {
+    const other = zones.createZone({ name: "Football tools", goal: "Tools for my football group", parentId: null, language: "go", focusSkills: [] });
+    zones.createZone({ name: s.zone.breadcrumb[0]!.name, goal: s.zone.goal, parentId: null, language: "go", focusSkills: [] });
+    mkdirSync(`${s.home}/zones/${other.id}`, { recursive: true });
+    writeFileSync(`${s.home}/zones/${other.id}/practice.json`, JSON.stringify({
+      version: 2, next: 2, active: "p1",
+      projects: [{ ...project(), id: "p1", exercise: "go", focus: null, extends: null, at: "2026-10-01T00:00:00.000Z", state: "open", submissions: [] }],
+    }));
+    const out = await s.practice.suggest("new in go");
+    assert.match(s.prompts[0]!, /PROJECTS THEY ALREADY HAVE[\s\S]*"pickup-match scheduler"[\s\S]*"goal":"Football tools"/, "the generator sees what they're building elsewhere");
+    assert.match(s.prompts[0]!, /ONE PROJECT FOR THE WHOLE GOAL/);
+    const titles = s.saved().projects.map((p: { title: string }) => p.title);
+    assert.deepEqual(titles, ["scheduler: next stage", "fresh scoreboard"], "the continuation comes first despite being larger; the invented one is dropped");
+    assert.deepEqual(s.saved().projects[0].extends, { title: "pickup-match scheduler", goal: "Football tools" });
+    assert.match(out, /p1  scheduler: next stage  · continues "pickup-match scheduler" \(Football tools\)/);
+  } finally {
+    s.done();
   }
 });

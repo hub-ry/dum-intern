@@ -1,5 +1,5 @@
-// The circle's only bridge: its own restricted "dum:circle" channel. It can send gestures, the
-// accessibility toggle and a read of its small view; it receives that view and nothing else.
+// The circle's only bridge: its own restricted "dum:circle" channel. It can send gestures, slot picks,
+// the accessibility toggle, a collapse and a read of its small view; it receives that view and nothing else.
 // Sandboxed and context-isolated; nothing from Node or Electron is handed to the page.
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";

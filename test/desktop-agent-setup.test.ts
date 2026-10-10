@@ -16,7 +16,7 @@ const cipher: Cipher = {
   encrypt: async (text) => Buffer.from([...Buffer.from(text, "utf8")].map((b) => b ^ 0x5a)),
   decrypt: async (data) => Buffer.from([...data].map((b) => b ^ 0x5a)).toString("utf8"),
 };
-const ALL = new Set<BackendId>(["claude", "chatgpt", "local", "copilot"]);
+const ALL = new Set<BackendId>(["claude", "chatgpt", "copilot"]);
 const ui: LoginUi = { openUrl: async () => {}, changed: () => {} };
 /** The Claude subscription login Dum removed: it is no longer a LoginMethod. */
 const SUBSCRIPTION = "claude-subscription" as LoginMethod;
@@ -47,25 +47,25 @@ test("every released backend's status runs in parallel, and only released ones a
       return promise;
     },
   }).setup;
-  const agent = new AgentSetup([slow("claude", ["anthropic-key"]), slow("local", ["none"]), slow("chatgpt", ["chatgpt"])], new Set(["claude", "local"]));
+  const agent = new AgentSetup([slow("claude", ["anthropic-key"]), slow("chatgpt", ["chatgpt"]), slow("copilot", ["github"])], new Set(["claude", "chatgpt"]));
   const checking = agent.check();
   await new Promise((r) => setImmediate(r));
-  assert.deepEqual(started, ["claude", "local"], "both started before either finished; chatgpt isn't released");
+  assert.deepEqual(started, ["claude", "chatgpt"], "both started before either finished; copilot isn't released");
   for (const f of finish) f();
   await checking;
-  assert.deepEqual(agent.backends.map((b) => [b.id, b.ready]), [["claude", "anthropic-key"], ["local", "none"]]);
+  assert.deepEqual(agent.backends.map((b) => [b.id, b.ready]), [["claude", "anthropic-key"], ["chatgpt", "chatgpt"]]);
 });
 
 test("a status that fails or lies reads as unchecked, and each backend's own sign-in list decides the methods", async () => {
-  const broken = fake("local", ["none"], { status: async () => { throw new Error("secret detail"); } }).setup;
+  const broken = fake("chatgpt", ["chatgpt"], { status: async () => { throw new Error("secret detail"); } }).setup;
   const liar = fake("claude", ["anthropic-key", "chatgpt"], { ready: "chatgpt" }).setup;
   const agent = new AgentSetup([broken, liar], ALL);
   await agent.check();
-  const [claude, local] = [agent.backends.find((b) => b.id === "claude")!, agent.backends.find((b) => b.id === "local")!];
+  const [claude, chatgpt] = [agent.backends.find((b) => b.id === "claude")!, agent.backends.find((b) => b.id === "chatgpt")!];
   assert.deepEqual(claude.methods, ["anthropic-key"]);
   assert.equal(claude.ready, null, "Claude is never ready by a method it doesn't take");
-  assert.equal(local.ready, null);
-  assert.ok(!local.message.includes("secret"));
+  assert.equal(chatgpt.ready, null);
+  assert.ok(!chatgpt.message.includes("secret"));
 });
 
 test("Claude takes only an API key: a subscription sign-in or sign-out is refused as an unknown method", async () => {
@@ -124,7 +124,7 @@ function selecting(catalog: ModelOption[] = CATALOG) {
     settings: { get: () => settings.get(), set: (p: DesktopPreferences) => { order.push("persist"); settings.set(p); } },
     send: async (c: AgentChoice) => { order.push(`send ${c.intern.model}`); sent.push(c); },
   };
-  return { settings, order, sent, ports, agent: new AgentSetup([fake("claude", ["anthropic-key"]).setup, fake("local", ["none"]).setup], ALL) };
+  return { settings, order, sent, ports, agent: new AgentSetup([fake("claude", ["anthropic-key"]).setup], ALL) };
 }
 
 test("a selection is checked for every role against the host's catalog, persisted, then forwarded", async () => {
@@ -144,7 +144,7 @@ test("a selection the catalog doesn't allow changes nothing", async () => {
     { c: choice({ intern: { backend: "claude", model: "big", effort: null } }), why: /doesn't offer the default effort/ },
     { c: choice({ helper: { backend: "claude", model: "small", effort: "high" } }), why: /doesn't offer high effort/ },
     { c: choice({ helper: { backend: "claude", model: "missing", effort: null } }), why: /isn't in claude's model list/ },
-    { c: choice({ helper: { backend: "local", model: "small", effort: null } }), why: /must be on claude/ },
+    { c: choice({ helper: { backend: "chatgpt", model: "small", effort: null } }), why: /must be on claude/ },
     { c: choice({ look: { backend: "claude", model: "blind", effort: null } }), why: /can't look at pictures, so it can't be the look/ },
     { c: choice({ look: { backend: "claude", model: "missing", effort: null } }), why: /isn't in claude's model list/ },
     { c: choice({ look: { backend: "claude", model: "big", effort: "max" } }), why: /doesn't offer max effort/ },

@@ -3,8 +3,8 @@
 import { z } from "zod";
 import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption, Picture, Role, Selector } from "./types.ts";
 
-export const BACKEND_IDS = ["claude", "chatgpt", "local", "copilot"] as const satisfies readonly BackendId[];
-export const LOGIN_METHODS = ["anthropic-key", "chatgpt", "github", "none"] as const satisfies readonly LoginMethod[];
+export const BACKEND_IDS = ["claude", "chatgpt", "copilot"] as const satisfies readonly BackendId[];
+export const LOGIN_METHODS = ["anthropic-key", "chatgpt", "github"] as const satisfies readonly LoginMethod[];
 
 export const ROLES = ["intern", "helper", "look"] as const satisfies readonly Role[];
 
@@ -24,7 +24,6 @@ export const CLAUDE_DEFAULTS = {
 export const BACKEND_LOGINS: Readonly<Record<BackendId, readonly LoginMethod[]>> = {
   claude: ["anthropic-key"],
   chatgpt: ["chatgpt"],
-  local: ["none"],
   copilot: ["github"],
 };
 

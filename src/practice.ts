@@ -11,7 +11,7 @@ import * as skills from "./skills.ts";
 import * as curriculum from "./curriculum.ts";
 import * as context from "./context.ts";
 import * as memory from "./memory.ts";
-import { zonePrompt } from "./zones.ts";
+import { listZones, zonePrompt } from "./zones.ts";
 import { oneShot, json } from "./oneshot.ts";
 import { withoutHeld } from "./gate.ts";
 import { readState, writeState } from "./state-files.ts";
@@ -53,6 +53,8 @@ export type Project = {
   fit: string;
   /** Learning goals, prerequisite-first. None of them is unlocked by being here. */
   targets: LearningTarget[];
+  /** The earlier project this one builds on, when it carries one forward: its title and the goal it lives in. */
+  extends: { title: string; goal: string } | null;
   at: string;
   state: "open" | "passed";
   submissions: Submission[];
@@ -126,8 +128,14 @@ export function orderTargets(targets: LearningTarget[], exercise: string, built:
   return ordered;
 }
 
-/** A generated project, or null when it isn't one: bad shape, an uncovered prerequisite, a cycle, or a use that isn't built. */
-export function toProject(raw: unknown, exercise: string, built: (name: string) => boolean, focus: string | null = null): Offered | null {
+/** A project someone has started or finished, from any goal: what the next suggestion should build on first. */
+export type PriorProject = { title: string; task: string; exercise: string; goal: string; state: "open" | "passed"; targets: string[]; passed: string[] };
+
+/**
+ * A generated project, or null when it isn't one: bad shape, an uncovered prerequisite, a cycle, a use
+ * that isn't built, or an `extends` naming a project they don't have.
+ */
+export function toProject(raw: unknown, exercise: string, built: (name: string) => boolean, focus: string | null = null, prior: readonly PriorProject[] = []): Offered | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const duration = r.duration as Project["duration"] | undefined;
@@ -158,7 +166,12 @@ export function toProject(raw: unknown, exercise: string, built: (name: string) 
     if (!built(name)) return null;
     if (!uses.includes(name)) uses.push(name);
   }
-  return { title, task, done, exercise, focus, uses, duration: { minHours: duration.minHours, maxHours: duration.maxHours }, difficulty, fit, targets: ordered };
+  // `extends` must name a project they really have; the model can't invent history to build on.
+  const named = clip(r.extends, 120);
+  const base = named ? prior.find((p) => p.title.toLowerCase() === named.toLowerCase()) : undefined;
+  if (named && !base) return null;
+  const ext = base ? { title: base.title, goal: base.goal } : null;
+  return { title, task, done, exercise, focus, uses, duration: { minHours: duration.minHours, maxHours: duration.maxHours }, difficulty, fit, targets: ordered, extends: ext };
 }
 
 export type ProjectInput = {
@@ -175,6 +188,8 @@ export type ProjectInput = {
   personal: string;
   /** Names of the files shared with this request. */
   files: string[];
+  /** Projects already started or finished in any goal, most recent first. */
+  prior: PriorProject[];
 };
 
 export function projectPrompt(o: ProjectInput): string {
@@ -183,11 +198,22 @@ export function projectPrompt(o: ProjectInput): string {
     ? `SIZE EVERY PROJECT TO ONE SKILL: ${o.focus}. Each project makes "${o.focus}" a named learning target and centers on it.
 Keep its scope to what ${o.focus} needs: its unbuilt prerequisite chain and the few requirements the deliverable implies,
 nothing unrelated. Sizes can still differ, from a focused evening to a longer build that uses it in earnest.`
-    : "Size them to what the zone's goal asks for.";
+    : "Size them to what the goal asks for.";
+  const prior = o.prior.length
+    ? `PROJECTS THEY ALREADY HAVE (started or finished, any goal). Prefer building on one of these: a project they've already
+put work into is worth more than a new one. If an existing project can take on the new learning targets as its next
+stage, offer that first, keep its title in "extends", and describe only the new stage in "task". Offer a fresh project
+only when none of these fits.
+${JSON.stringify(o.prior.map((p) => ({ title: p.title, goal: p.goal, language: p.exercise, what: p.task, state: p.state, passed: p.passed, remaining: p.targets.filter((t) => !p.passed.includes(t)) })))}`
+    : "PROJECTS THEY ALREADY HAVE: none yet.";
   return `You suggest projects for someone learning ${o.exercise}. They're choosing what to build, not asking for drills or a guided course.
 ${scope}
-Use the actual goal, interests, constraints and decisions in the zone background, bounded memory and opt-in personal background below.
-When those say nothing about interests, say that the fit is based on the zone's goal and language alone. Never invent a hobby, job, experience or preference.
+ONE PROJECT FOR THE WHOLE GOAL: at least one suggestion must be something they can keep building for the rest of this goal,
+stage by stage as their skills grow, and that could one day sit on a résumé as real work (a tool, app, service or dataset
+someone else could use), not a toy that's thrown away after one skill. Say which suggestion that is in its "fit".
+${prior}
+Use the actual goal, interests, constraints and decisions in the goal background, bounded memory and opt-in personal background below.
+When those say nothing about interests, say that the fit is based on the goal and language alone. Never invent a hobby, job, experience or preference.
 Their demonstrated experience in other languages can justify a larger project and a faster learning path, but grants NO ${o.exercise} skill credit.
 Offer two to ${MAX_GENERATED} useful projects of different sizes. Estimate active work hours, not calendar promises.
 Order by estimated duration, then difficulty. An experienced programmer can learn several tree levels in one project.
@@ -197,7 +223,6 @@ Include the full prerequisite chain as targets unless already built IN THIS LANG
 Account for implied requirements (input, files, loops, errors, objects, libraries), not just the project's headline skill.
 Targets may be unfamiliar or currently locked: these are learning goals, never assumed unlocked.
 Only uses may assume existing ability. Choosing a project, memory and discussion never unlock anything.
-
 SHARED FILES: ${o.files.join(", ") || "none shared"}
 BUILT IN ${o.exercise}: ${o.built.join(", ") || "nothing yet"}
 EXPERIENCE ACROSS LANGUAGES (demonstrated tree, not transferable credit):
@@ -209,7 +234,8 @@ ${o.memory}
 ${o.personal}
 
 Reply with one JSON object:
-{ "projects": [ { "title": string, "task": what the complete useful project does,
+{ "projects": [ { "title": string, "task": what the complete useful project does (or, when extending, what the next stage adds),
+  "extends": the exact title of one of THEIR projects this builds on, or null,
   "done": overall completion criteria, "uses": [already-built requirements],
   "duration": { "minHours": positive number, "maxHours": number at least minHours },
   "difficulty": "beginner" or "intermediate" or "advanced",
@@ -331,6 +357,7 @@ const ProjectSchema = z.object({
   difficulty: z.enum(["beginner", "intermediate", "advanced"]),
   fit: str,
   targets: z.array(TargetSchema).min(1).max(MAX_TARGETS),
+  extends: z.object({ title: str.min(1), goal: str }).strict().nullable().default(null),
   at: str,
   state: z.enum(["open", "passed"]),
   submissions: z.array(SubmissionSchema).max(MAX_SUBMISSIONS),
@@ -357,6 +384,35 @@ function load(home: string, zoneId: ZoneId): Saved {
   const saved = SavedSchema.safeParse(parsed);
   if (!saved.success) throw new Error(`this zone's ${FILE} isn't a suggested-projects file Dum can read - fix or move it; nothing was changed`);
   return saved.data;
+}
+
+/** The suggested project they said they're building in this zone, or null. Throws like `load`. */
+export function activeProject(home: string, zoneId: ZoneId): Project | null {
+  const saved = load(home, zoneId);
+  return saved.projects.find((p) => p.id === saved.active) ?? null;
+}
+
+/**
+ * Every project they've started or finished, across all goals, newest first: what a new suggestion
+ * should build on. A goal whose record can't be read is skipped rather than failing the suggestion.
+ */
+export function priorProjects(home: string, goals: readonly { id: ZoneId; name: string }[]): PriorProject[] {
+  const out: (PriorProject & { at: string })[] = [];
+  for (const goal of goals) {
+    let saved: Saved;
+    try {
+      saved = load(home, goal.id);
+    } catch {
+      continue;
+    }
+    for (const p of saved.projects) {
+      const started = p.id === saved.active || p.state === "passed" || p.submissions.length > 0;
+      if (!started) continue;
+      const passed = p.submissions.flatMap((s) => s.targets.filter((t) => t.passed).map((t) => t.skill));
+      out.push({ title: p.title, task: p.task, exercise: p.exercise, goal: goal.name, state: p.state, targets: p.targets.map((t) => t.skill), passed: [...new Set(passed)], at: p.submissions.at(-1)?.at ?? p.at });
+    }
+  }
+  return out.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 12).map(({ at: _at, ...p }) => p);
 }
 
 export class Practice {
@@ -432,6 +488,7 @@ export class Practice {
   private async generate(exercise: string, focus: { name: string; lang: string } | null): Promise<string> {
     let tree = this.tree();
     const built = (name: string) => curriculum.current(tree, name, projectLang(name, exercise)).state === "unlocked";
+    const prior = priorProjects(this.home, listZones().zones.filter((z) => z.deletedAt === null));
     const reply = await this.helped(projectPrompt({
       exercise,
       focus: focus?.name ?? null,
@@ -442,6 +499,7 @@ export class Practice {
       personal: context.prompt(this.personal),
       // Shared file names without their grant IDs: background for fit, never a permission.
       files: this.files.list().slice(0, 40).map((p) => p.slice(p.indexOf("/") + 1)),
+      prior,
     }));
     const raw = json(reply, "{") as { projects?: unknown } | undefined;
     if (!raw || !Array.isArray(raw.projects)) throw new Error("the suggested projects couldn't be read - nothing saved, try :projects again");
@@ -453,7 +511,7 @@ export class Practice {
     const offered: Offered[] = [];
     const omitted: string[] = [];
     for (const entry of raw.projects.slice(0, MAX_GENERATED)) {
-      const p = toProject(entry, exercise, built, focus?.name ?? null);
+      const p = toProject(entry, exercise, built, focus?.name ?? null, prior);
       if (!p || offered.some((o) => o.title === p.title)) continue;
       if (focusKey && !p.targets.some((t) => skills.key(t.skill) === focusKey)) omitted.push(`${p.title}: it doesn't make ${focus!.name} a learning target`);
       else offered.push(p);
@@ -471,8 +529,9 @@ export class Practice {
       if (valid) checked.push(valid);
       else omitted.push(`${p.title}: the independent check found missing learning goals or prerequisites`);
     });
-    // Estimated midpoint is the duration sort key; difficulty breaks equal-duration ties.
-    checked.sort((x, y) => (x.duration.minHours + x.duration.maxHours) - (y.duration.minHours + y.duration.maxHours) ||
+    // A project that carries one they already have comes first; then the estimated midpoint, then difficulty.
+    checked.sort((x, y) => Number(y.extends !== null) - Number(x.extends !== null) ||
+      (x.duration.minHours + x.duration.maxHours) - (y.duration.minHours + y.duration.maxHours) ||
       difficulties.indexOf(x.difficulty) - difficulties.indexOf(y.difficulty));
     if (!checked.length) return ["no suggested projects cleared the independent check - nothing saved.", ...omitted].join("\n");
     // Projects saved meanwhile, by another :projects, are kept and numbered past.
@@ -643,7 +702,7 @@ export class Practice {
 /** One saved project, as they read it. */
 export function render(p: Project): string {
   return [
-    `${p.id}  ${p.title}${p.state === "passed" ? "  ✓ built" : ""}`,
+    `${p.id}  ${p.title}${p.state === "passed" ? "  ✓ built" : ""}${p.extends ? `  · continues "${p.extends.title}" (${p.extends.goal})` : ""}`,
     `  ${p.task}`,
     `  done when: ${p.done}`,
     `  approximate duration: ${p.duration.minHours}-${p.duration.maxHours} active hours · difficulty: ${p.difficulty}`,

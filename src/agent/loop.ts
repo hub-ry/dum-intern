@@ -1,4 +1,4 @@
-// Dum's own action loop over a stateless ModelClient (ChatGPT and local backends). The session keeps the
+// Dum's own action loop over a stateless ModelClient (the ChatGPT backend). The session keeps the
 // history, sends only Dum's actions, and ends for good on any call outside that closed set.
 
 import type { AgentEvent, AgentSession, ModelClient, OpenOptions, WireMessage } from "./types.ts";

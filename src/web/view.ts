@@ -6,27 +6,38 @@ import * as curriculum from "../curriculum.ts";
 
 export type State = "built" | "recognized" | "open" | "locked";
 
-export type NodeView = { name: string; state: State; level: skills.Level | null; needs: string[]; requires: string[]; next: string; depth: number };
+/** `trusted`: the level they hold came from their own word ("added", or a skipped step), not a review. */
+export type NodeView = { name: string; state: State; level: skills.Level | null; trusted: boolean; needs: string[]; requires: string[]; next: string; depth: number };
 export type TrackView = { name: string; lang: string; done: number; total: number; nodes: NodeView[] };
 export type View = {
   tracks: TrackView[];
   /** Unlocked skills no track has: libraries, one-off ideas. */
-  off: { name: string; lang: string; level: skills.Level }[];
+  off: { name: string; lang: string; level: skills.Level; trusted: boolean }[];
   count: number;
   /** Built/apply notes whose prerequisite chain still permits build-level work. */
   usableBuilt: number;
 };
 
-function stateOf(t: skills.Tree, name: string, lang: string): { state: State; level: skills.Level | null; needs: string[] } {
+/** Whether the level they hold here rests on their word: the note behind it was added by hand. */
+export function trusted(t: skills.Tree, name: string, lang: string): boolean {
   const level = skills.levelIn(t, name, lang);
-  if (level && skills.rank(level) >= skills.rank("build")) return { state: "built", level, needs: [] };
+  if (!level) return false;
+  const own = skills.find(t, name, lang);
+  const s = own && own.level === level ? own : skills.find(t, name, "") ?? own;
+  return s?.how === "added";
+}
+
+function stateOf(t: skills.Tree, name: string, lang: string): { state: State; level: skills.Level | null; trusted: boolean; needs: string[] } {
+  const level = skills.levelIn(t, name, lang);
+  const trust = trusted(t, name, lang);
+  if (level && skills.rank(level) >= skills.rank("build")) return { state: "built", level, trusted: trust, needs: [] };
   const st = curriculum.status(t, name, lang);
-  if (level) return { state: "recognized", level, needs: st.state === "locked" ? st.missing : [] };
-  return { state: st.state === "open" ? "open" : "locked", level: null, needs: st.state === "locked" ? st.missing : [] };
+  if (level) return { state: "recognized", level, trusted: trust, needs: st.state === "locked" ? st.missing : [] };
+  return { state: st.state === "open" ? "open" : "locked", level: null, trusted: false, needs: st.state === "locked" ? st.missing : [] };
 }
 
 /** How many rungs sit under a skill inside its own track: 0 for the first ones. */
-function depths(track: curriculum.Track): Map<string, number> {
+export function trackDepths(track: curriculum.Track): Map<string, number> {
   const byKey = new Map(track.skills.map((n) => [skills.key(n.name), n]));
   const memo = new Map<string, number>();
   const depth = (k: string, seen: Set<string>): number => {
@@ -44,7 +55,7 @@ function depths(track: curriculum.Track): Map<string, number> {
 
 export function view(t: skills.Tree): View {
   const tracks = curriculum.tracks().map((tr) => {
-    const d = depths(tr);
+    const d = trackDepths(tr);
     const nodes = tr.skills.map((n) => {
       const st = curriculum.status(t, n.name, tr.lang);
       return { name: n.name, requires: n.requires, next: st.state === "locked" ? st.next : "", depth: d.get(n.name) ?? 0, ...stateOf(t, n.name, tr.lang) };
@@ -53,7 +64,7 @@ export function view(t: skills.Tree): View {
   });
   const off = t.skills
     .filter((s) => !curriculum.curated(s.name, s.lang))
-    .map((s) => ({ name: s.name, lang: s.lang, level: s.level }))
+    .map((s) => ({ name: s.name, lang: s.lang, level: s.level, trusted: s.how === "added" }))
     .sort((a, b) => (a.lang + a.name).localeCompare(b.lang + b.name));
   let usableBuilt = 0;
   for (const s of t.skills) {

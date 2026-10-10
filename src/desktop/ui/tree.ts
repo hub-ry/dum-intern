@@ -88,9 +88,9 @@ export class SkillTree {
                   "button",
                   {
                     type: "button",
-                    class: `node node-${n.state}${n.name === this.picked ? " picked" : ""}`,
+                    class: `node node-${n.state}${n.trusted ? " trusted" : ""}${n.name === this.picked ? " picked" : ""}`,
                     "aria-pressed": String(n.name === this.picked),
-                    "aria-label": `${n.name}: ${n.state}`,
+                    "aria-label": `${n.name}: ${n.state}${n.trusted ? ", trusted" : ""}`,
                     onclick: () => {
                       this.picked = this.picked === n.name ? "" : n.name;
                       this.draw();
@@ -98,6 +98,7 @@ export class SkillTree {
                   },
                   n.state === "locked" ? icon("lock") : n.state === "built" ? icon("check") : null,
                   h("span", {}, n.name),
+                  n.trusted ? h("span", { class: "node-tag" }, "trusted") : null,
                 ),
               ),
             ),
@@ -112,7 +113,7 @@ export class SkillTree {
     if (data.off.length) {
       this.off.append(
         h("h4", {}, "off the tracks"),
-        h("ul", { class: "off-list" }, ...data.off.map((s) => h("li", {}, h("span", {}, s.name), h("span", { class: "muted" }, `${s.lang ? `${s.lang} · ` : ""}${s.level}`)))),
+        h("ul", { class: "off-list" }, ...data.off.map((s) => h("li", {}, h("span", {}, s.name), h("span", { class: "muted" }, `${s.lang ? `${s.lang} · ` : ""}${s.level}${s.trusted ? " · trusted" : ""}`)))),
       );
     }
     this.off.append(h("p", { class: "muted small" }, `${data.count} skill${data.count === 1 ? "" : "s"} on your tree. Only your own work moves them: an explanation for recognize, a reviewed unaided build for build.`));
@@ -121,7 +122,7 @@ export class SkillTree {
   private describe(track: TrackView, n: NodeView): Node[] {
     const where = track.lang ? ` in ${track.lang}` : "";
     const out: Node[] = [h("h4", {}, n.name), h("p", {}, STATE_TEXT[n.state])];
-    if (n.level) out.push(h("p", { class: "muted" }, `level on your tree: ${n.level}`));
+    if (n.level) out.push(h("p", { class: "muted" }, `level on your tree: ${n.level}${n.trusted ? " (trusted: your word, not a review)" : ""}`));
     if (n.requires.length) out.push(h("p", {}, h("span", { class: "muted" }, "rests on "), n.requires.join(", ")));
     if (n.needs.length) out.push(h("p", {}, h("span", { class: "muted" }, "still needs "), n.needs.join(", ")));
     const row = h("div", { class: "node-actions" });

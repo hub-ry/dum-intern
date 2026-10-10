@@ -14,7 +14,7 @@ import { Captures, type Capturer } from "../src/desktop/capture.ts";
 import { Drafts } from "../src/desktop/draft.ts";
 import { Router, circleView, ownedPage, type Host, type Native } from "../src/desktop/ipc.ts";
 import { DesktopSettings } from "../src/desktop/settings.ts";
-import { BUBBLE_OPEN, BUBBLE_TTL, Bubble } from "../src/desktop/surfaces.ts";
+import { BUBBLE_TTL, Bubble } from "../src/desktop/surfaces.ts";
 import type { HostView } from "../src/desktop/host-client.ts";
 import type { Context } from "../src/context.ts";
 import type {
@@ -27,6 +27,7 @@ import type { VoiceEvent } from "../src/desktop/native-protocol.ts";
 import type { InputBinding, RequestBinding, ShareGrant } from "../src/share-types.ts";
 import type { SharedImage, State } from "../src/store-types.ts";
 import type { StoryQuery, TrailQuery } from "../src/trail-types.ts";
+import type { GoalView, StepView } from "../src/step-types.ts";
 import type { Zone, ZoneContext } from "../src/zone-types.ts";
 
 const temp = () => mkdtempSync(join(tmpdir(), "dum-native-"));
@@ -162,7 +163,7 @@ function viewIn(patch: Partial<HostView> = {}): HostView {
     zoneEpoch: "e1", state: state(), tree: null,
     registry: { version: 1, revision: 3, activeZoneId: zoneA, zones: [zone(zoneA, null, "Trees"), zone(zoneB, zoneA, "AVL")] },
     activeZone: context(zoneA, "Trees"), inputToken: "t1", runningRequestId: null, canAttach: true, shares: [], follows: [], changes: [],
-    look: LOOK, direction: null, decision: null, handoff: null, contextUse: NO_USE, session: null, trail: null, ...patch,
+    look: LOOK, direction: null, decision: null, handoff: null, contextUse: NO_USE, session: null, trail: null, goals: [], next: null, lookLog: [], wizard: null, ...patch,
   };
 }
 
@@ -254,6 +255,9 @@ class FakeHost {
   async debugStop(binding: DebugBinding) { this.record("debug-stop", binding); }
   async debugReset() { this.record("debug-reset", null); return debugView([]); }
   async diagnosticMain(events: readonly SanitizedMainEvent[], status: MainStatus | null) { this.diagnostics.push({ events, status }); }
+  async goalSkip(id: string, skip: boolean) { this.record("goal-skip", { id, skip }); }
+  async stepSkip(zoneId: string, stepId: string, confirmed: boolean) { this.record("step-skip", { zoneId, stepId, confirmed }); }
+  async play(skill: unknown) { this.record("play", skill); }
 }
 
 function desktop() {
@@ -268,6 +272,7 @@ function desktop() {
   let confirmed = true;
   let visible = false;
   let focused = false;
+  let expanded = false;
   let failure = "";
   let personal: Context = { path: "", text: "", warning: "" };
   const reloads: string[] = [];
@@ -290,7 +295,9 @@ function desktop() {
     dismissWindow: async () => void calls.push("dismiss window"),
     windowVisible: () => visible,
     windowFocused: () => focused,
-    openView: (v) => void calls.push(`open view ${v}`),
+    placePanel: () => void calls.push("place panel"),
+    circleExpanded: () => expanded,
+    circleCollapse: () => { calls.push("circle collapse"); expanded = false; },
     circleBegin: () => { calls.push("circle begin"); return "g1"; },
     circleEnd: async (g) => void calls.push(`circle end ${g}`),
     circleCancel: (g) => void calls.push(`circle cancel ${g}`),
@@ -332,6 +339,7 @@ function desktop() {
     conflictOn: (k: string) => { conflict = k; },
     show: (v: boolean) => { visible = v; },
     focus: (f: boolean) => { focused = f; },
+    expand: (e: boolean) => { expanded = e; },
     fail: (message: string) => { failure = message; },
     personal: (c: Context) => { personal = c; },
     live: () => router.snapshot().binding! as RequestBinding,
@@ -340,6 +348,8 @@ function desktop() {
   };
 }
 
+/** A passing bubble's lines; a step or nothing has none. */
+const lines = (v: BubbleView | null | undefined): string[] => (v && v.kind !== "step" ? v.lines : []);
 const ok = (reply: Reply | CircleReply) => {
   assert.ok(reply.ok, reply.ok ? "" : reply.error);
   return reply;
@@ -392,7 +402,10 @@ test("the window's requests are strictly validated, and refusals change nothing"
 
 test("roles: the bubble invokes nothing, the circle only its gestures, toggle and view", async () => {
   const d = desktop();
-  for (const request of [{ type: "snapshot" }, { type: "quit" }, { type: "circle-toggle" }, { type: "circle-view" }]) {
+  for (const request of [
+    { type: "snapshot" }, { type: "quit" }, { type: "circle-toggle" }, { type: "circle-view" },
+    { type: "step-pick", zoneId: zoneA, stepId: "project-1a2b" }, { type: "step-skip", zoneId: zoneA, stepId: "project-1a2b", confirmed: true }, { type: "step-open", zoneId: zoneA },
+  ]) {
     refused(await d.router.handle(request, "bubble"), /bubble can't/);
   }
   for (const request of [
@@ -406,7 +419,7 @@ test("roles: the bubble invokes nothing, the circle only its gestures, toggle an
 
   const begin = ok(await d.router.handle({ type: "circle-press", phase: "begin" }, "circle")) as Extract<CircleReply, { ok: true }>;
   assert.deepEqual(begin.gesture, { gestureId: "g1" });
-  assert.deepEqual(Object.keys(begin.view).sort(), ["open", "paused", "reason", "state"], "the circle sees only its face");
+  assert.deepEqual(Object.keys(begin.view).sort(), ["expanded", "open", "paused", "reason", "showing", "slots", "state"], "the circle sees only its face and column");
   ok(await d.router.handle({ type: "circle-press", phase: "end", gestureId: "g1" }, "circle"));
   ok(await d.router.handle({ type: "circle-press", phase: "cancel", gestureId: "g1" }, "circle"));
   ok(await d.router.handle({ type: "circle-toggle" }, "circle"));
@@ -758,7 +771,7 @@ test("push-to-talk fills an empty draft for the live binding; stale or late voic
   assert.deepEqual(d.voice, [`start t1 g1`], "the press starts a recording for the live binding");
   d.router.voiceEvent({ op: "recording", recordingId: "rec1", binding: live });
   assert.equal(d.router.snapshot().voice.phase, "recording");
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Listening…"]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["Listening…"]);
   d.router.voiceEvent({ op: "transcribing", recordingId: "rec1", binding: live });
   d.router.voiceEvent({ op: "transcript", recordingId: "rec1", binding: live, text: "how do rotations work" });
   const snap = d.router.snapshot();
@@ -766,7 +779,7 @@ test("push-to-talk fills an empty draft for the live binding; stale or late voic
   assert.equal(snap.draft.source, "voice");
   assert.equal(snap.voice.phase, "ready");
   assert.equal(d.host.sent.length, 0, "voice never sends");
-  assert.ok(d.bubbles.at(-1)?.lines.some((l) => l.includes("open Dum")), "the bubble points at Dum, not a command bar");
+  assert.ok(lines(d.bubbles.at(-1)).some((l) => l.includes("open Dum")), "the bubble points at Dum, not a command bar");
 
   // A full draft refuses a new press and a mouse start.
   d.router.voiceEvent({ op: "pressed", gestureId: "g2" });
@@ -791,20 +804,20 @@ test("a voice request's reply shows in the bubble; a decision stays in the windo
   const live = d.live();
   d.router.voiceEvent({ op: "transcript", recordingId: "r", binding: live, text: "explain" });
   ok(await d.router.handle({ type: "send", binding: live, draftRevision: d.router.snapshot().draft.revision }, "window"));
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["Dum is working…"]);
   d.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }), inputToken: "idle" });
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["A rotation keeps order."]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["A rotation keeps order."]);
   d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }), inputToken: "t7" });
   assert.equal(d.bubbles.at(-1)?.kind, "reply");
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["A rotation keeps order."]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["A rotation keeps order."]);
 
   const v = desktop();
   const vl = v.live();
   v.router.voiceEvent({ op: "transcript", recordingId: "r", binding: vl, text: "change it" });
   ok(await v.router.handle({ type: "send", binding: vl, draftRevision: v.router.snapshot().draft.revision }, "window"));
   v.update({ state: state({ prompt: { type: "question", question: "Share src?", why: "", purpose: "share" } }), inputToken: "q1" });
-  assert.equal(v.bubbles.at(-1)?.lines.at(-1), "Decision waiting - answer it in Dum");
-  assert.ok(!v.bubbles.at(-1)!.lines.some((l) => l.includes("Share src?")), "the decision itself is never in the bubble");
+  assert.deepEqual(lines(v.bubbles.at(-1)), ["A decision is waiting for you in Dum."]);
+  assert.ok(!lines(v.bubbles.at(-1)).some((l) => l.includes("Share src?")), "the decision itself is never in the bubble");
 });
 
 /** Type `explain` into the live draft and send it. */
@@ -831,10 +844,10 @@ test("replies resume after question answers when the user switches away from Dum
       else ok(await d.router.handle({ type: "respond", binding: d.live(), decision: { kind: answer, value: true } }, "window"));
       d.focus(false);
       d.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "Continuing." }] }), inputToken: "idle" });
-      assert.deepEqual(d.bubbles.at(-1)?.lines, ["Continuing."], `${start}/${answer}`);
+      assert.deepEqual(lines(d.bubbles.at(-1)), ["Continuing."], `${start}/${answer}`);
       d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Continuing." }, { kind: "say", id: 2, text: "Finished." }] }), inputToken: "t7" });
       assert.equal(d.bubbles.at(-1)?.kind, "reply");
-      assert.deepEqual(d.bubbles.at(-1)?.lines, ["Continuing.", "Finished."]);
+      assert.deepEqual(lines(d.bubbles.at(-1)), ["Continuing."], "one sentence");
     }
   }
 });
@@ -842,32 +855,32 @@ test("replies resume after question answers when the user switches away from Dum
 test("a typed request's reply shows in the bubble too, with the Wizard's aside and one reply lifetime", async () => {
   const d = desktop();
   await typed(d.router, d.live());
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["Dum is working…"]);
   d.update({
     runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }, { kind: "quip", id: 2, text: "Nice question." }] }),
     inputToken: "t7",
   });
   const reply = d.bubbles.at(-1)!;
   assert.equal(reply.kind, "reply");
-  assert.deepEqual(reply.lines, ["A rotation keeps order.", "Wizard: Nice question."]);
+  assert.deepEqual(lines(reply), ["A rotation keeps order.", "Wizard: Nice question."]);
   assert.equal(reply.expiresAt - NOW, BUBBLE_TTL.reply);
   assert.ok(BUBBLE_TTL.reply > 8_000, "a reply is read, not heard: it outlasts the old 8 s");
 
-  // A cut reply ends by pointing at Dum.
+  // A long reply is its first sentence.
   const long = desktop();
   await typed(long.router, long.live());
-  long.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n") }] }), inputToken: "t7" });
-  assert.equal(long.bubbles.at(-1)!.lines.at(-1), BUBBLE_OPEN);
+  long.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "First, the rule. Then twenty more lines.\nline 2\nline 3" }] }), inputToken: "t7" });
+  assert.deepEqual(lines(long.bubbles.at(-1)), ["First, the rule."]);
   assert.equal(long.bubbles.at(-1)!.expiresAt - NOW, BUBBLE_TTL.reply);
 
-  // A question Dum asks is shown, with where it waits.
+  // A question Dum asks is the one sentence shown.
   const q = desktop();
   await typed(q.router, q.live());
   q.update({
     state: state({ prompt: { type: "question", question: "Which file?", why: "", intern: true }, transcript: [{ kind: "question", id: 1, question: "Which file?", why: "", answer: null }] }),
     inputToken: "q1",
   });
-  assert.deepEqual(q.bubbles.at(-1)!.lines, ["Which file?", "Dum is waiting for your answer in Dum"]);
+  assert.deepEqual(lines(q.bubbles.at(-1)), ["Which file?"]);
 });
 
 test("no bubble while the working window is visible and focused: the reply is already on screen", async () => {
@@ -884,7 +897,7 @@ test("no bubble while the working window is visible and focused: the reply is al
   g.show(true);
   await typed(g.router, g.live());
   g.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Off to the side." }] }), inputToken: "t7" });
-  assert.deepEqual(g.bubbles.at(-1)?.lines, ["Off to the side."]);
+  assert.deepEqual(lines(g.bubbles.at(-1)), ["Off to the side."]);
 
   // Focus taken mid-request, then released: the reply still arrives in the bubble.
   const h = desktop();
@@ -895,7 +908,7 @@ test("no bubble while the working window is visible and focused: the reply is al
   assert.equal(h.bubbles.at(-1) ?? null, null, "a status bubble is dismissed once they're looking at the window");
   h.focus(false);
   h.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Half." }, { kind: "say", id: 2, text: "Whole." }] }), inputToken: "t7" });
-  assert.deepEqual(h.bubbles.at(-1)?.lines, ["Half.", "Whole."]);
+  assert.deepEqual(lines(h.bubbles.at(-1)), ["Half."]);
 });
 
 test("focusing Dum suppresses a completed reply without another host reply", async () => {
@@ -919,11 +932,11 @@ test("window focus leaves dictation recording and draft bubbles available", () =
   d.router.voiceEvent({ op: "recording", recordingId: "r1", binding });
   d.focus(true);
   d.router.changed();
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Listening…"]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["Listening…"]);
   d.router.voiceEvent({ op: "transcript", recordingId: "r1", binding, text: "Ready to send" });
   d.router.changed();
   assert.equal(d.bubbles.at(-1)?.kind, "voice");
-  assert.equal(d.bubbles.at(-1)?.lines[0], "Ready to send");
+  assert.equal(lines(d.bubbles.at(-1))[0], "Ready to send");
 });
 
 test("unchanged request replies leave voice interactions in the bubble", async () => {
@@ -961,7 +974,7 @@ test("new request content replaces a voice preview and a Send starts a fresh rep
   d.router.voiceEvent({ op: "transcript", recordingId: "r", binding, text: "Use tree.ts" });
   d.update({ state: state({ prompt: { type: "question", question: "Which folder?", why: "", intern: true }, transcript: [{ kind: "question", id: 2, question: "Which folder?", why: "", answer: null }] }) });
   assert.equal(d.bubbles.at(-1)?.kind, "reply");
-  assert.equal(d.bubbles.at(-1)?.lines[0], "Which folder?");
+  assert.equal(lines(d.bubbles.at(-1))[0], "Which folder?");
   d.router.voiceEvent({ op: "error", message: "Try again" });
   ok(await d.router.handle({ type: "send", binding: d.live(), draftRevision: d.router.snapshot().draft.revision }, "window"));
   assert.equal(d.bubbles.at(-1)?.kind, "reply");
@@ -982,7 +995,7 @@ test("synchronous typed and voice commands finish before Verify is pressed", asy
     ok(await d.router.handle({ type: "agent-verify-images", backend: "claude", selector: { backend: "claude", model: "haiku", effort: null } }, "window"));
     assert.ok(d.calls.includes("verify"));
     assert.notEqual(d.live().requestId, live.requestId);
-    assert.deepEqual(d.bubbles.at(-1)?.lines, ["dum", "Help for this request."]);
+    assert.deepEqual(lines(d.bubbles.at(-1)), ["Help for this request."]);
   }
 });
 
@@ -1002,7 +1015,7 @@ test("typed, voice and button commands follow the host request through an unchan
     d.update({ state: state(), inputToken: "t1" });
     assert.equal(d.live().requestId, live.requestId);
     d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Here are your projects." }] }) });
-    assert.deepEqual(d.bubbles.at(-1)?.lines, ["Here are your projects."]);
+    assert.deepEqual(lines(d.bubbles.at(-1)), ["Here are your projects."]);
     assert.equal(d.bubbles.at(-1)?.kind, "reply");
     assert.notEqual(d.live().requestId, live.requestId);
   }
@@ -1019,8 +1032,7 @@ test("typed, voice and handoff failures bubble their recorded outcome without mo
     } else await typed(d.router, live);
     d.update({ runningRequestId: null, inputToken: "t7", state: state({ transcript: [{ kind: "note", id: 1, text: "The backend failed before answering." }] }), ...(source === "handoff" ? { handoff: { head: { requestId: live.requestId, state: "failed", result: "No file changed." } } as HandoffView } : {}) });
     assert.equal(d.bubbles.at(-1)?.kind, "reply");
-    assert.ok(d.bubbles.at(-1)?.lines.includes("The backend failed before answering."));
-    if (source === "handoff") assert.ok(d.bubbles.at(-1)?.lines.includes("No file changed."));
+    assert.deepEqual(lines(d.bubbles.at(-1)), ["The backend failed before answering."], "the first thing said, in one sentence");
   }
 });
 
@@ -1031,7 +1043,7 @@ test("a silent completed handoff bubbles its own result for every terminal state
     ok(await d.router.handle({ type: "handoff-run", binding, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
     const result = `${terminal}: No file changed.`;
     d.update({ runningRequestId: null, state: state(), handoff: { head: { requestId: binding.requestId, state: terminal, result } } as HandoffView });
-    assert.deepEqual(d.bubbles.at(-1)?.lines, [result]);
+    assert.deepEqual(lines(d.bubbles.at(-1)), [result]);
     assert.equal(d.bubbles.at(-1)?.kind, "reply");
   }
 });
@@ -1041,10 +1053,10 @@ test("Do this: the finished handoff's summary bubbles like a typed reply, under 
   const live = d.live();
   ok(await d.router.handle({ type: "handoff-run", binding: live, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
   assert.equal(d.host.runs.length, 1);
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["Dum is working…"]);
   d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Done: renamed the helper." }] }), inputToken: "t7" });
   assert.equal(d.bubbles.at(-1)?.kind, "reply");
-  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Done: renamed the helper."]);
+  assert.deepEqual(lines(d.bubbles.at(-1)), ["Done: renamed the helper."]);
 
   const f = desktop();
   f.show(true);
@@ -1065,8 +1077,8 @@ test("settings: distinct shortcuts, applied before saved, rolled back on conflic
   assert.equal(existsSync(join(d.dir, "settings.json")), false, "a refused shortcut saves nothing");
   assert.deepEqual(d.host.diagnostics.at(-1)?.events.map((e) => `${e.kind} ${e.outcome} ${e.reason}`), ["settings failed shortcut-conflict"]);
   const agent = {
-    backend: "local", login: "none",
-    intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "m", effort: null }, look: { backend: "local", model: "m", effort: null },
+    backend: "claude", login: "anthropic-key",
+    intern: { backend: "claude", model: "m", effort: null }, helper: { backend: "claude", model: "m", effort: null }, look: { backend: "claude", model: "m", effort: null },
   } as const;
   refused(await d.router.handle({ type: "settings", settings: { ...prefs, agent } }, "window"), /Who powers Dum|Agent/);
 
@@ -1085,7 +1097,7 @@ test("zone delete and skill add need a native confirmation; deleting drops those
   const d = desktop();
   d.answer(false);
   ok(await d.router.handle({ type: "zone-delete", id: zoneA, expectedRevision: 3 }, "window"));
-  assert.ok(d.calls.at(-1)!.includes("1 zone inside it"));
+  assert.ok(d.calls.at(-1)!.includes("1 goal inside it"));
   ok(await d.router.handle({ type: "skill-edit", op: "add", skill: { name: "recursion", lang: "" } }, "window"));
   assert.deepEqual(d.host.calls, [], "declined: nothing reaches the host");
   d.answer(true);
@@ -1151,12 +1163,12 @@ test("the circle's face follows typed fields in priority order", () => {
   const d = desktop();
   const base = d.router.snapshot();
   const chosen = {
-    backend: "local", login: "none",
-    intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "m", effort: null }, look: { backend: "local", model: "m", effort: null },
+    backend: "claude", login: "anthropic-key",
+    intern: { backend: "claude", model: "m", effort: null }, helper: { backend: "claude", model: "m", effort: null }, look: { backend: "claude", model: "m", effort: null },
   } as const;
   const ready: Snapshot = {
     ...base, settings: { ...base.settings, agent: chosen },
-    agent: { chosen, backends: [{ id: "local", label: "On this Mac", installed: true, methods: ["none"], ready: "none", loginRunning: false, message: "" }] },
+    agent: { chosen, backends: [{ id: "claude", label: "Claude", installed: true, methods: ["anthropic-key"], ready: "anthropic-key", loginRunning: false, message: "" }] },
   };
   const face = (s: Snapshot, failure = "", rejected = false) => {
     const v = circleView(s, failure, rejected);
@@ -1176,4 +1188,180 @@ test("the circle's face follows typed fields in priority order", () => {
   assert.equal(face({ ...ready, voice: { phase: "transcribing", recordingId: "r", status: "" } }, "host stopped"), "listening/transcribing");
   assert.equal(face({ ...ready, voice: { phase: "recording", recordingId: "r", status: "" } }), "listening/recording");
   assert.equal(circleView({ ...ready, window: { visible: true } }, "").open, true);
+});
+
+// -- goals, panels, pins, steps ---------------------------------------------------------------------
+
+const stepIn = (zoneId: string, patch: Partial<StepView> = {}): StepView => ({
+  id: "project-1a2b", zoneId, goal: "Trees", kind: "project", text: "Pick a project theme or idea.", skill: null,
+  pick: { label: "Pick the project idea for me", prompt: "Pick a small tree project idea for me." }, confirmSkip: false, ...patch,
+});
+const goalIn = (id: string, step: StepView | null, done = 1, total = 4): GoalView => ({ id, path: [], progress: { done, total }, step, skippedAt: null });
+
+test("the active goal's step comes from the host and stays in the bubble until it changes, except while Dum is in front", () => {
+  const d = desktop();
+  const step = stepIn(zoneA);
+  const next = { skill: { name: "insert", lang: "typescript" }, zoneId: zoneA, why: "It's the next thing your tree needs." };
+  d.update({ goals: [goalIn(zoneA, step), goalIn(zoneB, stepIn(zoneB, { id: "align-9f" }))], next });
+  const snap = d.router.snapshot();
+  assert.deepEqual(snap.step, step, "only the active goal's step");
+  assert.deepEqual(snap.goals.map((g) => g.id), [zoneA, zoneB]);
+  assert.deepEqual(snap.next, next);
+  assert.deepEqual(d.bubbles.at(-1), { kind: "step", step, expiresAt: 0 });
+
+  d.show(true);
+  d.focus(true);
+  d.router.windowChanged();
+  assert.equal(d.bubbles.at(-1), null, "the window in front shows it already");
+  d.focus(false);
+  d.router.windowChanged();
+  assert.equal(d.bubbles.at(-1)?.kind, "step", "back once they look away");
+
+  const milestone = stepIn(zoneA, { id: "milestone-3c", kind: "milestone", text: "Write the insert function." });
+  d.update({ goals: [goalIn(zoneA, milestone)] });
+  assert.deepEqual(d.bubbles.at(-1), { kind: "step", step: milestone, expiresAt: 0 }, "a new step replaces it");
+  d.update({ goals: [goalIn(zoneA, null)] });
+  assert.equal(d.bubbles.at(-1), null, "done or skipped: it goes");
+  assert.equal(d.router.snapshot().step, null);
+});
+
+test("the panel follows the active goal until one is chosen; another goal is entered first; a deleted one falls back to Dum", async () => {
+  const d = desktop();
+  assert.deepEqual(d.router.snapshot().panel, { kind: "goal", id: zoneA });
+  ok(await d.router.handle({ type: "panel", panel: { kind: "tree" } }, "window"));
+  assert.deepEqual(d.router.snapshot().panel, { kind: "tree" });
+  assert.deepEqual(d.calls, ["place panel"], "re-placed at the circle for the new size");
+  ok(await d.router.handle({ type: "panel", panel: { kind: "goal", id: zoneB } }, "window"));
+  assert.deepEqual(d.host.calls, ["enter B 3"], "entered at the registry revision");
+  assert.deepEqual(d.router.snapshot().panel, { kind: "goal", id: zoneB });
+  ok(await d.router.handle({ type: "panel", panel: { kind: "goal", id: zoneA } }, "window"));
+  assert.deepEqual(d.host.calls, ["enter B 3"], "the active goal isn't entered again");
+  refused(await d.router.handle({ type: "panel", panel: { kind: "goal", id: randomUUID() } }, "window"), /doesn't exist/);
+
+  const registry = d.host.view!.registry;
+  d.update({ registry: { ...registry, zones: registry.zones.map((z) => (z.id === zoneA ? { ...z, deletedAt: AT } : z)) } });
+  assert.deepEqual(d.router.snapshot().panel, { kind: "dum" }, "its goal is gone");
+
+  const fresh = desktop();
+  fresh.update({ registry: { ...registry, activeZoneId: null }, activeZone: null, zoneEpoch: null });
+  assert.deepEqual(fresh.router.snapshot().panel, { kind: "dum" }, "no active goal: Dum's panel");
+});
+
+test("at most three goals pin to the column, in order; deleted goals come off", async () => {
+  const d = desktop();
+  const [c, e] = [randomUUID(), randomUUID()];
+  const registry = d.host.view!.registry;
+  d.update({ registry: { ...registry, zones: [...registry.zones, zone(c, null, "SQL"), zone(e, null, "Go")] } });
+  for (const id of [zoneB, c, zoneA]) ok(await d.router.handle({ type: "goal-pin", id, pinned: true }, "window"));
+  refused(await d.router.handle({ type: "goal-pin", id: e, pinned: true }, "window"), /up to three goals/);
+  refused(await d.router.handle({ type: "goal-pin", id: randomUUID(), pinned: true }, "window"), /doesn't exist/);
+  assert.deepEqual(d.router.snapshot().pinned, [zoneB, c, zoneA]);
+  assert.deepEqual(d.router.circle().slots.map((s) => (s.ref.kind === "goal" ? s.ref.id : s.ref.kind)), ["dum", zoneB, c, zoneA, "tree", "monitor", "settings"]);
+  assert.deepEqual(DesktopSettings.load(d.dir).pinned(), [zoneB, c, zoneA], "saved beside the circle's placement");
+
+  ok(await d.router.handle({ type: "goal-pin", id: c, pinned: false }, "window"));
+  assert.deepEqual(d.router.snapshot().pinned, [zoneB, zoneA]);
+  const now = d.host.view!.registry;
+  d.update({ registry: { ...now, zones: now.zones.map((z) => (z.id === zoneB ? { ...z, deletedAt: AT } : z)) } });
+  assert.deepEqual(d.router.snapshot().pinned, [zoneA]);
+  assert.deepEqual(d.settings.pinned(), [zoneA], "pruned in the file too");
+});
+
+test("skips and play go to the host as asked", async () => {
+  const d = desktop();
+  const skill = { name: "insert", lang: "typescript" };
+  ok(await d.router.handle({ type: "goal-skip", id: zoneB, skip: true }, "window"));
+  ok(await d.router.handle({ type: "step-skip", zoneId: zoneA, stepId: "build-77", confirmed: false }, "window"));
+  ok(await d.router.handle({ type: "play", skill }, "window"));
+  ok(await d.router.handle({ type: "play", skill: null }, "window"));
+  assert.deepEqual(d.host.got, [
+    { op: "goal-skip", input: { id: zoneB, skip: true } },
+    { op: "step-skip", input: { zoneId: zoneA, stepId: "build-77", confirmed: false } },
+    { op: "play", input: skill },
+    { op: "play", input: null },
+  ]);
+});
+
+test("pick for me sends the step's prompt like a typed Send, only for the step that's showing", async () => {
+  const d = desktop();
+  const step = stepIn(zoneA);
+  d.update({ goals: [goalIn(zoneA, step), goalIn(zoneB, null)] });
+  refused(await d.router.handle({ type: "step-pick", zoneId: zoneA, stepId: "project-old" }, "window"), /step changed/);
+  refused(await d.router.handle({ type: "step-pick", zoneId: zoneB, stepId: "project-1a2b" }, "window"), /step changed/);
+  ok(await d.router.handle({ type: "step-pick", zoneId: zoneA, stepId: step.id }, "window"));
+  assert.deepEqual(d.host.sent.map((s) => [s.binding.zoneId, s.text]), [[zoneA, step.pick!.prompt]]);
+  assert.equal(d.router.snapshot().draft.text, "", "the draft is consumed like a Send");
+  refused(await d.router.handle({ type: "step-pick", zoneId: zoneA, stepId: step.id }, "window"), /still working/);
+  assert.equal(d.host.sent.length, 1);
+
+  // Another goal's step: that goal is entered, then the prompt goes there.
+  const o = desktop();
+  const other = stepIn(zoneB, { id: "align-5e", kind: "align" });
+  o.host.openZone = async (id: string, rev: number) => {
+    o.host.calls.push(`enter ${id === zoneB ? "B" : id} ${rev}`);
+    o.update({ registry: { ...o.host.view!.registry, activeZoneId: id }, activeZone: context(id, "AVL"), zoneEpoch: "e2", inputToken: "t2" });
+  };
+  o.update({ goals: [goalIn(zoneA, null), goalIn(zoneB, other)] });
+  ok(await o.router.handle({ type: "step-pick", zoneId: zoneB, stepId: other.id }, "window"));
+  assert.deepEqual(o.host.calls, ["enter B 3"]);
+  assert.deepEqual(o.host.sent.map((s) => [s.binding.zoneId, s.text]), [[zoneB, other.pick!.prompt]]);
+  assert.equal(lines(o.bubbles.at(-1))[0], "Dum is working…", "its reply bubbles as usual");
+
+  const none = desktop();
+  none.update({ goals: [goalIn(zoneA, stepIn(zoneA, { pick: null }))] });
+  refused(await none.router.handle({ type: "step-pick", zoneId: zoneA, stepId: "project-1a2b" }, "window"), /nothing for Dum to pick/);
+});
+
+test("the Wizard's chime comes from the host and jumps into the bubble once, unless Dum is in front", () => {
+  const d = desktop();
+  const lookLog = [{ id: "l1", at: AT, kind: "app" as const, text: "Switched to the editor." }];
+  const chime = { id: "w1", at: AT, text: "Looks stuck: try logging the rows first." };
+  d.update({ goals: [goalIn(zoneA, stepIn(zoneA))], lookLog, wizard: chime });
+  assert.deepEqual([d.router.snapshot().lookLog, d.router.snapshot().wizard], [lookLog, chime]);
+  assert.deepEqual(d.bubbles.at(-1), { kind: "wizard", text: chime.text, expiresAt: NOW + BUBBLE_TTL.wizard });
+  const count = d.bubbles.length;
+  d.update({ lookLog: [] });
+  assert.equal(d.bubbles.length, count, "the same chime isn't shown again");
+
+  const f = desktop();
+  f.show(true);
+  f.focus(true);
+  f.router.windowChanged();
+  f.update({ wizard: chime });
+  assert.equal(f.bubbles.at(-1) ?? null, null, "the panel shows it already");
+
+  const old = desktop();
+  old.update({ lookLog: undefined as unknown as [], wizard: undefined as unknown as null });
+  assert.deepEqual([old.router.snapshot().lookLog, old.router.snapshot().wizard], [[], null]);
+});
+
+test("monitor and settings panels switch like the tree; the settings view opens the settings panel", async () => {
+  const d = desktop();
+  ok(await d.router.handle({ type: "panel", panel: { kind: "monitor" } }, "window"));
+  assert.deepEqual(d.router.snapshot().panel, { kind: "monitor" });
+  ok(await d.router.handle({ type: "view", view: "settings" }, "window"));
+  assert.deepEqual(d.router.snapshot().panel, { kind: "settings" });
+  assert.deepEqual(d.calls, ["place panel", "place panel"]);
+  assert.deepEqual(d.host.calls, [], "no goal entered, no host view selected");
+});
+
+test("the circle picks a slot in its column by keyboard and folds it on Esc", async () => {
+  const d = desktop();
+  d.expand(true);
+  const view = ok(await d.router.handle({ type: "circle-view" }, "circle")) as Extract<CircleReply, { ok: true }>;
+  assert.equal(view.view.expanded, true);
+  assert.deepEqual(view.view.slots.map((s) => s.ref.kind), ["dum", "goal", "goal", "tree", "monitor", "settings"]);
+  assert.equal(view.view.showing, null, "nothing open");
+  ok(await d.router.handle({ type: "circle-pick", slot: { kind: "tree" } }, "circle"));
+  assert.deepEqual(d.calls, ["circle collapse", "place panel", "show window"], "fold, open that panel, show the window");
+  assert.deepEqual(d.router.snapshot().panel, { kind: "tree" });
+  d.show(true);
+  const open = ok(await d.router.handle({ type: "circle-view" }, "circle")) as Extract<CircleReply, { ok: true }>;
+  assert.deepEqual([open.view.expanded, open.view.showing], [false, { kind: "tree" }], "the one circle wears the open panel's slot");
+
+  refused(await d.router.handle({ type: "circle-pick", slot: { kind: "goal", id: randomUUID() } }, "circle"), /isn't in the column/);
+  d.expand(true);
+  ok(await d.router.handle({ type: "circle-collapse" }, "circle"));
+  assert.equal(d.calls.at(-1), "circle collapse");
+  assert.deepEqual(d.host.calls, [], "picking the tree enters no goal");
 });

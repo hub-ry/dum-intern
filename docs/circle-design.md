@@ -1,5 +1,17 @@
 # Dum: delegate from the circle
 
+## Superseded parts (goals column)
+
+The goals column replaces §2 (circle window: one circle that only opens the window), §3 (working window: the strip, the zone crumb, the Context chevron, Hide and the section order) and §7 (bubble: the eight-line/600-character cut, "Open Dum for the full reply" and reply-only content). The Status line below describes the strip, which is gone too. The rest stands. Where this section and the rest disagree, this section and the code win.
+
+- **Column.** One circle; a click unfolds it into a column of at most seven 56 DIP circles on one shared translucent capsule: Dum (the global goals folder, Dum's face), up to three goals (pinned, else the three most recently updated with the active one first), the skill tree, the Monitor and Settings. It folds back after 8 s with no pointer over it, or on Esc. `CircleView.slots`, `circle-pick`, `circle-collapse` in `src/desktop/protocol.ts`; `COLUMN` and `columnRect` in `surfaces.ts`.
+- **Panels.** Picking a circle folds the column into it and opens its panel (`PanelRef`), all in one dark theme: Dum 400×560 (the "What do you want to work toward?" prompt and the nested goal list; a row opens its goal, pin and skip are hover icons), Goal 440×640 (header and progress, the step cloud, chat with a one-line composer and Stop only while running, a Path strip with ▶ per skill; More has Edit goal, New goal inside, Delete goal, Suggested projects, Changes, Memory), Tree 760×560 (Graph | Tree, track filter, Tidy, ▶ Play), Monitor 400×560 (Recording / Paused / Not recording: why, look model, last check, pictures, Pause/Resume, the live context log), Settings 400×560 (including Mode and Move circle). The panel's top-left corner sits at the circle's disk center and flips left/up when there's no room (`placePanel`). Esc backs out of a panel one step at a time.
+- **Goals.** The user reads "goal" everywhere; storage stays zones (`zones.json`, `~/.dum/zones/`), with no migration. Pins are main-owned in `settings.json` (`pinned`, at most 3).
+- **Steps.** Each goal has exactly one next step, one sentence, derived by the host (`src/steps.ts`, types in `src/step-types.ts`): align → project → next milestone → next path skill (recognize, then build). Each has "Pick … for me" (a fixed prompt sent as if typed) and Skip; it goes away once done. Skips live in `zones/<id>/steps.json`, host-written only.
+- **Trust.** Skipping a skill step records it through evidence's self-report (`how: "added"`, build), so it counts for the gate and shows as trusted (dashed). Beginner skills skip in one click; others need a confirmed "Sure?" (`confirmSkip`). Skipping a goal trusts every unheld path skill, prerequisites first. Undo trust removes the skill.
+- **Play.** ▶ on a skill, or ▶ Play for `NextSkill`, makes it the active goal's step.
+- **Bubble.** A click-through thought cloud with puffs trailing toward the circle; no buttons, no input, and the bubble role invokes nothing (`BubbleAPI`). Beside the circle: the active goal's step, which never times out and hides only while the window is visible and focused, or the Wizard's chime (purple, 20 s, at most once per 60 s, when the look sees the user stuck). At the cursor: voice status, or a reply of one sentence of Dum's plus at most one Wizard line (`bubbleLines`). Pick … for me and Skip live in the goal panel's step cloud and on the graph card. The host's context log (`LOOK_LOG`, ≤200 entries, memory only) feeds the Monitor.
+
 Status: the strip layout in `src/desktop/ui/window.ts` supersedes the three-section header below: the window opens on Chat with one slim strip (zone crumb, look chip, goal, Context chevron that expands Current context and the zone tree, Settings cog, Hide) and a Chat header of Mode · Menu · Move circle; "Zones → Current context → Chat" and the "Skills / Records" menu in §3 are the earlier contract. Otherwise: implementation contract, not implemented behavior. Ryan's circle and delegation decisions are fixed. Sizes, thresholds, schemas and signatures below are **target choices** unless labeled **Current**. Relative citations refer to this checkout; `/tmp/dum-live-look/...` citations identify the separate work-in-flight checkout. Both changed during inspection; latest reads in this checkout now also show three model roles, API-key setup and observation-only look. They supersede earlier ambient/settings assumptions.
 
 ## 1. Decision and grounding
@@ -46,7 +58,7 @@ flowchart TB
   end
   F[Universal focus helper]
   V[OpenSuperWhisper bridge]
-  A[Chosen API-key or local model backend]
+  A[Chosen API-key backend]
   W <-- finite IPC / host protocol --> U
   O <-- fresh ticks / frames --> L
   W <-- independent debug binding --> D

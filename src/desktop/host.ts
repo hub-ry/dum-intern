@@ -4,7 +4,6 @@
 import { serve } from "./controller.ts";
 import { claudeBackend } from "../agent/claude.ts";
 import { chatgptBackend } from "../agent/openai-responses.ts";
-import { localBackend } from "../agent/local.ts";
 
 const epoch = process.env.DUM_HOST_EPOCH;
 if (!epoch) throw new Error("a teaching host must be started by Dum");
@@ -14,6 +13,5 @@ serve({
   backends: ({ home, claudeExecutable, credential }) => [
     ...(claudeExecutable ? [claudeBackend({ executable: claudeExecutable, credential, home })] : []),
     chatgptBackend({ credential }),
-    localBackend(),
   ],
 });

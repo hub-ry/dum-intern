@@ -1,47 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { once } from "node:events";
-import type { AddressInfo } from "node:net";
 import { z } from "zod";
 import { loopSession } from "../src/agent/loop.ts";
-import { chatCompletionsClient } from "../src/agent/openai-compatible.ts";
 import { bareName, toWireActions } from "../src/agent/wire.ts";
-import type { AgentEvent, DumAction, OpenOptions } from "../src/agent/types.ts";
+import type { AgentEvent, DumAction, ModelClient, ModelStep, OpenOptions, WireAction, WireMessage } from "../src/agent/types.ts";
 
 process.env.DUM_CONTEXT = "off";
 
-type ChatBody = {
-  stream: boolean;
-  tools?: { function: { name: string; parameters: { required?: string[] } } }[];
-  messages: { role: string; content?: unknown }[];
-};
-type Reply = (req: { body: ChatBody }, res: ServerResponse) => void;
+type Request = { system: string; history: WireMessage[]; actions: WireAction[]; model: string; effort: string | null };
+type Reply = ModelStep | ((signal: AbortSignal) => Promise<ModelStep>);
 
-async function server(replies: Reply[]) {
-  const bodies: ChatBody[] = [];
-  const paths: string[] = [];
-  const srv = createServer(async (req: IncomingMessage, res) => {
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
-    paths.push(req.url ?? "");
-    const body = JSON.parse(raw) as ChatBody;
-    bodies.push(body);
-    const reply = replies.shift();
-    if (!reply) { res.statusCode = 500; res.end("no more replies"); return; }
-    reply({ body }, res);
-  });
-  srv.listen(0, "127.0.0.1");
-  await once(srv, "listening");
-  const { port } = srv.address() as AddressInfo;
-  const close = () => {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    srv.closeAllConnections();
-    srv.close(() => resolve());
-    return promise;
+/** A scripted ModelClient: each step answers with the next reply and records what it was sent. */
+function scripted(replies: Reply[]) {
+  const requests: Request[] = [];
+  const client: ModelClient = {
+    async step(req) {
+      requests.push({ system: req.system, history: structuredClone([...req.history]), actions: [...req.actions], model: req.model, effort: req.effort });
+      const reply = replies.shift();
+      if (!reply) return { text: "", calls: [], error: "no more replies" };
+      return typeof reply === "function" ? reply(req.signal) : reply;
+    },
   };
-  return { base: `http://127.0.0.1:${port}`, bodies, paths, close };
+  return { client, requests };
 }
+
+const says = (text: string): ModelStep => ({ text, calls: [], error: null });
+const calls = (name: string, args: unknown, id = "c"): ModelStep => ({ text: "", calls: [{ id, name, arguments: JSON.stringify(args) }], error: null });
 
 function endError(events: AgentEvent[]): string | null {
   const end = events.at(-1);
@@ -49,27 +33,16 @@ function endError(events: AgentEvent[]): string | null {
   return end?.type === "end" ? end.error : null;
 }
 
-function sse(chunks: unknown[], done = true): Reply {
-  return (_req, res) => {
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    for (const c of chunks) res.write(`data: ${JSON.stringify(c)}\n\n`);
-    if (done) res.write("data: [DONE]\n\n");
-    res.end();
-  };
-}
-
-const delta = (d: unknown) => ({ choices: [{ index: 0, delta: d }] });
-
 function options(actions: DumAction[], extra: Partial<OpenOptions> = {}): OpenOptions {
   return {
     cwd: "/tmp",
     systemPrompt: "You are Dum.",
-    selector: { backend: "local", model: "m", effort: null },
-    login: "none",
+    selector: { backend: "chatgpt", model: "m", effort: null },
+    login: "chatgpt",
     actions,
     signal: new AbortController().signal,
     ...extra,
-  } as OpenOptions;
+  };
 }
 
 async function collect(it: AsyncIterable<AgentEvent>) {
@@ -92,142 +65,89 @@ function recorder(name = "read_file") {
   return { action, calls };
 }
 
-test("streams text and sends the system prompt and history", async () => {
-  const s = await server([sse([delta({ role: "assistant" }), delta({ content: "Hel" }), delta({ content: "lo" })])]);
-  try {
-    const session = loopSession(chatCompletionsClient(s.base), options([]));
-    const events = await collect(session.turn({ text: "hi" }));
-    assert.deepEqual(events, [
-      { type: "model", model: "m", effort: null },
-      { type: "text", text: "Hello" },
-      { type: "end", error: null, interrupted: false },
-    ]);
-    assert.deepEqual(s.paths, ["/v1/chat/completions"]);
-    assert.equal(s.bodies[0].stream, true);
-    assert.equal(s.bodies[0].tools, undefined);
-    assert.deepEqual(s.bodies[0].messages, [{ role: "system", content: "You are Dum." }, { role: "user", content: "hi" }]);
-  } finally {
-    await s.close();
-  }
+test("streams text and sends the system prompt, the selector and the history", async () => {
+  const s = scripted([says("Hello")]);
+  const events = await collect(loopSession(s.client, options([])).turn({ text: "hi" }));
+  assert.deepEqual(events, [
+    { type: "model", model: "m", effort: null },
+    { type: "text", text: "Hello" },
+    { type: "end", error: null, interrupted: false },
+  ]);
+  assert.equal(s.requests.length, 1);
+  assert.deepEqual(s.requests[0], { system: "You are Dum.", history: [{ role: "user", text: "hi" }], actions: [], model: "m", effort: null });
 });
 
-test("joins split tool-call deltas, runs the action and continues with its result", async () => {
-  const { action, calls } = recorder();
-  const s = await server([
-    sse([
-      delta({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "read_", arguments: "" } }] }),
-      delta({ tool_calls: [{ index: 0, function: { name: "file", arguments: "{\"pa" } }] }),
-      delta({ tool_calls: [{ index: 0, function: { arguments: "th\":\"a/b.ts\"}" } }] }),
-    ]),
-    sse([delta({ content: "Done." })]),
+test("runs the called action and continues with its result", async () => {
+  const { action, calls: ran } = recorder();
+  const s = scripted([calls("read_file", { path: "a/b.ts" }, "call_1"), says("Done.")]);
+  const events = await collect(loopSession(s.client, options([action])).turn({ text: "read it" }));
+  assert.deepEqual(events.map((e) => e.type), ["model", "action", "text", "end"]);
+  assert.deepEqual(ran, [{ path: "a/b.ts" }]);
+  assert.equal(s.requests[0]!.actions[0]?.name, "read_file");
+  const params = s.requests[0]!.actions[0]!.parameters;
+  assert.ok("required" in params);
+  assert.deepEqual(params.required, ["path"]);
+  assert.deepEqual(s.requests[1]!.history.slice(-2), [
+    { role: "assistant", text: "", calls: [{ id: "call_1", name: "read_file", arguments: "{\"path\":\"a/b.ts\"}" }] },
+    { role: "tool", callId: "call_1", text: "file text", isError: false },
   ]);
-  try {
-    const session = loopSession(chatCompletionsClient(s.base), options([action]));
-    const events = await collect(session.turn({ text: "read it" }));
-    assert.deepEqual(events.map((e) => e.type), ["model", "action", "text", "end"]);
-    assert.deepEqual(calls, [{ path: "a/b.ts" }]);
-    assert.equal(s.bodies[0].tools?.[0]?.function.name, "read_file");
-    assert.deepEqual(s.bodies[0].tools?.[0]?.function.parameters.required, ["path"]);
-    const second = s.bodies[1].messages;
-    assert.deepEqual(second.at(-2), {
-      role: "assistant", content: null,
-      tool_calls: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: "{\"path\":\"a/b.ts\"}" } }],
-    });
-    assert.deepEqual(second.at(-1), { role: "tool", tool_call_id: "call_1", content: "file text" });
-  } finally {
-    await s.close();
-  }
 });
 
 test("an unknown action ends the session and runs nothing", async () => {
-  const { action, calls } = recorder();
-  const s = await server([sse([delta({ tool_calls: [{ index: 0, id: "c", function: { name: "Bash", arguments: "{}" } }] })])]);
-  try {
-    const session = loopSession(chatCompletionsClient(s.base), options([action]));
-    const events = await collect(session.turn({ text: "go" }));
-    const end = events.at(-1) as Extract<AgentEvent, { type: "end" }>;
-    assert.match(end.error ?? "", /Bash.*isn't one of Dum's actions/);
-    assert.equal(calls.length, 0);
-    const again = await collect(session.turn({ text: "again" }));
-    assert.deepEqual(again, [end]);
-    assert.equal(s.bodies.length, 1);
-  } finally {
-    await s.close();
-  }
+  const { action, calls: ran } = recorder();
+  const s = scripted([calls("Bash", {})]);
+  const session = loopSession(s.client, options([action]));
+  const events = await collect(session.turn({ text: "go" }));
+  const end = events.at(-1) as Extract<AgentEvent, { type: "end" }>;
+  assert.match(end.error ?? "", /Bash.*isn't one of Dum's actions/);
+  assert.equal(ran.length, 0);
+  const again = await collect(session.turn({ text: "again" }));
+  assert.deepEqual(again, [end]);
+  assert.equal(s.requests.length, 1);
 });
 
-test("interrupt mid-stream ends as interrupted", async () => {
-  const streaming = Promise.withResolvers<void>();
-  const s = await server([(_req, res) => {
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.write(`data: ${JSON.stringify(delta({ content: "partial" }))}\n\n`, () => streaming.resolve());
+test("interrupt mid-step ends as interrupted", async () => {
+  const stepping = Promise.withResolvers<void>();
+  const s = scripted([(signal) => {
+    stepping.resolve();
+    const hung = Promise.withResolvers<ModelStep>();
+    signal.addEventListener("abort", () => hung.reject(signal.reason), { once: true });
+    return hung.promise;
   }]);
-  try {
-    const session = loopSession(chatCompletionsClient(s.base), options([]));
-    const it = session.turn({ text: "go" })[Symbol.asyncIterator]();
-    assert.equal((await it.next()).value.type, "model");
-    const next = it.next();
-    await streaming.promise;
-    await session.interrupt();
-    assert.deepEqual((await next).value, { type: "end", error: null, interrupted: true });
-    assert.equal((await it.next()).done, true);
-  } finally {
-    await s.close();
-  }
+  const session = loopSession(s.client, options([]));
+  const it = session.turn({ text: "go" })[Symbol.asyncIterator]();
+  assert.equal((await it.next()).value.type, "model");
+  const next = it.next();
+  await stepping.promise;
+  await session.interrupt();
+  assert.deepEqual((await next).value, { type: "end", error: null, interrupted: true });
+  assert.equal((await it.next()).done, true);
 });
 
 test("maxTurns stops a model that keeps calling actions", async () => {
-  const { action, calls } = recorder();
-  const call = sse([delta({ tool_calls: [{ index: 0, id: "c", function: { name: "read_file", arguments: "{\"path\":\"x\"}" } }] })]);
-  const s = await server([call, call, call]);
-  try {
-    const session = loopSession(chatCompletionsClient(s.base), options([action], { maxTurns: 2 }));
-    const events = await collect(session.turn({ text: "go" }));
-    assert.match(endError(events) ?? "", /after 2 model steps/);
-    assert.equal(calls.length, 2);
-    assert.equal(s.bodies.length, 2);
-  } finally {
-    await s.close();
-  }
+  const { action, calls: ran } = recorder();
+  const call = calls("read_file", { path: "x" });
+  const s = scripted([call, call, call]);
+  const events = await collect(loopSession(s.client, options([action], { maxTurns: 2 })).turn({ text: "go" }));
+  assert.match(endError(events) ?? "", /after 2 model steps/);
+  assert.equal(ran.length, 2);
+  assert.equal(s.requests.length, 2);
 });
 
-test("server errors and malformed streams end with a readable error", async () => {
-  const s = await server([
-    (_req, res) => { res.statusCode = 404; res.end("model not found"); },
-    (_req, res) => { res.writeHead(200); res.end("data: {nope\n\n"); },
-  ]);
-  try {
-    const a = await collect(loopSession(chatCompletionsClient(s.base), options([])).turn({ text: "x" }));
-    assert.match(endError(a) ?? "", /404: model not found/);
-    const b = await collect(loopSession(chatCompletionsClient(s.base), options([])).turn({ text: "x" }));
-    assert.match(endError(b) ?? "", /malformed stream/);
-  } finally {
-    await s.close();
-  }
+test("a step's error and unreadable arguments end with a readable error", async () => {
+  const a = await collect(loopSession(scripted([{ text: "", calls: [], error: "The model server answered 404: model not found" }]).client, options([])).turn({ text: "x" }));
+  assert.match(endError(a) ?? "", /404: model not found/);
+  const { action } = recorder();
+  const garbled = scripted([{ text: "", calls: [{ id: "c", name: "read_file", arguments: "{nope" }], error: null }]);
+  const b = await collect(loopSession(garbled.client, options([action])).turn({ text: "x" }));
+  assert.match(endError(b) ?? "", /unreadable arguments for read_file/);
 });
 
-test("redirects are refused, not followed", async () => {
-  const s = await server([(_req, res) => { res.writeHead(307, { location: "https://example.com/v1/chat/completions" }); res.end(); }]);
-  try {
-    const events = await collect(loopSession(chatCompletionsClient(s.base), options([])).turn({ text: "x" }));
-    assert.match(endError(events) ?? "", /redirect/);
-    assert.equal(s.paths.length, 1);
-  } finally {
-    await s.close();
-  }
-});
-
-test("images go as base64 data URLs", async () => {
-  const s = await server([sse([delta({ content: "a cat" })])]);
-  try {
-    await collect(loopSession(chatCompletionsClient(s.base), options([])).turn({ text: "what", images: [{ mimeType: "image/png", data: "QUJD" }] }));
-    assert.deepEqual(s.bodies[0].messages[1].content, [
-      { type: "text", text: "what" },
-      { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
-    ]);
-  } finally {
-    await s.close();
-  }
+test("pictures travel in the user's history entry", async () => {
+  const s = scripted([says("a cat")]);
+  const images = [{ mimeType: "image/png" as const, data: "QUJD" }];
+  await collect(loopSession(s.client, options([])).turn({ text: "what", images }));
+  assert.deepEqual(s.requests[0]!.history, [{ role: "user", text: "what", images }]);
 });
 
 test("wire helpers validate names and strip prefixes", () => {

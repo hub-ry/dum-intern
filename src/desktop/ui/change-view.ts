@@ -46,11 +46,11 @@ export class ChangesPane {
     if (key === this.key) return;
     this.key = key;
     if (!s.activeZone) {
-      this.el.replaceChildren(h("p", { class: "muted" }, "Enter a zone to see the changes Dum made there."));
+      this.el.replaceChildren(h("p", { class: "muted" }, "Open a goal to see the changes Dum made there."));
       return;
     }
     if (!s.changes.length) {
-      this.el.replaceChildren(h("p", { class: "muted" }, "Dum hasn't changed any file in this zone. When it does, the diff shows here with a Revert button."));
+      this.el.replaceChildren(h("p", { class: "muted" }, "Dum hasn't changed any file in this goal. When it does, the diff shows here with a Revert button."));
       return;
     }
     this.el.replaceChildren(

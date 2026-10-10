@@ -1,7 +1,8 @@
 // The renderer's whole surface: a finite set of strict, bounded requests and the snapshot it draws.
 // The renderer has no Node access; ipc.ts validates with `parseRequest` and never duplicates it.
-// Three surfaces (docs/circle-design.md §9): the working window asks for everything below, the
-// circle only sends gestures, toggles and reads its own small view, and the bubble asks for nothing.
+// Three surfaces (docs/circle-design.md §9 and "Superseded parts (goals column)"): the working
+// window asks for everything below, the circle only sends gestures, picks, toggles and reads its own
+// small view, and the bubble asks for nothing: it only draws.
 
 import { z } from "zod";
 import { AgentChoiceSchema, BackendIdSchema, LoginMethodSchema, SelectorSchema } from "../agent/schema.ts";
@@ -15,6 +16,7 @@ import { LookPrefsSchema } from "../observe-types.ts";
 import { IdSchema, InputBindingSchema, RequestBindingSchema, TokenSchema } from "../share-types.ts";
 import { StoryQuerySchema, TrailMapInputSchema, TrailQuerySchema } from "../trail-types.ts";
 import { FocusSkillsSchema, LanguageSchema, SkillRefSchema, ZONE_LIMITS, ZoneGoalSchema, ZoneNameSchema } from "../zone-types.ts";
+import { StepIdSchema, type GoalView, type NextSkill, type StepView } from "../step-types.ts";
 import type { AgentChoice, BackendId, BackendStatus, LoginMethod, ModelOption, Selector } from "../agent/types.ts";
 import type {
   AlignmentAcceptInput, AlignmentStepInput, ContextUsePage, ContextUseView, DecisionDismissInput, DecisionHelpInput, DecisionView,
@@ -23,7 +25,7 @@ import type {
 } from "../delegation-types.ts";
 import type { DebugBinding, DebugView } from "../diagnostic-types.ts";
 import type { Mode } from "../gate.ts";
-import type { LookPrefs, LookStatusView } from "../observe-types.ts";
+import type { LookLogEntry, LookPrefs, LookStatusView, WizardChime } from "../observe-types.ts";
 import type { InputBinding, RequestBinding, ShareGrant } from "../share-types.ts";
 import type { State } from "../store-types.ts";
 import type { SessionMeta, StoryPage, StoryQuery, TrailMapInput, TrailPage, TrailQuery, TrailSource, TrailView } from "../trail-types.ts";
@@ -96,9 +98,15 @@ export type DraftState = {
   shareIds: string[];
   captureToken?: string;
 };
-/** An in-window view: a Records/Skills/Story/Settings region inside Chat, or the zone tree. */
+/** An in-window view: a Records/Skills/Story/Settings region inside a panel, or the goal tree. */
 export type ViewName =
   | "zones" | "tree" | "memory" | "history" | "context" | "evidence" | "boundary" | "projects" | "changes" | "settings" | "story";
+/**
+ * One circle in the column and the panel it opens: Dum (the global goals folder you prompt), one
+ * goal, the skill tree, the Monitor (recording status and the live context log) or Settings. Main
+ * owns which panel shows; the working window draws it.
+ */
+export type PanelRef = { kind: "dum" } | { kind: "goal"; id: ZoneId } | { kind: "tree" } | { kind: "monitor" } | { kind: "settings" };
 export type CaptureSource = { id: string; name: string; kind: "screen" | "window" };
 export type CapturePreview = { token: string; name: string; dataUrl: string; expiresAt: number };
 
@@ -114,13 +122,31 @@ export type CircleReason =
   | "zone" | "debug"
   | "recording" | "transcribing"
   | "decision" | "host-failed" | "setup" | "key-rejected" | "voice-error" | "look-route";
-/** All the circle sees: no transcript, tree, settings or keys. */
-export type CircleView = { state: CircleState; reason: CircleReason; paused: boolean; open: boolean };
+/**
+ * One circle in the expanded column. `mark` is the one or two characters drawn on a goal's disk;
+ * `progress` is 0..1 of the goal's path; `waiting` means its step is waiting on the user, and on the
+ * Monitor's circle that the look is recording.
+ */
+export type CircleSlot = { ref: PanelRef; label: string; mark: string; progress: number; waiting: boolean };
+/** All the circle sees: its face, the column's slots and which panel is open. No transcript, tree, settings or keys. */
+export type CircleView = {
+  state: CircleState; reason: CircleReason; paused: boolean; open: boolean;
+  /** The column is out. Main decides; the page only animates to it. */
+  expanded: boolean;
+  /** Dum first, then up to three goals, then the skill tree, the Monitor and Settings. */
+  slots: CircleSlot[];
+  /** The panel the working window shows while `open`; the collapsed circle wears its slot. */
+  showing: PanelRef | null;
+};
 export type CircleRequest =
   | { type: "circle-press"; phase: "begin" }
   | { type: "circle-press"; phase: "end" | "cancel"; gestureId: string }
   /** The accessibility button's press: the same toggle as a click. */
   | { type: "circle-toggle" }
+  /** A slot's accessibility button, or Enter on it: opens that panel. Mouse picks go through press gestures. */
+  | { type: "circle-pick"; slot: PanelRef }
+  /** Esc on the column: fold it back into one circle. */
+  | { type: "circle-collapse" }
   | { type: "circle-view" };
 export type CircleReply = { ok: true; view: CircleView; gesture?: { gestureId: string } } | { ok: false; error: string };
 /** Displays the window's Move circle offers, sanitized: no bounds or hardware detail. */
@@ -165,6 +191,20 @@ export type Snapshot = {
   platform: string;
   version: string;
   canAttach: boolean;
+  /** Every live goal's progress and next step, in registry order. */
+  goals: GoalView[];
+  /** The active goal's step: what the bubble shows until it's done or skipped. */
+  step: StepView | null;
+  /** The play button's recommendation; null when nothing is open to work on. */
+  next: NextSkill | null;
+  /** Which panel the working window draws. */
+  panel: PanelRef;
+  /** Goals pinned to the column, at most three; main-owned like the circle's placement. */
+  pinned: ZoneId[];
+  /** The Monitor's context log, oldest first: memory only in the host. */
+  lookLog: LookLogEntry[];
+  /** The Wizard's latest jump-in from the look; the bubble shows it once per id. */
+  wizard: WizardChime | null;
 };
 
 /** Editable creation fields; ids, revision and timestamps are app-issued. */
@@ -255,7 +295,19 @@ export type Request =
   | { type: "circle-display"; displayId: string }
   | { type: "show-surface"; surface: "window" }
   | { type: "dismiss-surface"; surface: "window" }
-  | { type: "quit" };
+  | { type: "quit" }
+  // Goals, steps and play.
+  /** Switch the working window to another panel; main re-places it at the circle. */
+  | { type: "panel"; panel: PanelRef }
+  | { type: "goal-pin"; id: ZoneId; pinned: boolean }
+  /** Skip a whole goal: its path's skills become trusted. `skip: false` clears the goal's skip mark only. */
+  | { type: "goal-skip"; id: ZoneId; skip: boolean }
+  /** Skip one step. A skill step's skill becomes trusted. Refused unconfirmed when the step has `confirmSkip`. */
+  | { type: "step-skip"; zoneId: ZoneId; stepId: string; confirmed: boolean }
+  /** "Pick … for me": the step's pick prompt goes to Dum in that goal, as if typed. */
+  | { type: "step-pick"; zoneId: ZoneId; stepId: string }
+  /** Play: work on this skill next in the active goal, or on the recommended one when null. */
+  | { type: "play"; skill: SkillRef | null };
 
 export const ViewNameSchema = z.enum([
   "zones", "tree", "memory", "history", "context", "evidence", "boundary", "projects", "changes", "settings", "story",
@@ -269,6 +321,13 @@ export const RecordSchema = z.enum(["change", "memory"]);
 export const DisplayIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "not a display id");
 const revision = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const surface = z.literal("window");
+export const PanelRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("dum") }).strict(),
+  z.object({ kind: z.literal("goal"), id: IdSchema }).strict(),
+  z.object({ kind: z.literal("tree") }).strict(),
+  z.object({ kind: z.literal("monitor") }).strict(),
+  z.object({ kind: z.literal("settings") }).strict(),
+]) satisfies z.ZodType<PanelRef>;
 const utf8Max = (max: number) => z.string().refine((t) => new TextEncoder().encode(t).length <= max, "is too long");
 
 export const ZoneCreateSchema = z.object({
@@ -369,6 +428,12 @@ export const RequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("show-surface"), surface }).strict(),
   z.object({ type: z.literal("dismiss-surface"), surface }).strict(),
   z.object({ type: z.literal("quit") }).strict(),
+  z.object({ type: z.literal("panel"), panel: PanelRefSchema }).strict(),
+  z.object({ type: z.literal("goal-pin"), id: IdSchema, pinned: z.boolean() }).strict(),
+  z.object({ type: z.literal("goal-skip"), id: IdSchema, skip: z.boolean() }).strict(),
+  z.object({ type: z.literal("step-skip"), zoneId: IdSchema, stepId: StepIdSchema, confirmed: z.boolean() }).strict(),
+  z.object({ type: z.literal("step-pick"), zoneId: IdSchema, stepId: StepIdSchema }).strict(),
+  z.object({ type: z.literal("play"), skill: SkillRefSchema.nullable() }).strict(),
 ]) satisfies z.ZodType<Request>;
 
 export const CircleRequestSchema = z.discriminatedUnion("type", [
@@ -377,6 +442,8 @@ export const CircleRequestSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("circle-press"), phase: z.enum(["end", "cancel"]), gestureId: TokenSchema }).strict(),
   ]),
   z.object({ type: z.literal("circle-toggle") }).strict(),
+  z.object({ type: z.literal("circle-pick"), slot: PanelRefSchema }).strict(),
+  z.object({ type: z.literal("circle-collapse") }).strict(),
   z.object({ type: z.literal("circle-view") }).strict(),
 ]) satisfies z.ZodType<CircleRequest>;
 
@@ -396,6 +463,15 @@ export const CircleViewSchema = z.object({
   ]),
   paused: z.boolean(),
   open: z.boolean(),
+  expanded: z.boolean(),
+  slots: z.array(z.object({
+    ref: PanelRefSchema,
+    label: z.string().min(1).max(160),
+    mark: z.string().min(1).max(4),
+    progress: z.number().min(0).max(1),
+    waiting: z.boolean(),
+  }).strict()).max(7),
+  showing: PanelRefSchema.nullable(),
 }).strict()
   .refine((v) => CIRCLE_REASONS[v.state].includes(v.reason), "that reason belongs to another state")
   .refine((v) => v.reason !== "look-paused" || v.paused, "look-paused needs the look paused") satisfies z.ZodType<CircleView>;
@@ -412,7 +488,7 @@ export const CircleDisplaysSchema = z.object({
 
 /**
  * The one authorization rule for every surface: the bubble invokes nothing, the circle only its
- * gestures, toggle and view, the working window everything else. Throws on anything outside it.
+ * gestures, picks, toggle and view, the working window everything else. Throws on anything outside it.
  */
 export function parseRequest(role: Role, raw: unknown): { role: "circle"; request: CircleRequest } | { role: "window"; request: Request } {
   switch (role) {
@@ -454,7 +530,16 @@ export type CircleAPI = {
   invoke(request: CircleRequest): Promise<CircleReply>;
   subscribe(listener: (view: CircleView) => void): () => void;
 };
-/** The cursor bubble: what it shows and when it goes away. */
-export type BubbleView = { kind: "voice" | "reply"; lines: string[]; expiresAt: number };
+/**
+ * The bubble, drawn as a thought cloud trailing toward the circle. It has no buttons and takes no
+ * input. `reply` is at most one sentence of Dum's; `voice` is the dictation preview; `step` is the
+ * active goal's step, which stays (expiresAt 0) until it's done, skipped or replaced; `wizard` is the
+ * Wizard jumping in because the look saw the user stuck. Step and wizard sit beside the circle:
+ * `toward` is the side of the bubble window the circle is on, where the cloud's puffs trail off.
+ */
+export type BubbleView =
+  | { kind: "voice" | "reply"; lines: string[]; expiresAt: number }
+  | { kind: "step"; step: StepView; expiresAt: 0; toward?: "left" | "right" }
+  | { kind: "wizard"; text: string; expiresAt: number; toward?: "left" | "right" };
 /** Read-only: the bubble can't invoke anything. */
 export type BubbleAPI = { subscribe(listener: (view: BubbleView) => void): () => void };

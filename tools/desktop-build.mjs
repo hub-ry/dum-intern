@@ -11,6 +11,7 @@ await Promise.all([
   cp('src/desktop/ui/index.html', 'dist/desktop/ui/index.html'),
   cp('src/desktop/ui/style.css', 'dist/desktop/ui/style.css'),
   cp('src/desktop/ui/circle.css', 'dist/desktop/ui/circle.css'),
+  cp('src/desktop/ui/fonts', 'dist/desktop/ui/fonts', { recursive: true }),
   ...['preload', 'circle-preload', 'bubble-preload'].map((name) =>
     build({ entryPoints: [`src/desktop/${name}.ts`], outfile: `dist/desktop/${name}.cjs`, bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' })),
   build({ entryPoints: ['src/desktop/ui/renderer.ts'], outfile: 'dist/desktop/ui/renderer.js', bundle: true, platform: 'browser', format: 'iife', loader: { '.txt': 'text' }, target: 'chrome144' }),

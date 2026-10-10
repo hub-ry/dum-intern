@@ -211,7 +211,7 @@ const goodRequests = [
   { type: "voice-start", binding: { ...binding, zoneId: null } },
   { type: "agent-login", backend: "claude", method: "anthropic-key" },
   { type: "agent-key", backend: "claude", key: "sk-ant-api03-abc" },
-  { type: "agent-models", backend: "local", login: "none" },
+  { type: "agent-models", backend: "claude", login: "anthropic-key" },
   { type: "agent-select", choice },
   // Goal alignment, decisions and handoffs.
   { type: "alignment-read", zoneId: childId },
@@ -384,25 +384,42 @@ test("only agent-key carries a secret", () => {
   bad(RequestSchema, { type: "agent-select", choice: { ...choice, key: "sk-ant-api03-abc" } });
 });
 
-test("the bubble never invokes and the circle only sends gestures, toggles and reads its view", () => {
+test("the bubble invokes nothing and the circle only sends gestures, picks, toggles and reads its view", () => {
   const circleGood = [
     { type: "circle-press", phase: "begin" },
     { type: "circle-press", phase: "end", gestureId: "g1" },
     { type: "circle-press", phase: "cancel", gestureId: "g1" },
     { type: "circle-toggle" },
+    { type: "circle-pick", slot: { kind: "goal", id: childId } },
+    { type: "circle-pick", slot: { kind: "tree" } },
+    { type: "circle-pick", slot: { kind: "monitor" } },
+    { type: "circle-pick", slot: { kind: "settings" } },
+    { type: "circle-collapse" },
     { type: "circle-view" },
   ];
   for (const r of circleGood) {
     ok(CircleRequestSchema, r);
     assert.equal(parseRequest("circle", wire(r)).role, "circle");
     assert.throws(() => parseRequest("window", wire(r)));
-    assert.throws(() => parseRequest("bubble", wire(r)), /bubble/);
+    assert.throws(() => parseRequest("bubble", wire(r)));
+  }
+  // The thought bubble has no buttons: not even its step's old skip, pick or open.
+  for (const r of [
+    { type: "step-skip", zoneId: childId, stepId: "skill-0123456789abcdef", confirmed: false },
+    { type: "step-pick", zoneId: childId, stepId: "project-0123456789abcdef" },
+    { type: "step-open", zoneId: childId },
+  ]) {
+    assert.throws(() => parseRequest("bubble", wire(r)));
+    assert.throws(() => parseRequest("circle", wire(r)));
   }
   for (const r of goodRequests) {
     assert.equal(parseRequest("window", wire(r)).role, "window");
     assert.throws(() => parseRequest("circle", wire(r)));
-    assert.throws(() => parseRequest("bubble", wire(r)), /bubble/);
+    assert.throws(() => parseRequest("bubble", wire(r)));
   }
+  bad(CircleRequestSchema, { type: "circle-pick", slot: { kind: "goal" } });
+  bad(CircleRequestSchema, { type: "circle-pick", slot: { kind: "records" } });
+  bad(CircleRequestSchema, { type: "circle-pick", slot: { kind: "settings", id: childId } });
   bad(CircleRequestSchema, { type: "circle-press", phase: "begin", gestureId: "g1" });
   bad(CircleRequestSchema, { type: "circle-press", phase: "end" });
   bad(CircleRequestSchema, { type: "circle-press", phase: "begin", x: 10, y: 20 });
@@ -418,10 +435,23 @@ test("the bubble never invokes and the circle only sends gestures, toggles and r
 });
 
 test("circle view, replies and display choices are typed", () => {
-  const view = { state: "attention", reason: "decision", paused: false, open: false };
+  const view = { state: "attention", reason: "decision", paused: false, open: false, expanded: false, slots: [], showing: null };
   ok(CircleViewSchema, view);
-  ok(CircleViewSchema, { state: "idle", reason: "look-paused", paused: true, open: true });
-  bad(CircleViewSchema, { state: "idle", reason: "look-paused", paused: false, open: true });
+  ok(CircleViewSchema, {
+    state: "idle", reason: "look-paused", paused: true, open: true, expanded: true, showing: { kind: "goal", id: childId },
+    slots: [
+      { ref: { kind: "dum" }, label: "Dum: your goals", mark: "D", progress: 0, waiting: false },
+      { ref: { kind: "goal", id: childId }, label: "Goal: Learn SQL", mark: "LS", progress: 0.4, waiting: true },
+      { ref: { kind: "tree" }, label: "Skill tree", mark: "T", progress: 0, waiting: false },
+      { ref: { kind: "monitor" }, label: "Monitor: recording", mark: "M", progress: 0, waiting: true },
+      { ref: { kind: "settings" }, label: "Settings", mark: "S", progress: 0, waiting: false },
+    ],
+  });
+  const slot = { ref: { kind: "tree" }, label: "Skill tree", mark: "T", progress: 0, waiting: false };
+  ok(CircleViewSchema, { ...view, slots: Array.from({ length: 7 }, () => slot) });
+  bad(CircleViewSchema, { ...view, slots: Array.from({ length: 8 }, () => slot) });
+  bad(CircleViewSchema, { ...view, slots: [{ ref: { kind: "dum" }, label: "Dum", mark: "D", progress: 2, waiting: false }] });
+  bad(CircleViewSchema, { state: "idle", reason: "look-paused", paused: false, open: true, expanded: false, slots: [], showing: null });
   bad(CircleViewSchema, { state: "thinking", reason: "decision", paused: false, open: false });
   bad(CircleViewSchema, { ...view, status: "Dum needs a decision" });
   bad(CircleViewSchema, { ...view, transcript: [] });
@@ -559,7 +589,7 @@ const state = {
 const stateEvent = {
   type: "state", epoch: "e1", zoneEpoch: "z1", state, tree: { tracks: [], off: [], count: 0, usableBuilt: 0 }, registry, activeZone: context,
   inputToken: "t1", runningRequestId: null, canAttach: true, shares: [], follows: [], changes: [], look: hostLook,
-  direction: directionView, decision, handoff: handoffView, contextUse, session: meta, trail: trailView,
+  direction: directionView, decision, handoff: handoffView, contextUse, session: meta, trail: trailView, goals: [], next: null, lookLog: [], wizard: null,
 };
 
 test("host events are validated too", () => {

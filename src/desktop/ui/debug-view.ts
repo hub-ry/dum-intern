@@ -58,7 +58,7 @@ export class DebugView {
     });
     this.draft.addEventListener("input", () => this.sync());
     this.el.append(
-      h("p", { class: "hint" }, "Read-only questions about Dum itself: its status, models, look decisions and recent events. It can't change settings, zones, files or skills, and never sees your zone's conversation. Nothing is kept on disk. Each Send makes one model call."),
+      h("p", { class: "hint" }, "Ask Dum about itself. Read-only; each Send makes one model call."),
       h("div", { class: "card-head" }, h("span", {}, "Debug chat"), this.state),
       this.notice,
       this.log,

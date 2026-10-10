@@ -12,7 +12,6 @@ const METHOD_LABELS: Record<LoginMethod, string> = {
   "anthropic-key": "Use an Anthropic API key",
   chatgpt: "Continue with ChatGPT",
   github: "Sign in with GitHub",
-  none: "No sign-in needed",
 };
 
 export const UNTESTED = "untested";

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PREFERENCES, type DesktopPreferences } from "../src/desktop/protocol.ts";
@@ -52,7 +53,7 @@ test("a version 1 file migrates in place once: window, workspace, recent and com
     assert.deepEqual(settings.get(), expected);
     assert.equal(settings.warning, "");
     const stored = JSON.parse(readFileSync(file, "utf8"));
-    assert.deepEqual(stored, { version: 3, settings: expected, circle: NO_CIRCLE }, "the old companion position is not imported");
+    assert.deepEqual(stored, { version: 3, settings: expected, circle: NO_CIRCLE, pinned: [] }, "the old companion position is not imported");
     assert.deepEqual(settings.circle(), NO_CIRCLE);
     assert.ok(readFileSync(file, "utf8").endsWith("\n"));
     assert.deepEqual(readdirSync(dir), ["settings.json"], "rewritten in place, nothing set aside");
@@ -102,12 +103,28 @@ test("an older Claude choice migrates once: the subscription becomes the API key
 test("a non-Claude choice without a look model gets its own helper selector as the look", () => {
   const { dir, file, done } = scratch();
   try {
-    const helper = { backend: "local", model: "ollama/llava:7b", effort: null };
-    const local = { backend: "local", login: "none", intern: { backend: "local", model: "ollama/qwen3:8b", effort: "high" }, helper };
-    writeFileSync(file, JSON.stringify({ version: 2, settings: { ...DEFAULT_PREFERENCES, agent: local } }));
+    const helper = { backend: "chatgpt", model: "gpt-eyes", effort: null };
+    const chatgpt = { backend: "chatgpt", login: "chatgpt", intern: { backend: "chatgpt", model: "gpt-big", effort: "high" }, helper };
+    writeFileSync(file, JSON.stringify({ version: 2, settings: { ...DEFAULT_PREFERENCES, agent: chatgpt } }));
     const settings = DesktopSettings.load(dir);
-    assert.deepEqual(settings.get().agent, { ...local, look: helper });
-    assert.match(settings.warning, /look model: ollama\/llava:7b/);
+    assert.deepEqual(settings.get().agent, { ...chatgpt, look: helper });
+    assert.match(settings.warning, /look model: gpt-eyes/);
+  } finally { done(); }
+});
+
+test("a saved choice of the removed local backend loads as no backend chosen and keeps every other setting", () => {
+  const { dir, file, done } = scratch();
+  try {
+    const selector = { backend: "local", model: "qwen3:8b", effort: null };
+    const local = { backend: "local", login: "none", intern: selector, helper: selector, look: selector };
+    const body = v3({ ...DEFAULT_PREFERENCES, mode: "anti-vibe", hotkey: "Alt+J", agent: local });
+    writeFileSync(file, body);
+    const settings = DesktopSettings.load(dir);
+    assert.deepEqual(settings.get(), { ...DEFAULT_PREFERENCES, mode: "anti-vibe", hotkey: "Alt+J", agent: null }, "only the agent is dropped");
+    assert.match(settings.warning, /Choose again in Settings › Agent/);
+    assert.equal(readFileSync(file, "utf8"), body, "never set aside or rewritten by loading");
+    settings.set({ ...settings.get(), agent: apiKey });
+    assert.deepEqual(DesktopSettings.load(dir).get(), { ...DEFAULT_PREFERENCES, mode: "anti-vibe", hotkey: "Alt+J", agent: apiKey });
   } finally { done(); }
 });
 
@@ -209,7 +226,7 @@ test("a version 2 file becomes version 3 once with every preference unchanged an
     assert.deepEqual(settings.get(), prefs);
     assert.deepEqual(settings.circle(), NO_CIRCLE);
     assert.equal(settings.warning, "");
-    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 3, settings: prefs, circle: NO_CIRCLE });
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 3, settings: prefs, circle: NO_CIRCLE, pinned: [] });
     const written = readFileSync(file, "utf8");
     const again = DesktopSettings.load(dir);
     assert.deepEqual(again.get(), prefs);
@@ -282,4 +299,48 @@ test("one placement per display, at most 16; the least recently user-chosen one 
   assert.ok(!layout.placements.some((p) => p.displayId === "d1"), "d1 was the least recently chosen");
   assert.ok(layout.placements.some((p) => p.displayId === "d0"));
   assert.equal(layout.lastChosenDisplayId, "new");
+});
+
+test("pinned goals persist beside the circle's placement, at most three, each once", () => {
+  const { dir, file, done } = scratch();
+  try {
+    const settings = DesktopSettings.load(dir);
+    assert.deepEqual(settings.pinned(), []);
+    const [a, b, c, d] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    const layout: CircleLayout = { lastChosenDisplayId: "1", placements: [placement("1", "2026-10-08T10:00:00.000Z")] };
+    settings.setCircle(layout);
+    settings.setPinned([a, b]);
+    settings.set({ ...DEFAULT_PREFERENCES, mode: "anti-vibe" });
+    assert.deepEqual(settings.pinned(), [a, b], "a preference write keeps the pins");
+    settings.setCircle({ ...layout, lastChosenDisplayId: null });
+    const reloaded = DesktopSettings.load(dir);
+    assert.deepEqual(reloaded.pinned(), [a, b]);
+    assert.equal(reloaded.circle().lastChosenDisplayId, null);
+    assert.equal(reloaded.get().mode, "anti-vibe");
+
+    const saved = readFileSync(file, "utf8");
+    assert.throws(() => reloaded.setPinned([a, b, c, d]), /up to three goals/);
+    assert.throws(() => reloaded.setPinned([a, a]));
+    assert.throws(() => reloaded.setPinned(["not-a-goal"]));
+    assert.equal(readFileSync(file, "utf8"), saved, "a refused pin list writes nothing");
+    assert.deepEqual(reloaded.pinned(), [a, b]);
+    const copy = reloaded.pinned();
+    copy.length = 0;
+    assert.equal(reloaded.pinned().length, 2, "pinned() hands out copies");
+  } finally { done(); }
+});
+
+test("a version 3 file without pins, or with unreadable ones, loads with none and keeps everything else", () => {
+  const { dir, file, done } = scratch();
+  try {
+    writeFileSync(file, v3({ ...DEFAULT_PREFERENCES, mode: "anti-vibe" }));
+    assert.deepEqual(DesktopSettings.load(dir).pinned(), []);
+    const body = JSON.stringify({ version: 3, settings: { ...DEFAULT_PREFERENCES, mode: "anti-vibe" }, circle: NO_CIRCLE, pinned: ["x", "y", "z", "w"] });
+    writeFileSync(file, body);
+    const settings = DesktopSettings.load(dir);
+    assert.deepEqual(settings.pinned(), []);
+    assert.equal(settings.get().mode, "anti-vibe");
+    assert.equal(settings.warning, "");
+    assert.equal(readFileSync(file, "utf8"), body, "left until the next write");
+  } finally { done(); }
 });

@@ -106,14 +106,6 @@ export class DecisionCards {
     }
   }
 
-  /** The badge Manage shows for a zone whose alignment is pending here. */
-  badge(id: ZoneId): string {
-    const s = this.client.snap;
-    const view = id === s?.activeZone?.id ? s.direction : this.others.get(id);
-    if (!view || view.status === "aligned") return "";
-    return view.status === "deferred" ? "alignment deferred" : view.status === "aligning" ? "aligning" : "alignment needed";
-  }
-
   /** Help me decide: opens the outcome editor, starting from the last outcome. */
   decide() {
     this.open({ kind: "outcome" });
@@ -157,7 +149,7 @@ export class DecisionCards {
     for (const view of this.others.values()) parts.push(this.alignment(s, view, false));
     if (s.activeZone) {
       if (s.direction && (s.direction.status === "aligning" || s.direction.status === "needs-backend")) parts.push(this.alignment(s, s.direction, true));
-      parts.push(this.outcomeBar(s));
+      if (this.form?.kind === "outcome") parts.push(this.outcomeForm(s));
       if (s.decision) parts.push(this.decision(s, s.decision));
       if (s.handoff && s.handoff.head.state !== "dismissed") parts.push(this.handoff(s, s.handoff));
     }
@@ -168,8 +160,8 @@ export class DecisionCards {
 
   private alignment(s: Snapshot, view: DirectionView, active: boolean): HTMLElement {
     const zone = s.zones.zones.find((z) => z.id === view.zoneId);
-    const title = active ? "Goal alignment" : `Goal alignment for ${zonePath(s.zones, view.zoneId) || "another zone"}`;
-    const card = h("article", { class: "card alignment", "aria-label": title }, h("div", { class: "card-head" }, icon("boundary"), h("span", {}, title), active ? null : chip("not the zone you're in", "muted")));
+    const title = active ? "Goal alignment" : `Goal alignment for ${zonePath(s.zones, view.zoneId) || "another goal"}`;
+    const card = h("article", { class: "card alignment", "aria-label": title }, h("div", { class: "card-head" }, icon("boundary"), h("span", {}, title), active ? null : chip("not the goal you're in", "muted")));
     if (zone) card.append(field("Your goal", zone.goal));
     const step = (action: "start" | "revise" | "defer") => async () => {
       const r = await this.client.call({ type: "alignment-step", binding: view.binding, action });
@@ -273,7 +265,7 @@ export class DecisionCards {
       h("label", { class: "field" }, h("span", {}, "What you'll be able to do"), ability),
       h("label", { class: "field" }, h("span", {}, "How you'll know it worked"), review),
       h("label", { class: "field" }, h("span", {}, "Assumptions you accept (optional, one per line)"), assumptions),
-      h("p", { class: "hint" }, "This agrees a direction for the zone. It is not a schedule and gives Dum no permission to write."),
+      h("p", { class: "hint" }, "This agrees a direction for the goal. It is not a schedule and gives Dum no permission to write."),
       h("div", { class: "actions" }, h("button", { type: "submit", class: "btn primary" }, "Agree this direction"), h("button", { type: "button", class: "btn ghost", onclick: () => this.escape() }, "Cancel")),
     );
     form.addEventListener("submit", async (e) => {
@@ -301,47 +293,35 @@ export class DecisionCards {
 
   // -- your outcome and the Wizard's options ----------------------------------------
 
-  private outcomeBar(s: Snapshot): HTMLElement {
-    const bar = h("div", { class: "outcome-bar" });
-    if (this.form?.kind === "outcome") {
-      const input = textArea("The outcome you need next", this.outcome || s.draft.text.trim(), "outcome");
-      const form = h(
-        "form",
-        { class: "card-form", "aria-label": "Your outcome" },
-        h("label", { class: "field" }, h("span", {}, "What do you need done next?"), input),
-        h("p", { class: "hint" }, "The Wizard compares two or three ways to get there, grounded in your goal and what you've proven. Nothing runs until you say Do this."),
-        h("div", { class: "actions" }, h("button", { type: "submit", class: "btn primary" }, "Help me decide"), h("button", { type: "button", class: "btn ghost", onclick: () => this.escape() }, "Cancel")),
-      );
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-          e.preventDefault();
-          form.requestSubmit();
-        }
-      });
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const outcome = input.value.trim();
-        const binding = this.client.requestBinding();
-        if (!outcome) return input.focus();
-        if (!binding) return;
-        if (!this.client.snap?.agent.chosen) return this.hooks.needsAgent();
-        const r = await this.client.call({ type: "decision-help", binding, outcome });
-        if (!r.ok) return;
-        this.outcome = outcome;
-        this.form = null;
-        this.redraw();
-      });
-      bar.append(form);
-      return bar;
-    }
-    return h(
-      "div",
-      { class: "outcome-bar" },
-      this.outcome ? h("p", { class: "outcome" }, h("span", { class: "muted" }, "Your outcome: "), this.outcome) : h("p", { class: "muted outcome" }, "Say what you need done, or ask for help deciding."),
-      this.outcome ? h("button", { type: "button", class: "btn ghost small", onclick: () => this.decide() }, icon("pencil"), "Edit") : null,
-      h("span", { class: "spacer" }),
-      h("button", { type: "button", class: "btn small", "data-focus": "decide", onclick: () => this.decide() }, "Help me decide"),
+  /** Revise on a decision card: the outcome editor, starting from the last outcome. */
+  private outcomeForm(s: Snapshot): HTMLElement {
+    const input = textArea("The outcome you need next", this.outcome || s.draft.text.trim(), "outcome");
+    const form = h(
+      "form",
+      { class: "card-form", "aria-label": "Your outcome" },
+      h("label", { class: "field" }, h("span", {}, "What do you need done next?"), input),
+      h("div", { class: "actions" }, h("button", { type: "submit", class: "btn primary" }, "Help me decide"), h("button", { type: "button", class: "btn ghost", onclick: () => this.escape() }, "Cancel")),
     );
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const outcome = input.value.trim();
+      const binding = this.client.requestBinding();
+      if (!outcome) return input.focus();
+      if (!binding) return;
+      if (!this.client.snap?.agent.chosen) return this.hooks.needsAgent();
+      const r = await this.client.call({ type: "decision-help", binding, outcome });
+      if (!r.ok) return;
+      this.outcome = outcome;
+      this.form = null;
+      this.redraw();
+    });
+    return form;
   }
 
   private decision(s: Snapshot, d: DecisionView): HTMLElement {

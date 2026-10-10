@@ -1,5 +1,5 @@
-// Desktop preferences and the circle's placement, version 3, in one private file under Electron's
-// userData. Main is the only writer; the host gets copies of the preferences. Nothing secret goes in
+// Desktop preferences, the circle's placement and the goals pinned to its column, version 3, in one
+// private file under Electron's userData. Main is the only writer; the host gets copies of the preferences. Nothing secret goes in
 // it: no tokens, keys, transcripts or captures.
 
 import { renameSync } from "node:fs";
@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { z } from "zod";
 import { AgentChoiceSchema, CLAUDE_DEFAULTS, SelectorSchema } from "../agent/schema.ts";
 import { readState, writeState } from "../state-files.ts";
-import { IsoSchema } from "../zone-types.ts";
+import { IdSchema } from "../share-types.ts";
+import { IsoSchema, type ZoneId } from "../zone-types.ts";
 import { accelerator, DEFAULT_PREFERENCES, DesktopPreferencesSchema, DisplayIdSchema, type DesktopPreferences } from "./protocol.ts";
 import { CIRCLE } from "./surfaces.ts";
 
@@ -31,7 +32,13 @@ export const CircleLayoutSchema = z.object({
 
 const EMPTY_LAYOUT: CircleLayout = { lastChosenDisplayId: null, placements: [] };
 
-const StoredV3 = z.object({ version: z.literal(3), settings: z.record(z.string(), z.unknown()), circle: z.unknown() }).strict();
+/** Goals pinned to the circle's column, at most this many. */
+export const MAX_PINS = 3;
+export const PinsSchema = z.array(IdSchema).max(MAX_PINS).refine((ids) => new Set(ids).size === ids.length, "a goal is pinned once");
+
+const StoredV3 = z.object({
+  version: z.literal(3), settings: z.record(z.string(), z.unknown()), circle: z.unknown(), pinned: z.unknown().optional(),
+}).strict();
 const StoredV2 = z.object({ version: z.literal(2), settings: z.record(z.string(), z.unknown()) }).strict();
 
 /** The version 1 file exactly as older builds wrote it; read only to migrate. */
@@ -92,6 +99,7 @@ export class DesktopSettings {
   warning = "";
   private prefs: DesktopPreferences = structuredClone(DEFAULT_PREFERENCES);
   private layout: CircleLayout = structuredClone(EMPTY_LAYOUT);
+  private pins: ZoneId[] = [];
 
   private constructor(readonly dir: string) {}
 
@@ -100,7 +108,7 @@ export class DesktopSettings {
    * and so is a saved agent choice of an older shape; version 2 preferences carry over unchanged and
    * the circle starts at its default. An unreadable file is kept aside, never silently overwritten.
    * A saved agent choice that still doesn't parse loads as null and the file is left as it is; so is
-   * a circle layout that doesn't parse, which loads as none.
+   * a circle layout or a pin list that doesn't parse, which loads as none.
    */
   static load(dir: string): DesktopSettings {
     const out = new DesktopSettings(dir);
@@ -134,6 +142,8 @@ export class DesktopSettings {
     if (v3.success) {
       const layout = CircleLayoutSchema.safeParse(v3.data.circle);
       if (layout.success) out.layout = layout.data;
+      const pins = PinsSchema.safeParse(v3.data.pinned ?? []);
+      if (pins.success) out.pins = pins.data;
     }
     const { agent, notes } = migrateAgent(saved ?? null);
     const choice = AgentChoiceSchema.nullable().safeParse(agent);
@@ -151,10 +161,10 @@ export class DesktopSettings {
     return structuredClone(this.prefs);
   }
 
-  /** Validated and saved before it counts: a failed write leaves the previous preferences in force. The circle's layout is kept. */
+  /** Validated and saved before it counts: a failed write leaves the previous preferences in force. The circle's layout and pins are kept. */
   set(p: DesktopPreferences): void {
     const next = DesktopPreferencesSchema.parse(p);
-    this.write(next, this.layout);
+    this.write(next, this.layout, this.pins);
     this.prefs = next;
   }
 
@@ -162,15 +172,28 @@ export class DesktopSettings {
     return structuredClone(this.layout);
   }
 
-  /** Validated and saved before it counts, like `set`. The preferences are kept. */
+  /** Validated and saved before it counts, like `set`. The preferences and pins are kept. */
   setCircle(layout: CircleLayout): void {
     const next = CircleLayoutSchema.parse(layout);
-    this.write(this.prefs, next);
+    this.write(this.prefs, next, this.pins);
     this.layout = next;
   }
 
-  private write(prefs: DesktopPreferences, circle: CircleLayout): void {
-    writeState(this.dir, FILE, `${JSON.stringify({ version: 3, settings: prefs, circle }, null, 2)}\n`);
+  /** The goals pinned to the column, in the order they were pinned. */
+  pinned(): ZoneId[] {
+    return [...this.pins];
+  }
+
+  /** At most three distinct goal ids, validated and saved before they count, like `set`. */
+  setPinned(ids: readonly ZoneId[]): void {
+    if (ids.length > MAX_PINS) throw new Error("You can pin up to three goals - unpin one first");
+    const next = PinsSchema.parse([...ids]);
+    this.write(this.prefs, this.layout, next);
+    this.pins = next;
+  }
+
+  private write(prefs: DesktopPreferences, circle: CircleLayout, pinned: readonly ZoneId[]): void {
+    writeState(this.dir, FILE, `${JSON.stringify({ version: 3, settings: prefs, circle, pinned }, null, 2)}\n`);
   }
 
   /** Window, workspace, recent-project and companion fields are dropped; screen advice becomes the look. */
@@ -184,7 +207,7 @@ export class DesktopSettings {
       look: { apps: DEFAULT_PREFERENCES.look.apps, screen },
     };
     if (old.wizardAdvice && old.wizardSource === "files") {
-      this.warning = "Dum no longer watches a project for saved changes. Follow a folder in a zone to get advice when you save code there.";
+      this.warning = "Dum no longer watches a project for saved changes. Follow a folder in a goal to get advice when you save code there.";
     }
     this.save();
   }
@@ -192,7 +215,7 @@ export class DesktopSettings {
   /** A migration's result, written once; if that fails it still applies and is saved on the next change. */
   private save(): void {
     try {
-      this.write(this.prefs, this.layout);
+      this.write(this.prefs, this.layout, this.pins);
     } catch (err) {
       const why = `Upgraded desktop settings couldn't be saved (${(err as Error).message}); they apply for now and will be saved on the next change.`;
       this.warning = this.warning ? `${this.warning}\n${why}` : why;

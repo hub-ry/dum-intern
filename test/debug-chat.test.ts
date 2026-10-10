@@ -17,15 +17,15 @@ process.env.DUM_HOME = home;
 process.env.DUM_CONTEXT = "off";
 
 const main: MainStatus = {
-  version: "1.2.3", platform: "darwin", backends: [{ id: "local", installed: true, ready: "none" }], screenPermission: "granted",
+  version: "1.2.3", platform: "darwin", backends: [{ id: "claude", installed: true, ready: "anthropic-key" }], screenPermission: "granted",
   lookPaused: false, voice: { supported: true, available: true, bridge: true }, shortcuts: { open: null, voice: null, sendDraft: null },
 };
 const settings: DiagnosticSettings = {
   launchAtLogin: false, personalContext: false, look: { apps: true, screen: true }, mode: "understand",
   hotkey: "Alt+Space", voiceHotkey: "Alt+V", sendDraftHotkey: "Alt+Enter",
 };
-const selector = { backend: "local", model: "m", effort: null } as const;
-const choice: AgentChoice = { backend: "local", login: "none", intern: selector, helper: selector, look: selector };
+const selector = { backend: "claude", model: "m", effort: null } as const;
+const choice: AgentChoice = { backend: "claude", login: "anthropic-key", intern: selector, helper: selector, look: selector };
 
 type Step = { text?: string; call?: { name: string; args: unknown } } | "hang";
 
@@ -33,7 +33,7 @@ type Step = { text?: string; call?: { name: string; args: unknown } } | "hang";
 function harness(script: () => Step[]) {
   const seen = { opens: [] as OpenOptions[], requests: [] as { system: string; history: WireMessage[]; actions: string[] }[] };
   const backend: AgentBackend = {
-    id: "local",
+    id: "claude",
     label: "Scripted",
     async models() { return []; },
     async capabilities() { throw new Error("unused"); },
@@ -56,7 +56,7 @@ function harness(script: () => Step[]) {
       return loopSession(client, o);
     },
   };
-  const agent = createRegistry([backend], new Set(["local"]));
+  const agent = createRegistry([backend], new Set(["claude"]));
   agent.set(choice);
   const diagnostics = new Diagnostics(Date.now, main, settings);
   const runtime = join(home, "debug", "runtime");
@@ -112,7 +112,7 @@ test("legit no-zone status and reference reads answer through the intern selecto
     { call: { name: "diagnostic_status", args: {} } },
     { call: { name: "diagnostic_events", args: { limit: 10 } } },
     { call: { name: "diagnostic_reference", args: { topic: "models" } } },
-    { text: "The look model is m on local." },
+    { text: "The look model is m on claude." },
   ]);
   const view = h.chat.open();
   DebugViewSchema.parse(view);
@@ -120,7 +120,7 @@ test("legit no-zone status and reference reads answer through the intern selecto
   await h.chat.send(view.binding, "which look model is running?");
   const after = h.chat.view();
   assert.deepEqual(after.entries.map((e) => e.from), ["you", "dum"]);
-  assert.equal(last(after).text, "The look model is m on local.");
+  assert.equal(last(after).text, "The look model is m on claude.");
   assert.notDeepEqual(after.binding.requestId, view.binding.requestId);
   assert.equal(after.binding.debugSessionId, view.binding.debugSessionId);
   const o = h.seen.opens[0]!;
@@ -172,7 +172,7 @@ test("redaction: a pasted key never reaches the model, the view or the reply; pr
   assert.equal(redact("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.sig"), "token: [redacted]");
 
   const failing = harness(() => []);
-  const backend = failing.agent.backend("local");
+  const backend = failing.agent.backend("claude");
   backend.open = async () => { throw new Error(`401 {"error":{"message":"invalid x-api-key ${key}"}}`); };
   await failing.chat.send(failing.chat.view().binding, "hi");
   assert.doesNotMatch(JSON.stringify(failing.chat.view()), /401|x-api-key|AbCdEf/);

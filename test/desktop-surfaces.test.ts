@@ -1,11 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  BUBBLE_CHARS, BUBBLE_LINES, BUBBLE_TTL, Bubble, CIRCLE, CircleGesture, FocusReturn, MARGIN, WINDOW_GAP, WINDOW_SIZE, bubbleLines,
-  clampCircle, defaultCircle, fromPlacement, insideDisk, nearestDisplay, placeBubble, placeWindow, reclamp, toPlacement,
+  BUBBLE_TTL, Bubble, CIRCLE, COLUMN, CircleGesture, FocusReturn, MARGIN, PANEL_CLEAR, PANEL_SIZE, bubbleLines,
+  clampCircle, columnRect, defaultCircle, diskCenter, firstSentence, fromPlacement, insideColumn, insideDisk, nearestDisplay, placeBubble,
+  THOUGHT, placePanel, placeThought, reclamp, slotAt, slotCenter, toPlacement,
   type DisplayArea, type Rect,
 } from "../src/desktop/surfaces.ts";
-import type { BubbleView } from "../src/desktop/protocol.ts";
+import { circleSlots, goalMark } from "../src/desktop/ipc.ts";
+import type { BubbleView, Snapshot } from "../src/desktop/protocol.ts";
+import type { GoalView, StepView } from "../src/step-types.ts";
+import type { Zone } from "../src/zone-types.ts";
 
 const main: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 /** A display left of and above the main one: negative global coordinates. */
@@ -116,24 +120,79 @@ test("the bubble shows only while listening or answering, and times out on its o
   assert.equal(shown.length, count, "dismissing a hidden bubble publishes nothing");
 });
 
-test("bubble text is what Dum and the Wizard said, at most eight lines and 600 characters", () => {
-  assert.deepEqual(bubbleLines(["Short answer."], "One aside."), ["Short answer.", "Wizard: One aside."]);
-  const many = bubbleLines([Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")], "aside");
-  assert.ok(many.length <= BUBBLE_LINES);
-  assert.equal(many.at(-1), "Open Dum for the full reply");
-  const long = bubbleLines(["x".repeat(2000)], null);
-  assert.ok(long.slice(0, -1).join("").length <= BUBBLE_CHARS);
-  assert.equal(long.at(-1), "Open Dum for the full reply");
+test("a reply is one sentence of what Dum said, plus one Wizard sentence when the Wizard spoke", () => {
+  assert.deepEqual(bubbleLines(["Short answer. And more detail after it."], "One aside. Another."), ["Short answer.", "Wizard: One aside."]);
+  assert.deepEqual(bubbleLines(["Continuing.", "Finished."], null), ["Continuing."], "the first thing Dum said");
+  assert.deepEqual(bubbleLines([], "Only the Wizard."), ["Wizard: Only the Wizard."]);
+  assert.deepEqual(bubbleLines(["  ", ""], null), []);
+  const long = bubbleLines(["x".repeat(2000)], "y".repeat(500));
+  assert.equal(long.length, 2);
+  assert.ok(long[0]!.length <= 140 && long[0]!.endsWith("…"), "a long sentence is cut to 140 characters and ellipsized");
+  assert.ok(long[1]!.length <= 140 && long[1]!.startsWith("Wizard: ") && long[1]!.endsWith("…"));
+  assert.deepEqual(bubbleLines([Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")], null).length, 1, "never more than one line of Dum's");
 });
 
-test("shortened or omitted Wizard asides always show the full-reply notice", () => {
-  for (const dum of [["x".repeat(590)], ["x".repeat(600)], Array.from({ length: 7 }, (_, i) => `line ${i}`)]) {
-    const lines = bubbleLines(dum, "The Wizard has more to say.");
-    assert.equal(lines.at(-1), "Open Dum for the full reply");
-    assert.ok(lines.length <= BUBBLE_LINES);
-    assert.ok(lines.slice(0, -1).join("").length <= BUBBLE_CHARS);
-  }
-  assert.deepEqual(bubbleLines(["x".repeat(580)], "small"), ["x".repeat(580), "Wizard: small"]);
+test("the first sentence ends at a sentence end or a paragraph break, with whitespace collapsed", () => {
+  assert.equal(firstSentence("Pick a project.   Then build it."), "Pick a project.");
+  assert.equal(firstSentence("Is it done? Yes."), "Is it done?");
+  assert.equal(firstSentence("Open src/app.ts first.\nThen run it."), "Open src/app.ts first.", "a dot inside a word isn't an end");
+  assert.equal(firstSentence("A heading\n\nThe body."), "A heading");
+  assert.equal(firstSentence("no end at all"), "no end at all");
+  assert.equal(firstSentence(" \n "), "");
+  assert.equal(firstSentence("abcdef", 4), "abc…");
+});
+
+const STEP: StepView = {
+  id: "project-1a2b", zoneId: "z1", goal: "SQL", kind: "project", text: "Pick a project theme or idea.",
+  skill: null, pick: { label: "Pick the project idea for me", prompt: "Pick a SQL project idea for me." }, confirmSkip: false,
+};
+
+test("the step stays until it changes or goes away, and comes back after anything passing", () => {
+  const c = clock();
+  const shown: { view: BubbleView | null; fresh: boolean }[] = [];
+  const bubble = new Bubble({ publish: (view, fresh) => shown.push({ view, fresh }), now: c.now, after: c.after });
+  bubble.step(STEP);
+  assert.deepEqual(shown.at(-1), { view: { kind: "step", step: STEP, expiresAt: 0 }, fresh: true });
+  c.advance(10 * 60_000);
+  assert.equal(bubble.current?.kind, "step", "a step never times out");
+  const count = shown.length;
+  bubble.step({ ...STEP });
+  assert.equal(shown.length, count, "the same step publishes nothing again");
+
+  bubble.timed("reply", ["Here's one idea."], BUBBLE_TTL.reply);
+  assert.equal(shown.at(-1)!.view!.kind, "reply", "a reply takes the bubble meanwhile");
+  assert.equal(shown.at(-1)!.fresh, true, "and anchors at the cursor");
+  c.advance(BUBBLE_TTL.reply);
+  assert.equal(bubble.current?.kind, "step", "the step comes back when the reply goes");
+  bubble.voice(["Listening…"]);
+  bubble.dismiss();
+  assert.equal(bubble.current?.kind, "step", "dismissing what passed leaves the step");
+
+  const next: StepView = { ...STEP, id: "milestone-3c4d", kind: "milestone", text: "Write the first query." };
+  bubble.step(next);
+  assert.deepEqual(shown.at(-1), { view: { kind: "step", step: next, expiresAt: 0 }, fresh: true }, "a new step replaces the old");
+  bubble.step({ ...next, text: "Write the first SELECT query." });
+  assert.equal(shown.at(-1)!.fresh, false, "the same step with new words updates in place");
+  bubble.step(null);
+  assert.equal(bubble.current, null);
+  assert.equal(shown.at(-1)!.view, null, "a done or skipped step goes away");
+});
+
+test("the step hides while the working window is in front, and while asleep", () => {
+  const shown: (BubbleView | null)[] = [];
+  const bubble = new Bubble({ publish: (view) => shown.push(view), now: () => 0, after: () => () => {} });
+  bubble.windowFront(true);
+  bubble.step(STEP);
+  assert.equal(bubble.current, null, "they're already looking at it");
+  assert.equal(shown.length, 0);
+  bubble.windowFront(false);
+  assert.equal(bubble.current?.kind, "step");
+  bubble.suspend(true);
+  assert.equal(bubble.current, null);
+  bubble.timed("reply", ["x"], BUBBLE_TTL.reply);
+  assert.equal(bubble.current, null, "nothing shows while suspended");
+  bubble.suspend(false);
+  assert.equal(bubble.current?.kind, "step");
 });
 
 test("dismissal gives focus back to the external app captured at summon, once", async () => {
@@ -161,6 +220,59 @@ test("dismissal gives focus back to the external app captured at summon, once", 
   const refused = new FocusReturn({ capture: async () => "h2", restore: async () => { throw new Error("helper stopped"); } });
   await refused.summon();
   assert.equal(await refused.dismiss(), false);
+});
+
+test("the Wizard jumps in once per chime for 20 s, over the step, and gives the step back", () => {
+  const c = clock();
+  const shown: { view: BubbleView | null; fresh: boolean }[] = [];
+  const bubble = new Bubble({ publish: (view, fresh) => shown.push({ view, fresh }), now: c.now, after: c.after });
+  bubble.step(STEP);
+  const chime = { id: "w1", at: "2026-10-10T00:00:00.000Z", text: "Try printing the rows before the join." };
+  bubble.wizard(chime);
+  assert.deepEqual(shown.at(-1), { view: { kind: "wizard", text: chime.text, expiresAt: c.now() + BUBBLE_TTL.wizard }, fresh: true });
+  assert.equal(BUBBLE_TTL.wizard, 20_000);
+  const count = shown.length;
+  bubble.wizard({ ...chime });
+  bubble.step({ ...STEP });
+  assert.equal(shown.length, count, "the same chime and the same step change nothing");
+  c.advance(BUBBLE_TTL.wizard - 1);
+  assert.equal(bubble.current?.kind, "wizard");
+  c.advance(1);
+  assert.deepEqual(bubble.current, { kind: "step", step: STEP, expiresAt: 0 }, "the step comes back");
+  bubble.wizard(chime);
+  assert.equal(bubble.current?.kind, "step", "a chime shows once");
+  bubble.wizard(null);
+  assert.equal(bubble.current?.kind, "step");
+
+  // Between a reply and the Wizard the newer one shows; voice wins over both.
+  bubble.timed("reply", ["Here's one."], BUBBLE_TTL.reply);
+  bubble.wizard({ ...chime, id: "w2" });
+  assert.equal(bubble.current?.kind, "wizard");
+  bubble.timed("reply", ["And another."], BUBBLE_TTL.reply);
+  assert.equal(bubble.current?.kind, "reply");
+  assert.equal(shown.at(-1)!.fresh, true, "a reply after the cloud anchors at the cursor again");
+  bubble.dismiss();
+  assert.equal(bubble.current?.kind, "wizard", "the Wizard is still live under it");
+  bubble.voice(["Listening…"]);
+  assert.equal(bubble.current?.kind, "voice");
+});
+
+test("the Wizard is skipped while the working window is in front, and while asleep", () => {
+  const shown: (BubbleView | null)[] = [];
+  const bubble = new Bubble({ publish: (view) => shown.push(view), now: () => 0, after: () => () => {} });
+  const chime = { id: "w1", at: "2026-10-10T00:00:00.000Z", text: "Stuck? Read the error's last line." };
+  bubble.windowFront(true);
+  bubble.wizard(chime);
+  bubble.windowFront(false);
+  assert.equal(bubble.current, null, "the panel showed it; it doesn't come back later");
+  bubble.suspend(true);
+  bubble.wizard({ ...chime, id: "w2" });
+  bubble.suspend(false);
+  assert.equal(bubble.current, null);
+  bubble.wizard({ ...chime, id: "w3" });
+  assert.equal(bubble.current?.kind, "wizard");
+  bubble.windowFront(true);
+  assert.equal(bubble.current, null, "hidden while they look at the window");
 });
 
 // -- the circle ------------------------------------------------------------------------------
@@ -232,22 +344,116 @@ test("only the round disk takes the pointer, not the transparent corners or padd
   assert.ok(!insideDisk({ x: 132 + 21, y: 132 + 21 }, circle), "a corner of the inscribed square");
 });
 
-test("the working window sits right of the circle, centered on it; else left; else the roomier side, clamped", () => {
-  const right = placeWindow({ x: 100, y: 500, width: C, height: C }, main, WINDOW_SIZE);
-  assert.deepEqual(right, { x: 100 + C + WINDOW_GAP, y: 532 - 720 / 2, width: 640, height: 720 });
-  const leftSide = placeWindow(defaultCircle(main), main, WINDOW_SIZE);
-  assert.equal(leftSide.x, defaultCircle(main).x - WINDOW_GAP - 640);
-  assert.ok(inside(leftSide, main));
-  const middle: Rect = { x: 0, y: 0, width: 1000, height: 900 };
-  const squeezed = placeWindow({ x: 300, y: 400, width: C, height: C }, middle, WINDOW_SIZE);
-  assert.ok(inside(squeezed, middle), "clamped onscreen");
-  assert.equal(squeezed.width, 640);
-  assert.ok(squeezed.x > 300, "the right had more room");
+test("a panel's top-left corner sits at the disk's center; it flips left or up when it doesn't fit", () => {
+  const circle: Rect = { x: 100, y: 200, width: C, height: C };
+  const disk = diskCenter(circle);
+  assert.deepEqual(disk, { x: 132, y: 232 });
+  assert.deepEqual(placePanel(disk, main, PANEL_SIZE.goal), { x: 132, y: 232, width: 440, height: 640 });
+  const right = { x: diskCenter(defaultCircle(main)).x, y: 132 };
+  const flipped = placePanel(right, main, PANEL_SIZE.dum);
+  assert.equal(flipped.x + flipped.width, right.x, "no room on the right: its top-right corner is at the disk");
+  assert.equal(flipped.y, right.y);
+  const low = { x: 132, y: 800 };
+  const up = placePanel(low, main, PANEL_SIZE.tree);
+  assert.deepEqual(up, { x: 132, y: 800 - 560, width: 760, height: 560 }, "no room below: its bottom-left corner is at the disk");
+  const corner = placePanel({ x: 1400, y: 850 }, main, PANEL_SIZE.dum);
+  assert.deepEqual([corner.x + corner.width, corner.y + corner.height], [1400, 850], "both flips");
   const small: Rect = { x: 0, y: 0, width: 500, height: 400 };
-  const shrunk = placeWindow({ x: 400, y: 200, width: C, height: C }, small, WINDOW_SIZE);
-  assert.deepEqual(shrunk, { x: 8, y: 8, width: 500 - 16, height: 400 - 16 }, "shrunk to the work area and clamped; it may cover the circle");
-  const topEdge = placeWindow({ x: 100, y: 33, width: C, height: C }, main, WINDOW_SIZE);
-  assert.equal(topEdge.y, 33, "vertical centering clamps at the top");
+  const shrunk = placePanel({ x: 250, y: 200 }, small, PANEL_SIZE.tree);
+  assert.deepEqual(shrunk, { x: 8, y: 8, width: 484, height: 384 }, "shrunk to the work area and clamped");
+  assert.ok(inside(placePanel({ x: -1000, y: -200 }, left, PANEL_SIZE.goal), left), "negative origins as they are");
+  assert.ok(PANEL_CLEAR >= CIRCLE.disk / 2, "the disk over a corner stays inside the clear square");
+});
+
+test("the column grows down from the circle, one 64 DIP slot per circle, shifted up near the bottom", () => {
+  const circle: Rect = { x: 1000, y: 300, width: C, height: C };
+  assert.deepEqual(columnRect(circle, main, 7), { x: 1000, y: 300, width: C, height: 7 * COLUMN.pitch });
+  assert.deepEqual(columnRect(circle, main, 1), circle, "one circle is the circle itself");
+  const low = clampCircle({ x: 1000, y: 5000, width: C, height: C }, main);
+  const shifted = columnRect(low, main, 7);
+  assert.equal(shifted.y + shifted.height, main.y + main.height - CIRCLE.inset, "clamped to the work area's bottom");
+  assert.equal(COLUMN.slots, 7, "Dum, three goals, the tree, the monitor, settings");
+  assert.deepEqual(columnRect(circle, main, 9).height, 7 * COLUMN.pitch, "never more than seven slots");
+  const short: Rect = { x: 0, y: 0, width: 800, height: 200 };
+  assert.equal(columnRect({ x: 10, y: 50, width: C, height: C }, short, 7).y, CIRCLE.inset, "too tall: the top stays inset");
+});
+
+test("a click resolves to the disk under main's pointer sample; the gaps and corners are nothing", () => {
+  const column: Rect = { x: 1000, y: 300, width: C, height: 7 * 64 };
+  assert.deepEqual(slotCenter(column, 2), { x: 1032, y: 300 + 32 + 128 });
+  assert.equal(slotAt({ x: 1032, y: 332 }, column, 7), 0);
+  assert.equal(slotAt({ x: 1032, y: 332 + 64 * 6 + 28 }, column, 7), 6, "the rim of the last disk");
+  assert.equal(slotAt({ x: 1032, y: 332 + 64 * 6 }, column, 6), null, "a slot past the count isn't one");
+  assert.equal(slotAt({ x: 1032, y: 300 + 64 }, column, 7), null, "between two disks");
+  assert.equal(slotAt({ x: 1003, y: 332 + 64 }, column, 7), null, "beside a disk");
+  assert.ok(insideColumn({ x: 1032, y: 300 + 64 }, column), "between disks is still the shared background");
+  assert.ok(insideColumn({ x: 1003, y: 300 + 160 }, column), "the background's straight side");
+  assert.ok(!insideColumn({ x: 1001, y: 301 }, column), "its transparent corner");
+  assert.ok(!insideColumn({ x: 1032, y: 300 + 7 * 64 + 1 }, column), "below it");
+});
+
+test("the thought cloud sits beside the circle, top-aligned, its puffs toward it; left of it near the right edge", () => {
+  const circle: Rect = { x: 100, y: 300, width: C, height: C };
+  const width = THOUGHT.cloud.width + THOUGHT.puffs;
+  assert.deepEqual(placeThought(circle, main), { rect: { x: 100 + C + THOUGHT.gap, y: 300, width, height: THOUGHT.cloud.height }, toward: "left" });
+  const edge = defaultCircle(main);
+  const leftOf = placeThought(edge, main);
+  assert.equal(leftOf.toward, "right", "the circle is on the cloud's right");
+  assert.equal(leftOf.rect.x + leftOf.rect.width, edge.x - THOUGHT.gap);
+  assert.equal(leftOf.rect.y, edge.y);
+  const low = placeThought({ x: 100, y: 860, width: C, height: C }, main);
+  assert.ok(inside(low.rect, main), "clamped onscreen");
+});
+
+const zoneRow = (id: string, name: string, updatedAt: string, deletedAt: string | null = null): Zone => ({
+  id, parentId: null, name, goal: name, language: null, focusSkills: [], createdAt: updatedAt, updatedAt, deletedAt,
+});
+const goal = (id: string, done: number, total: number, step: StepView | null = null): GoalView => ({ id, path: [], progress: { done, total }, step, skippedAt: null });
+const AGENT = { backend: "claude" } as unknown as NonNullable<Snapshot["settings"]["agent"]>;
+type Recording = { screen?: boolean; paused?: boolean; permission?: Snapshot["look"]["permission"]; agent?: Snapshot["settings"]["agent"] };
+const snap = (zones: Zone[], active: string | null, pinned: string[], goals: GoalView[] = [], rec: Recording = {}) => ({
+  zones: { version: 1, revision: 3, activeZoneId: active, zones }, goals, pinned,
+  settings: { look: { apps: true, screen: rec.screen ?? true }, agent: rec.agent === undefined ? AGENT : rec.agent },
+  look: { paused: rec.paused ?? false, permission: rec.permission ?? "granted" },
+} as unknown as Snapshot);
+
+test("the column is Dum, the pinned goals or else the three latest with the active first, then the tree, monitor and settings", () => {
+  const zones = [
+    zoneRow("a", "learn sql", "2026-10-01T00:00:00.000Z"), zoneRow("b", "Rust", "2026-10-05T00:00:00.000Z"),
+    zoneRow("c", "web app basics", "2026-10-04T00:00:00.000Z"), zoneRow("d", "Go", "2026-10-03T00:00:00.000Z"),
+    zoneRow("e", "gone", "2026-10-09T00:00:00.000Z", "2026-10-09T00:00:00.000Z"),
+  ];
+  const latest = circleSlots(snap(zones, "a", [], [goal("a", 1, 4, { ...STEP, zoneId: "a" }), goal("b", 0, 0)]));
+  assert.deepEqual(latest.map((s) => s.ref), [
+    { kind: "dum" }, { kind: "goal", id: "a" }, { kind: "goal", id: "b" }, { kind: "goal", id: "c" }, { kind: "tree" }, { kind: "monitor" }, { kind: "settings" },
+  ]);
+  assert.deepEqual(latest[0], { ref: { kind: "dum" }, label: "Dum: your goals", mark: "D", progress: 0, waiting: false });
+  assert.deepEqual(latest[1], { ref: { kind: "goal", id: "a" }, label: "Goal: learn sql", mark: "LS", progress: 0.25, waiting: true });
+  assert.deepEqual(latest[2], { ref: { kind: "goal", id: "b" }, label: "Goal: Rust", mark: "R", progress: 0, waiting: false }, "no path yet is 0");
+  assert.deepEqual(latest[4], { ref: { kind: "tree" }, label: "Skill tree", mark: "T", progress: 0, waiting: false });
+  assert.deepEqual(latest[5], { ref: { kind: "monitor" }, label: "Monitor: recording", mark: "M", progress: 0, waiting: true });
+  assert.deepEqual(latest[6], { ref: { kind: "settings" }, label: "Settings", mark: "S", progress: 0, waiting: false });
+
+  const pinned = circleSlots(snap(zones, "a", ["d", "e", "missing"]));
+  assert.deepEqual(pinned.map((s) => s.ref.kind === "goal" ? s.ref.id : s.ref.kind), ["dum", "d", "tree", "monitor", "settings"], "pinned only, live only");
+  assert.deepEqual(circleSlots(snap([], null, [])).map((s) => s.ref.kind), ["dum", "tree", "monitor", "settings"]);
+});
+
+test("the monitor says it's recording only while the screen look is on, unpaused, allowed and powered", () => {
+  const monitor = (rec: Recording) => circleSlots(snap([], null, [], [], rec)).find((s) => s.ref.kind === "monitor")!;
+  assert.deepEqual([monitor({}).label, monitor({}).waiting], ["Monitor: recording", true]);
+  assert.equal(monitor({ permission: "not-required" }).waiting, true, "no permission needed on this system");
+  for (const rec of [{ screen: false }, { paused: true }, { permission: "denied" }, { permission: "not-determined" }, { agent: null }] as Recording[]) {
+    assert.deepEqual([monitor(rec).label, monitor(rec).waiting], ["Monitor: not recording", false], JSON.stringify(rec));
+  }
+});
+
+test("a goal's mark is one or two uppercase initials", () => {
+  assert.equal(goalMark("learn sql"), "LS");
+  assert.equal(goalMark("Rust"), "R");
+  assert.equal(goalMark("  data -- engineering pipelines "), "DE");
+  assert.equal(goalMark("ölçü birimi"), "ÖB");
+  assert.equal(goalMark("---"), "G");
 });
 
 function gestureClock() {
@@ -326,4 +532,17 @@ test("a press on the transparent padding neither opens Dum nor drags; a new pres
   assert.notEqual(first, second);
   assert.equal(g.end(first, center), "none");
   assert.equal(g.end(second, center), "toggle");
+});
+
+test("on the column, main's own hit test decides: the shared background clicks, its corners don't", () => {
+  const c = gestureClock();
+  const g = new CircleGesture(c.now);
+  const column: Rect = { x: 1000, y: 300, width: C, height: 5 * 64 };
+  const low = { x: 1032, y: 300 + 64 * 3 + 32 };
+  const id = g.begin(low, column, insideColumn(low, column));
+  assert.equal(g.end(id, low), "toggle", "a click on a lower disk, far outside the old 64×64 disk test");
+  c.advance(1000);
+  const corner = { x: 1001, y: 301 };
+  const missed = g.begin(corner, column, insideColumn(corner, column));
+  assert.equal(g.end(missed, corner), "none");
 });

@@ -3,9 +3,9 @@ import test from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Ambient, MAX_NOTE, lookCandidates, nearDuplicate, observationPrompt, observe, parseObservation, type AmbientOptions, type AmbientView } from "../src/ambient.ts";
+import { Ambient, LookLog, MAX_NOTE, lookCandidates, nearDuplicate, observationPrompt, observe, parseObservation, type AmbientOptions, type AmbientView } from "../src/ambient.ts";
 import { createRegistry } from "../src/agent/registry.ts";
-import { LOOK } from "../src/observe-types.ts";
+import { LOOK, LOOK_LOG, LookLogEntrySchema, WizardChimeSchema } from "../src/observe-types.ts";
 import type { AgentBackend, AgentEvent, OpenOptions, Picture, Selector, UserTurn } from "../src/agent/types.ts";
 import type { AmbientInput, AmbientResult, AppSignal, FileSignal, Tick } from "../src/observe-types.ts";
 import type { SkillRef, ZoneContext } from "../src/zone-types.ts";
@@ -44,7 +44,7 @@ function rig(over: Partial<AmbientOptions> & { auto?: boolean } = {}) {
   const state = {
     blocked: false, advised: true,
     pictures: { ok: true, why: "" },
-    reply: { note: "note", topics: [] } as AmbientResult,
+    reply: { note: "note", topics: [], confused: null } as AmbientResult,
   };
   const auto = over.auto ?? true;
   const ambient = new Ambient({
@@ -222,7 +222,7 @@ test("screen calls are at least LOOK.tickMs apart, one at a time, and coalesce w
   await r.tick({ app: a, screen: still });
   assert.equal(r.calls.length, 1, "nothing else starts while a call is in flight");
   assert.equal(r.frames.length, 1, "and no frame is taken for it");
-  r.calls[0]!.resolve({ note: "editing main.ts", topics: [] });
+  r.calls[0]!.resolve({ note: "editing main.ts", topics: [], confused: null });
   await r.settle();
   await r.tick({ app: a, screen: still });
   assert.equal(r.calls.length, 2, "the changes made during the call go out as one call");
@@ -271,9 +271,9 @@ test("an identical frame is never sent twice", async () => {
 test("each call is stateless: the previous observation in words, never an earlier frame", async () => {
   const r = rig();
   const a = app("com.editor");
-  r.state.reply = { note: "reading the parser in parse.ts", topics: [] };
+  r.state.reply = { note: "reading the parser in parse.ts", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
-  r.state.reply = { note: "writing a test for the parser", topics: [] };
+  r.state.reply = { note: "writing a test for the parser", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
   await r.tick({ app: a, screen: moving });
   const [first, second, third] = r.calls.map((c) => c.input);
@@ -290,17 +290,17 @@ test("each call is stateless: the previous observation in words, never an earlie
 test("a memory note only when the activity changed, at most one a minute", async () => {
   const r = rig();
   const a = app("com.editor");
-  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [] };
+  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
   assert.deepEqual(r.notes, ["editing the tokenizer in lex.ts"]);
-  r.state.reply = { note: "debugging a failing test in parse.test.ts", topics: [] };
+  r.state.reply = { note: "debugging a failing test in parse.test.ts", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
   assert.equal(r.notes.length, 1, "a new note inside 60 s waits");
   r.advance(LOOK.noteMs);
-  r.state.reply = { note: "still editing the tokenizer in lex.ts", topics: [] };
+  r.state.reply = { note: "still editing the tokenizer in lex.ts", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
   assert.equal(r.notes.length, 1, "a near-duplicate of a recent note isn't written");
-  r.state.reply = { note: "debugging a failing test in parse.test.ts", topics: [] };
+  r.state.reply = { note: "debugging a failing test in parse.test.ts", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
   assert.deepEqual(r.notes, ["editing the tokenizer in lex.ts", "debugging a failing test in parse.test.ts"]);
   assert.equal(nearDuplicate("Editing lex.ts!", "editing lex.ts"), true);
@@ -314,7 +314,7 @@ test("typing still counts and coalesces with the screen into one call", async ()
   await r.ticks(2, { app: a, screen: moving });
   await r.ticks(2, { app: a, screen: still });
   assert.equal(r.calls.length, 1, "the first change is in flight");
-  r.calls[0]!.resolve({ note: null, topics: [] });
+  r.calls[0]!.resolve({ note: null, topics: [], confused: null });
   await r.settle();
   await r.tick({ app: a, screen: still });
   assert.equal(r.calls.length, 2);
@@ -334,7 +334,7 @@ test("when the look model can't be sent pictures, the status says why and screen
   await r.ticks(2, { app: app("com.b"), screen: still });
   assert.equal(r.calls.length, 1, "an app switch still makes a text-only call");
   assert.equal(r.calls[0]!.input.image, null);
-  assert.deepEqual(r.records[0]!.result, { note: "note", topics: [] });
+  assert.deepEqual(r.records[0]!.result, { note: "note", topics: [], confused: null });
 
   r.state.pictures = { ok: true, why: "" };
   r.advance(LOOK.minMs.any);
@@ -368,7 +368,7 @@ test("a timed-out or failed call frees the slot and counts toward the limits", a
   await r.settle();
   assert.equal(r.calls[0]!.signal.aborted, true);
   assert.equal(r.statuses().at(-1), "failed");
-  r.calls[0]!.resolve({ note: "late", topics: [] });
+  r.calls[0]!.resolve({ note: "late", topics: [], confused: null });
   await r.settle();
   assert.equal(r.records.length, 0, "a late answer is dropped");
 
@@ -495,22 +495,24 @@ test("a look's prompt carries the zone, what changed, the previous observation, 
   assert.match(text, /files: club\/scores\.py/);
   assert.doesNotMatch(text, /11111111-2222/, "grant IDs stay out");
   assert.match(text, /screen: a picture of it is attached/);
-  assert.match(text, /never advise/);
+  assert.match(text, /In the note you never advise/);
   assert.match(text, /THE SKILLS YOU MAY NAME\n[\s\S]*sorting with keys \(python\)/);
-  assert.doesNotMatch(text, /anchor|"say"|ASIDE|wizard/i, "the look asks for no aside");
+  assert.doesNotMatch(text, /anchor|"say"|ASIDE/i, "the look asks for no aside");
+  assert.match(text, /CONFUSED: only when the screen[\s\S]*stuck[\s\S]*never the full answer, never code/, "the Wizard's nudge is asked for only when they're stuck");
+  assert.match(text, /"confused": \{"why": "<what's visible>", "hint": "<one sentence>"\} or null/);
   assert.match(observationPrompt(look(), PY), /screen: no picture/);
   assert.ok(lookCandidates(look()).some((s) => s.name === "lambdas" && s.lang === "python"), "the zone's language is on offer");
 });
 
 test("a look's reply is a bounded note or nothing plus checked topics, and anything else is unreadable", () => {
   const read = (v: unknown) => parseObservation(JSON.stringify(v), PY);
-  assert.deepEqual(read({ note: null }), { note: null, topics: [] });
-  assert.deepEqual(read({ note: "  sorting the  leaderboard \u2014 by score " }), { note: "sorting the leaderboard - by score", topics: [] });
+  assert.deepEqual(read({ note: null }), { note: null, topics: [], confused: null });
+  assert.deepEqual(read({ note: "  sorting the  leaderboard \u2014 by score " }), { note: "sorting the leaderboard - by score", topics: [], confused: null });
   const long = read({ note: "word ".repeat(200) })!.note!;
   assert.ok(long.length <= MAX_NOTE && long.endsWith("…"));
-  assert.deepEqual(read({ note: "see https://example.invalid" }), { note: null, topics: [] });
-  assert.deepEqual(read({ note: "x\n```py\nx = 1\n```" }), { note: null, topics: [] });
-  assert.deepEqual(read({ note: "editing", anchor: "python-sorting", say: "ties keep their order" }), { note: "editing", topics: [] }, "an aside in the reply is ignored");
+  assert.deepEqual(read({ note: "see https://example.invalid" }), { note: null, topics: [], confused: null });
+  assert.deepEqual(read({ note: "x\n```py\nx = 1\n```" }), { note: null, topics: [], confused: null });
+  assert.deepEqual(read({ note: "editing", anchor: "python-sorting", say: "ties keep their order" }), { note: "editing", topics: [], confused: null }, "an aside in the reply is ignored");
   const topics = read({
     note: null,
     topics: [
@@ -526,11 +528,100 @@ test("a look's reply is a bounded note or nothing plus checked topics, and anyth
   assert.equal(read({ say: "hi" }), null);
 });
 
+test("a look that saw them stuck carries why and the Wizard's one-sentence nudge; a bad one is dropped, not the look", () => {
+  const read = (v: unknown) => parseObservation(JSON.stringify(v), PY);
+  const stuck = { why: "  the same KeyError traceback for the third time ", hint: "Print the dict's keys right before the lookup and compare them with the key you ask for." };
+  assert.deepEqual(read({ note: "rerunning scores.py", topics: [], confused: stuck }), {
+    note: "rerunning scores.py", topics: [],
+    confused: { why: "the same KeyError traceback for the third time", hint: stuck.hint },
+  });
+  assert.deepEqual(read({ note: null, confused: { why: "an error dialog \u2014 again", hint: "Read the dialog's first line out loud." } })!.confused, { why: "an error dialog - again", hint: "Read the dialog's first line out loud." });
+  for (const bad of [
+    { why: "a failing test", hint: "Try ```key in d```" },
+    { why: "a failing test", hint: "See https://docs.python.org" },
+    { why: "a failing test", hint: "x".repeat(281) },
+    { why: "a failing test", hint: "line one\nline two" },
+    { why: "", hint: "Check the key." },
+    { why: "a failing test" },
+    "stuck",
+    ["why", "hint"],
+  ]) {
+    const r = read({ note: "editing scores.py", confused: bad });
+    assert.deepEqual(r, { note: "editing scores.py", topics: [], confused: null }, JSON.stringify(bad));
+  }
+  assert.equal(read({ note: "editing scores.py" })!.confused, null, "absent is null");
+});
+
+test("the context log keeps notes, app switches, skips, failures and pauses, bounded and coalesced", () => {
+  let now = Date.parse("2026-10-10T12:00:00.000Z");
+  const log = new LookLog(() => now);
+  const result = (note: string | null, confused: AmbientResult["confused"] = null): AmbientResult => ({ note, topics: [], confused });
+  log.paused(false);
+  assert.deepEqual(log.entries, [], "not paused at start isn't news");
+  log.app(app("com.editor"));
+  log.app(app("com.editor", 7));
+  log.app(null);
+  log.look({ status: "watching", reason: "unchanged" });
+  now += 3_000;
+  log.look({ status: "blocked", reason: "busy" });
+  log.look({ status: "blocked", reason: "busy" });
+  log.observed(result("editing scores.py"));
+  log.observed(result("editing scores.py"));
+  log.look({ status: "failed", reason: "timeout" });
+  log.paused(true);
+  log.paused(false);
+  assert.deepEqual(log.entries.map((e) => [e.kind, e.text]), [
+    ["app", "Switched to com.editor"],
+    ["skipped", "Nothing new on screen"],
+    ["skipped", "Dum is busy with a request"],
+    ["note", "editing scores.py"],
+    ["error", "The look timed out"],
+    ["paused", "Look paused"],
+    ["paused", "Look resumed"],
+  ]);
+  assert.ok(log.entries.every((e) => LookLogEntrySchema.safeParse(e).success));
+  assert.equal(new Set(log.entries.map((e) => e.id)).size, log.entries.length, "every line has its own id");
+
+  // The same skip again only moves its time.
+  const fresh = new LookLog(() => now);
+  fresh.look({ status: "watching", reason: "unchanged" });
+  fresh.look({ status: "checking", reason: null });
+  now += 9_000;
+  fresh.look({ status: "watching", reason: "unchanged" });
+  assert.equal(fresh.entries.length, 1);
+  assert.equal(fresh.entries[0]!.at, new Date(now).toISOString());
+
+  for (let i = 0; i < LOOK_LOG.entries + 20; i++) log.observed(result(`note ${i}`));
+  assert.equal(log.entries.length, LOOK_LOG.entries, "at most the bound, oldest dropped");
+  assert.equal(log.entries.at(-1)!.text, `note ${LOOK_LOG.entries + 19}`);
+});
+
+test("the Wizard chimes when a look sees them stuck, at most once a minute", () => {
+  let now = Date.parse("2026-10-10T12:00:00.000Z");
+  const log = new LookLog(() => now);
+  const stuck = (hint: string): AmbientResult => ({ note: null, topics: [], confused: { why: "the same error again", hint } });
+  log.observed({ note: "editing", topics: [], confused: null });
+  assert.equal(log.wizard, null, "no chime unless they look stuck");
+  log.observed(stuck("Check which line the traceback points at."));
+  const first = log.wizard!;
+  assert.ok(WizardChimeSchema.safeParse(first).success);
+  assert.equal(first.text, "Check which line the traceback points at.");
+  assert.equal(first.at, new Date(now).toISOString());
+  now += LOOK_LOG.wizardGapMs - 1;
+  log.observed(stuck("Too soon."));
+  assert.deepEqual(log.wizard, first, "inside the gap the Wizard stays quiet");
+  now += 1;
+  log.observed(stuck("Print the value just before that line."));
+  assert.notEqual(log.wizard!.id, first.id);
+  assert.equal(log.wizard!.text, "Print the value just before that line.");
+  assert.deepEqual(log.entries.filter((e) => e.kind === "wizard").map((e) => e.text), ["Check which line the traceback points at.", "Print the value just before that line."]);
+});
+
 test("observe makes one call on the look model with the one frame, and fails loudly rather than quietly", async () => {
   const frame: Picture = { mimeType: "image/png", data: "iVBORw0KGgo=" };
   const m = lookModel([JSON.stringify({ note: "reading scores.py in Code", topics: [{ topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" }] })]);
   const result = await observe(look({ image: frame, triggers: ["screen"] }), { agent: m.agent, cwd: "/h/zones/z/runtime", signal: new AbortController().signal });
-  assert.deepEqual(result, { note: "reading scores.py in Code", topics: [{ topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" }] });
+  assert.deepEqual(result, { note: "reading scores.py in Code", topics: [{ topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" }], confused: null });
   assert.equal(m.opened.length, 1);
   assert.deepEqual(m.opened[0]!.selector, { backend: "claude", model: "haiku", effort: "low" }, "the look role's model, not the helper's");
   assert.deepEqual(m.opened[0]!.actions, []);
@@ -548,11 +639,11 @@ test("every successful look reaches the trail hook before the note throttle, nul
   const r = rig();
   const a = app("com.editor");
   const hint = { topic: "lambdas", skill: { name: "lambdas", lang: "python" }, confidence: 1, reason: "key=lambda" };
-  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [] };
+  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
-  r.state.reply = { note: null, topics: [hint] };
+  r.state.reply = { note: null, topics: [hint], confused: null };
   await r.tick({ app: a, screen: moving });
-  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [hint] };
+  r.state.reply = { note: "editing the tokenizer in lex.ts", topics: [hint], confused: null };
   await r.tick({ app: a, screen: moving });
   assert.equal(r.notes.length, 1, "the throttle still keeps memory to one note a minute");
   assert.equal(r.observed.length, 3, "every look was reported, including the null and the throttled one");
@@ -563,7 +654,7 @@ test("every successful look reaches the trail hook before the note throttle, nul
 test("forget drops the latest observation, so it never feeds the next look", async () => {
   const r = rig();
   const a = app("com.editor");
-  r.state.reply = { note: "reading secrets.env", topics: [] };
+  r.state.reply = { note: "reading secrets.env", topics: [], confused: null };
   await r.tick({ app: a, screen: moving });
   assert.equal(r.views.at(-1)!.seen, "reading secrets.env");
   r.ambient.forget();

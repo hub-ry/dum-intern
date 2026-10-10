@@ -5,7 +5,7 @@
 // talks to it through host-protocol.ts; `serve` is the process side of that.
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as zones from "../zones.ts";
 import * as memory from "../memory.ts";
@@ -23,7 +23,7 @@ import { LedgerSchema } from "../evidence-types.ts";
 import { Follows } from "../follow.ts";
 import { SharedFiles, bound } from "../shared-files.ts";
 import { listChanges, revertChange } from "../changes.ts";
-import { Ambient, observe, type AmbientView } from "../ambient.ts";
+import { Ambient, LookLog, observe, type AmbientView } from "../ambient.ts";
 import { Store, Cancelled, parseCommand } from "../store.ts";
 import { prepare, run, type Ctx, type RunEnd, type SessionHooks } from "../session.ts";
 import { Practice } from "../practice.ts";
@@ -39,6 +39,8 @@ import { createState, readState, statePath } from "../state-files.ts";
 import { DELEGATION_LIMITS } from "../delegation-types.ts";
 import { TRAIL_LIMITS } from "../trail-types.ts";
 import { view as treeView, type View } from "../web/view.ts";
+import { Goals, goalZones, nextSkill, type GoalZone } from "../steps.ts";
+import type { GoalView, NextSkill } from "../step-types.ts";
 import { HostRequestSchema, type HostEvent, type HostRequest, type HostResult } from "./host-protocol.ts";
 import type { AgentBackend, AgentChoice, BackendId, CredentialNeed, CredentialSource, LoginMethod, ModelOption, Picture, Selector } from "../agent/types.ts";
 import type {
@@ -96,6 +98,8 @@ type Init = {
   trails: Trails;
   diagnostics: Diagnostics;
   debug: DebugChat;
+  /** Every goal's step facts, skips and play. */
+  goals: Goals;
   release: () => void;
   personal: context.Context;
   settings: DesktopPreferences;
@@ -229,6 +233,12 @@ export class DesktopController {
   private closed = false;
   private zoneList: ZoneRegistry = { version: 1, revision: 0, activeZoneId: null, zones: [] };
   private treeView: View | null = null;
+  /** The tree goals are computed from, and what it was read under: the skills folder and the "not yet" holds. */
+  private goalTree: { sig: string; tree: skills.Tree } | null = null;
+  /** Unreadable goal step files already noted, so each is said once. */
+  private readonly goalErrors = new Set<string>();
+  /** The Monitor's context log and the Wizard's latest chime: host memory only, across goal switches. */
+  private readonly lookLog = new LookLog();
   private readonly tokens = new WeakMap<object, string>();
   private readonly idle = randomUUID();
   /** Operations that change state run one at a time, each after the last has finished. */
@@ -324,6 +334,9 @@ export class DesktopController {
       }
       case "session-new": await this.newSession(r.binding); return undefined;
       case "trail-map": await this.trailMap({ binding: r.binding, sessionId: r.sessionId, gapId: r.gapId, skill: r.skill }); return undefined;
+      case "goal-skip": this.goalSkip(r.zoneId, r.skip); return undefined;
+      case "step-skip": this.stepSkip(r.zoneId, r.stepId, r.confirmed); return undefined;
+      case "play": this.play(r.skill); return undefined;
     }
   }
 
@@ -346,13 +359,16 @@ export class DesktopController {
       const diagnostics = new Diagnostics(Date.now, main, diagnosticSettings(settings));
       const debugCwd = join(home, "debug", "runtime");
       mkdirSync(debugCwd, { recursive: true, mode: 0o700 });
+      const directions = new Directions(home, Date.now);
       const init: Init = {
         home, registry, evidence: new Evidence(home), release, personal, settings, agentError: null,
-        directions: new Directions(home, Date.now), delegations: new Delegations(home, Date.now), trails: new Trails(home, Date.now),
+        directions, delegations: new Delegations(home, Date.now), trails: new Trails(home, Date.now),
         diagnostics,
         debug: new DebugChat(registry, diagnostics, debugCwd, () => this.o.post({ type: "debug-state", epoch: this.o.epoch, view: this.init?.debug.view() ?? null })),
+        goals: new Goals(home, directions),
       };
       this.applyAgent(init, settings.agent, false);
+      this.lookLog.paused(main.lookPaused);
       this.zoneList = zones.listZones();
       this.recover(init);
       this.init = init;
@@ -943,6 +959,10 @@ export class DesktopController {
 
   diagnosticMain(events: readonly SanitizedMainEvent[], status: MainStatus | null): void {
     this.ready().diagnostics.main(events, status);
+    if (!status) return;
+    const before = this.lookLog.entries;
+    this.lookLog.paused(status.lookPaused);
+    if (this.lookLog.entries !== before) this.changed();
   }
 
   // -- the conversation -----------------------------------------------------
@@ -1194,6 +1214,9 @@ export class DesktopController {
   async observeTick(tick: Tick): Promise<void> {
     const live = this.live;
     if (!this.init || !live || this.closed) return;
+    const before = this.lookLog.entries;
+    this.lookLog.app(tick.app);
+    if (this.lookLog.entries !== before) this.changed();
     await live.ambient.tick(tick);
   }
 
@@ -1782,8 +1805,75 @@ export class DesktopController {
   private treeChanged(): void {
     const tree = skills.read();
     this.treeView = treeView(tree);
+    this.goalTree = null;
     this.live?.store.setUnlocked(tree.skills.length);
     this.changed();
+  }
+
+  // -- goals: each goal's next step, skips (trust) and play ---------------------------------------
+
+  /** The tree as the gate sees it ("not yet" counts), reread only when the skills folder or the holds changed. */
+  private stepTree(init: Init): skills.Tree {
+    let folder = "-";
+    try {
+      const s = statSync(skills.folder(), { bigint: true });
+      folder = `${s.ino}:${s.mtimeNs}`;
+    } catch { /* no notes yet */ }
+    const sig = `${folder}\n${[...init.evidence.held].sort().join("\n")}`;
+    if (this.goalTree?.sig !== sig) this.goalTree = { sig, tree: gate.withoutHeld(skills.read(), init.evidence.held) };
+    return this.goalTree.tree;
+  }
+
+  private goalZone(zoneId: ZoneId): GoalZone {
+    const zone = goalZones(this.zoneList).find((z) => z.id === zoneId);
+    if (!zone) throw new Error("There's no such goal");
+    return zone;
+  }
+
+  /** Their word on a skill, recorded against the goal it was given for; Dum's notes go to the open conversation. */
+  private trust(init: Init, zone: GoalZone): (skill: SkillRef) => { ok: boolean; why: string } {
+    const store = this.live?.store ?? new Store({ id: zone.id, name: zone.name }, init.settings.mode);
+    return (skill) => init.evidence.selfReport({ zoneId: zone.id, zoneName: zone.name, store }, skill, true);
+  }
+
+  private goalSkip(zoneId: ZoneId, skip: boolean): void {
+    const init = this.ready();
+    const zone = this.goalZone(zoneId);
+    try {
+      init.goals.skipGoal(zone, skip, () => gate.withoutHeld(skills.read(), init.evidence.held), this.trust(init, zone));
+    } finally {
+      this.treeChanged();
+    }
+  }
+
+  private stepSkip(zoneId: ZoneId, stepId: string, confirmed: boolean): void {
+    const init = this.ready();
+    const zone = this.goalZone(zoneId);
+    init.goals.skipStep(zone, stepId, confirmed, () => gate.withoutHeld(skills.read(), init.evidence.held), this.trust(init, zone));
+    this.treeChanged();
+  }
+
+  private play(skill: SkillRef | null): void {
+    const init = this.ready();
+    if (!this.live) throw new Error("Open a goal first");
+    init.goals.play(this.stepTree(init), this.goalZone(this.live.zone.id), skill);
+    this.changed();
+  }
+
+  /** Every live goal with its step, and the play pick for the active one. An unreadable steps file is said once. */
+  private goalsState(init: Init, live: Live | null): { goals: GoalView[]; next: NextSkill | null } {
+    const tree = this.stepTree(init);
+    const all = goalZones(this.zoneList);
+    const goals = all.map((z) => init.goals.view(tree, z));
+    for (const z of all) {
+      const error = init.goals.facts(z).error;
+      if (error && !this.goalErrors.has(error)) {
+        this.goalErrors.add(error);
+        live?.store.note(`couldn't use ${z.name}'s steps: ${error}`);
+      }
+    }
+    const active = live ? all.find((z) => z.id === live.zone.id) : undefined;
+    return { goals, next: active ? nextSkill(tree, active) : null };
   }
 
   /** The registry changed: the open zone's context is re-resolved, so work bound to the old revision is dropped. */
@@ -1946,9 +2036,12 @@ export class DesktopController {
           throw err;
         }
       },
-      observed: (result, input) => {
+      observed: (result, input, at) => {
         // A result for another zone, epoch or context revision is about something they've moved on from: nothing is published.
         if (!mine() || input.binding.zoneEpoch !== live.epoch || input.zone.revision !== live.zone.revision) return;
+        // The context log and the Wizard's chime come first: a look that only saw them stuck still counts.
+        // The status that follows every successful look publishes them.
+        this.lookLog.observed(result, at);
         if (!result.note && !result.topics.length) return;
         this.activity(init, live);
         const excerpt = (result.note ?? result.topics.map((t) => t.topic).join(", ")).slice(0, TRAIL_LIMITS.observationChars);
@@ -1969,7 +2062,9 @@ export class DesktopController {
       },
       status: (view) => {
         live.look = view;
-        if (mine()) this.changed();
+        if (!mine()) return;
+        this.lookLog.look(view);
+        this.changed();
       },
     });
   }
@@ -2093,6 +2188,7 @@ export class DesktopController {
       });
       const session = live?.session ? safely(() => init.trails.meta(live.session!.id)) : null;
       const current = live ? safely(() => init.delegations.current(live.zone.id)) : null;
+      const { goals, next } = safely(() => this.goalsState(init, live)) ?? { goals: [], next: null };
       this.o.post({
         type: "state",
         epoch: this.o.epoch,
@@ -2114,6 +2210,10 @@ export class DesktopController {
         contextUse: this.contextUseView(init, live),
         session: session ?? null,
         trail: live?.session ? safely(() => init.trails.current(live.session!.id)) : null,
+        goals,
+        next,
+        lookLog: this.lookLog.entries,
+        wizard: this.lookLog.wizard,
       });
     });
   }

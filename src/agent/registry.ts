@@ -3,7 +3,7 @@
 import type { AgentBackend, AgentChoice, BackendId, Role, Selector } from "./types.ts";
 
 /** Which backends users can see. ChatGPT flips at its release gate; Copilot after its probe. */
-export const RELEASED: Readonly<Record<BackendId, boolean>> = { claude: true, local: true, chatgpt: false, copilot: false };
+export const RELEASED: Readonly<Record<BackendId, boolean>> = { claude: true, chatgpt: false, copilot: false };
 
 export type Registry = {
   /** Throws for an unregistered or unreleased id. */

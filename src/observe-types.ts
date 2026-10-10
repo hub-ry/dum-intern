@@ -66,9 +66,20 @@ export type AmbientInput = {
 };
 /**
  * What one look saw, in one sentence, or null when nothing was worth noting, plus at most three
- * topic hints for the trail. The look never advises.
+ * topic hints for the trail. `confused` is set when the screen shows the user stuck (the same error
+ * again, undoing and redoing, searching the same thing): why, and the Wizard's one-sentence nudge.
  */
-export type AmbientResult = { note: string | null; topics: TopicHint[] };
+export type AmbientResult = { note: string | null; topics: TopicHint[]; confused: { why: string; hint: string } | null };
+
+/**
+ * One line of the Monitor's context log: what the look noticed, said, skipped or failed at, newest
+ * last. Memory only in the host (at most LOOK_LOG.entries); gone when the host exits.
+ */
+export type LookLogKind = "note" | "app" | "wizard" | "skipped" | "error" | "paused";
+export type LookLogEntry = { id: string; at: string; kind: LookLogKind; text: string };
+/** The Wizard jumping in because the look saw the user stuck: one sentence, at most once per LOOK_LOG.wizardGapMs. */
+export type WizardChime = { id: string; at: string; text: string };
+export const LOOK_LOG = { entries: 200, text: 280, wizardGapMs: 60_000 } as const;
 
 /** Why the look didn't call, or how its last call went. A subset of the diagnostic codes. */
 export const LOOK_REASONS = [
@@ -134,3 +145,15 @@ const hostLook = {
 };
 export const HostLookStatusSchema = z.object(hostLook).strict() satisfies z.ZodType<HostLookStatus>;
 export const LookStatusViewSchema = z.object({ ...hostLook, paused: z.boolean(), permission: ScreenPermissionSchema }).strict() satisfies z.ZodType<LookStatusView>;
+
+export const LookLogEntrySchema = z.object({
+  id: TokenSchema,
+  at: IsoSchema,
+  kind: z.enum(["note", "app", "wizard", "skipped", "error", "paused"]),
+  text: z.string().min(1).max(LOOK_LOG.text).refine((s) => !/[\u0000-\u001f\u007f]/.test(s), "has control characters"),
+}).strict() satisfies z.ZodType<LookLogEntry>;
+export const WizardChimeSchema = z.object({
+  id: TokenSchema,
+  at: IsoSchema,
+  text: z.string().min(1).max(LOOK_LOG.text).refine((s) => !/[\u0000-\u001f\u007f]/.test(s), "has control characters"),
+}).strict() satisfies z.ZodType<WizardChime>;

@@ -19,7 +19,7 @@ const picture: SharedImage = { mimeType: "image/png", data: PNG_BYTES.toString("
 function helper(reply: (input: UserTurn) => AsyncGenerator<AgentEvent>, images = true) {
   const inputs: UserTurn[] = [];
   const backend: AgentBackend = {
-    id: "local",
+    id: "claude",
     label: "Fake",
     models: async () => [],
     capabilities: async (selector) => ({
@@ -29,8 +29,8 @@ function helper(reply: (input: UserTurn) => AsyncGenerator<AgentEvent>, images =
       return { turn: (input) => (inputs.push(input), reply(input)), interrupt: async () => {}, close: () => {} };
     },
   };
-  const agent = createRegistry([backend], new Set(["local"]));
-  agent.set({ backend: "local", login: "none", intern: { backend: "local", model: "m", effort: null }, helper: { backend: "local", model: "eyes", effort: null }, look: { backend: "local", model: "live", effort: null } });
+  const agent = createRegistry([backend], new Set(["claude"]));
+  agent.set({ backend: "claude", login: "anthropic-key", intern: { backend: "claude", model: "m", effort: null }, helper: { backend: "claude", model: "eyes", effort: null }, look: { backend: "claude", model: "live", effort: null } });
   return { agent, inputs };
 }
 

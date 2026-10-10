@@ -1,6 +1,8 @@
 // Dum's desktop app (docs/circle-design.md §1-§3, §7). One persistent draggable circle with Dum's face
-// opens one working window (Zones → Current context → Chat); a noninteractive bubble at the cursor
-// shows voice status and replies. No Tray, command bar, separate panel or Dock icon. Main owns every
+// unfolds into a column of circles (Dum, up to three goals, the skill tree); each opens its own panel
+// in the one working window, placed at the circle's corner. A click-through bubble shows voice status
+// and one-sentence replies at the cursor, and, as a thought cloud beside the circle, the active goal's
+// step and the Wizard jumping in. No Tray, command bar or Dock icon. Main owns every
 // operating-system capability, settings, the circle's placement and credentials; the sandboxed pages
 // only send the finite requests in protocol.ts, which ipc.ts validates and routes. Main makes no
 // model call: the supervised utility host does all model work.
@@ -31,7 +33,6 @@ import * as context from "../context.ts";
 import { home } from "../skills.ts";
 import { LOOK } from "../observe-types.ts";
 import { bundledExecutable, claudeSetup } from "../agent/claude-setup.ts";
-import { localSetup } from "../agent/local-setup.ts";
 import { RELEASED } from "../agent/registry.ts";
 import { accessToken, chatgptSetup } from "../agent/siwc.ts";
 import { AgentSetup, credentialSource } from "./agent-setup.ts";
@@ -45,8 +46,9 @@ import { Router, ownedPage, type Native } from "./ipc.ts";
 import { Observer, type Shot } from "./observer.ts";
 import { DesktopSettings, withPlacement } from "./settings.ts";
 import {
-  BUBBLE_MAX, BUBBLE_TTL, Bubble, CIRCLE, CircleGesture, FocusReturn, WINDOW_SIZE,
-  clampCircle, defaultCircle, fromPlacement, insideDisk, nearestDisplay, placeBubble, placeWindow, reclamp, toPlacement,
+  BUBBLE_MAX, BUBBLE_TTL, Bubble, CIRCLE, COLUMN, CircleGesture, FocusReturn, PANEL_SIZE,
+  clampCircle, columnRect, defaultCircle, diskCenter, fromPlacement, insideColumn, insideDisk, nearestDisplay, placeBubble, placePanel,
+  placeThought, reclamp, slotAt, toPlacement,
   type DisplayArea, type Rect,
 } from "./surfaces.ts";
 import type { BackendId } from "../agent/types.ts";
@@ -131,7 +133,7 @@ async function start(): Promise<void> {
   const credentials = new Credentials(join(userData, "credentials.json"), safeStorageCipher(safeStorage));
   const claudeExecutable = bundledExecutable();
   const released = new Set((Object.keys(RELEASED) as BackendId[]).filter((id) => RELEASED[id]));
-  const agent = new AgentSetup([claudeSetup({ executable: claudeExecutable, credentials }), chatgptSetup({ credentials }), localSetup()], released);
+  const agent = new AgentSetup([claudeSetup({ executable: claudeExecutable, credentials }), chatgptSetup({ credentials })], released);
 
   // -- windows ----------------------------------------------------------------
 
@@ -157,10 +159,11 @@ async function start(): Promise<void> {
     ...(MAC ? { type: "panel" } : {}),
     webPreferences: preferences(CIRCLE_PRELOAD),
   });
-  circleWindow.setAlwaysOnTop(true, "floating");
+  // Above the working window, whose corner it sits on.
+  circleWindow.setAlwaysOnTop(true, "pop-up-menu");
   circleWindow.setVisibleOnAllWorkspaces(true, ALL_SPACES);
   const work = new BrowserWindow({
-    ...WINDOW_SIZE,
+    ...PANEL_SIZE.dum,
     title: "Dum",
     show: false,
     frame: false,
@@ -217,17 +220,60 @@ async function start(): Promise<void> {
   let screens = readDisplays();
   /** Where the circle sits: its display and normalized place there. Null until a display exists. */
   let at: { displayId: string; u: number; v: number } | null = null;
+  /** The collapsed circle's rect; the window grows from it into the column. Null until a display exists. */
+  let circleRect: Rect | null = null;
+  /** The column is out; main decides, the page only animates. */
+  let expanded = false;
+  /** When the pointer was last over the column, for its idle fold. */
+  let overAt = 0;
+  /** The fold animation in flight: the window shrinks back to the circle when it ends. */
+  let foldTimer: NodeJS.Timeout | null = null;
+  /** The step or Wizard cloud showing beside the circle; null while the bubble is at the cursor or hidden. */
+  let beside: Extract<BubbleView, { kind: "step" | "wizard" }> | null = null;
   /** A live keyboard Move circle: where it started, to restore on Esc. */
   let positioning: { bounds: Rect; at: { displayId: string; u: number; v: number } } | null = null;
   let asleep = false;
   let locked = false;
 
   const currentDisplay = (): DisplayArea | null => screens.find((d) => d.id === at?.displayId) ?? null;
+  /** How many circles the column holds now. */
+  const slotCount = () => router?.circle().slots.length ?? 1;
+  /** The circle's window as the column or the one circle, moved only when it changed; a cloud beside it follows. */
+  const fitCircle = (): void => {
+    const display = currentDisplay();
+    if (!circleRect || !display) return;
+    const next = expanded ? columnRect(circleRect, display.workArea, slotCount()) : foldTimer ? null : circleRect;
+    if (next && !sameRect(circleWindow.getBounds(), next)) circleWindow.setBounds(next);
+    if (placeBeside() && beside) bubbleWindow.webContents.send("dum:bubble", beside);
+  };
   /** Clamp onto `display`, remember the normalized place in memory, and move only when it changed. */
   const putCircle = (rect: Rect, display: DisplayArea): void => {
     const next = clampCircle(rect, display.workArea);
     at = { displayId: display.id, ...toPlacement(next, display.workArea) };
-    if (!sameRect(circleWindow.getBounds(), next)) circleWindow.setBounds(next);
+    circleRect = next;
+    fitCircle();
+  };
+  /** Unfold the column from the circle. */
+  const expand = (): void => {
+    if (expanded || !circleRect) return;
+    clearTimeout(foldTimer ?? undefined);
+    foldTimer = null;
+    expanded = true;
+    overAt = Date.now();
+    fitCircle();
+    broadcast();
+  };
+  /** Fold the column into one circle; the window shrinks after the page's animation unless `now`. */
+  const collapse = (now = false): void => {
+    if (!expanded && !foldTimer) return;
+    expanded = false;
+    clearTimeout(foldTimer ?? undefined);
+    foldTimer = now ? null : setTimeout(() => {
+      foldTimer = null;
+      fitCircle();
+    }, COLUMN.foldMs);
+    fitCircle();
+    broadcast();
   };
   /** The display's cached user placement, else the default rule applied to that display. */
   const placementOn = (display: DisplayArea): Rect => {
@@ -269,8 +315,8 @@ async function start(): Promise<void> {
   // -- the round hit region and gestures ----------------------------------------
 
   const gesture = new CircleGesture(Date.now);
-  /** Whether the working window had focus when the press began: a click then hides it. */
-  let focusedAtPress = false;
+  /** Whether the press began on the column rather than the one circle: a click there picks, a drag moves nothing. */
+  let pressOnColumn = false;
   let ignoring: boolean | null = null;
   const setIgnore = (ignore: boolean) => {
     if (ignore === ignoring) return;
@@ -278,8 +324,9 @@ async function start(): Promise<void> {
     circleWindow.setIgnoreMouseEvents(ignore);
   };
   /**
-   * Every frame while the circle shows: pointer outside the disk passes through to what's under it;
-   * during a captured press the circle takes everything and follows a proven drag.
+   * Every frame while the circle shows: pointer outside the disk (or the column's background) passes
+   * through to what's under it; during a captured press the circle takes everything and follows a
+   * proven drag. The column folds after COLUMN.idleMs without the pointer over it.
    */
   const frame = () => {
     const pointer = screen.getCursorScreenPoint();
@@ -287,12 +334,21 @@ async function start(): Promise<void> {
     if (id) {
       setIgnore(false);
       if (gesture.overdue(id)) return circleCancel(id);
+      if (pressOnColumn) return;
       const moved = gesture.move(id, pointer);
       const display = moved && nearestDisplay(pointer, screens);
       if (moved && display) putCircle(moved, display);
       return;
     }
-    setIgnore(!insideDisk(pointer, circleWindow.getBounds()));
+    if (expanded) {
+      const over = insideColumn(pointer, circleWindow.getBounds());
+      const now = Date.now();
+      if (over) overAt = now;
+      else if (now - overAt >= COLUMN.idleMs) collapse();
+      setIgnore(!over);
+      return;
+    }
+    setIgnore(!circleRect || !insideDisk(pointer, circleRect));
   };
   let frames: NodeJS.Timeout | null = null;
   const showCircle = () => {
@@ -306,12 +362,14 @@ async function start(): Promise<void> {
     frames = null;
     const id = gesture.active;
     if (id) circleCancel(id);
+    collapse(true);
     circleWindow.hide();
   };
 
   function circleCancel(id: string): void {
     const start = gesture.cancel(id);
-    const display = start && nearestDisplay({ x: start.x + start.width / 2, y: start.y + start.height / 2 }, screens);
+    if (pressOnColumn) return;
+    const display = start && nearestDisplay(diskCenter(start), screens);
     if (start && display) putCircle(start, display);
   }
 
@@ -329,12 +387,14 @@ async function start(): Promise<void> {
       holds--;
     }
   };
-  /** Beside the circle, on the circle's display; never following the cursor. */
+  /** The current panel at the circle's corner, at that panel's size, on the circle's display; never following the cursor. */
   const anchor = (force = false) => {
     if (!force && !work.isVisible()) return;
     const display = currentDisplay() ?? nearestDisplay(screen.getCursorScreenPoint(), screens);
     if (!display) return;
-    const next = placeWindow(circleWindow.getBounds(), display.workArea, WINDOW_SIZE);
+    const area = display.workArea;
+    const disk = circleRect ? diskCenter(circleRect) : { x: area.x + area.width / 2, y: area.y + area.height / 2 };
+    const next = placePanel(disk, area, PANEL_SIZE[router?.panel().kind ?? "dum"]);
     if (!sameRect(work.getBounds(), next)) work.setBounds(next);
   };
 
@@ -349,9 +409,12 @@ async function start(): Promise<void> {
     // Capture the external app before Dum activates; with a Dum window already in front there is none.
     if (BrowserWindow.getFocusedWindow() === null) await focusReturn.summon();
     else focusReturn.forget();
+    // The window opening folds the column; the panel takes the circle's corner.
+    collapse();
     if (!work.isVisible()) anchor(true);
     work.show();
     work.focus();
+    if (circleWindow.isVisible()) circleWindow.moveTop();
     broadcast();
   };
   /** Hide; `restore` gives focus back to the captured app, once. Never `app.hide()`, which would hide the circle too. */
@@ -364,11 +427,19 @@ async function start(): Promise<void> {
   };
   const showWindow = () => serial(show);
   const dismissWindow = () => serial(() => hide(true));
-  /** Click, accessibility press or hotkey: focused hides, anything else shows and focuses. */
+  /** The hotkey: focused hides, anything else shows the last panel and focuses. */
   const toggle = (focused: boolean) => serial(() => (focused && work.isVisible() ? hide(true) : show()));
   const summon = () => void toggle(work.isVisible() && work.isFocused());
+  /** A click or accessibility press on the one circle: the column folds, an open panel hides, else the column unfolds. */
+  const clickCircle = () => serial(async () => {
+    if (expanded) collapse();
+    else if (work.isVisible()) await hide(true);
+    else expand();
+  });
 
   work.on("blur", () => {
+    // The step and the Wizard can come back once they've looked away.
+    broadcast();
     // Settle first: a blur from the circle, a native picker or a Dum window isn't the person leaving.
     setImmediate(() => {
       if (quitting || holds > 0 || gesture.active || !work.isVisible() || work.isFocused() || BrowserWindow.getFocusedWindow() !== null) return;
@@ -377,16 +448,32 @@ async function start(): Promise<void> {
     });
   });
 
+  /** Put the cloud beside the circle with its puffs toward it; whether the puffs changed side. */
+  function placeBeside(): boolean {
+    const display = currentDisplay();
+    if (!beside || !circleRect || !display) return false;
+    const { rect, toward } = placeThought(circleRect, display.workArea);
+    if (!sameRect(bubbleWindow.getBounds(), rect)) bubbleWindow.setBounds(rect);
+    if (beside.toward === toward) return false;
+    beside = { ...beside, toward };
+    return true;
+  }
   const bubble = new Bubble({
     publish(view: BubbleView | null, fresh: boolean) {
       if (bubbleWindow.isDestroyed()) return;
+      const wasBeside = beside !== null;
+      beside = view?.kind === "step" || view?.kind === "wizard" ? view : null;
       if (!view) {
         bubbleWindow.webContents.send("dum:bubble", { kind: "voice", lines: [], expiresAt: 0 } satisfies BubbleView);
         bubbleWindow.hide();
         return;
       }
-      // The anchor is sampled once per interaction; the bubble never follows the mouse, and steps off the circle.
-      if (fresh || !bubbleWindow.isVisible()) {
+      if (beside) {
+        placeBeside();
+        view = beside;
+      }
+      // A voice or reply anchor is sampled once per interaction; it never follows the mouse, and steps off the circle.
+      else if (fresh || wasBeside || !bubbleWindow.isVisible()) {
         const cursor = screen.getCursorScreenPoint();
         const circle = circleWindow.isVisible() ? circleWindow.getBounds() : null;
         bubbleWindow.setBounds(placeBubble(cursor, screen.getDisplayNearestPoint(cursor).workArea, BUBBLE_MAX, circle));
@@ -407,15 +494,16 @@ async function start(): Promise<void> {
       hideCircle();
       return;
     }
-    // A drag in progress is cancelled back to where it started.
+    // A drag in progress is cancelled back to where it started; the column folds.
     const id = gesture.active;
-    const started = id ? gesture.cancel(id) : null;
+    const cancelled = id ? gesture.cancel(id) : null;
+    const started = pressOnColumn ? null : cancelled;
+    collapse(true);
     if (positioning?.at.displayId === String(old.id)) positioning = null;
-    if (started || at?.displayId === String(old.id)) {
+    const bounds = started ?? circleRect;
+    if (bounds && (started || at?.displayId === String(old.id))) {
       // Into the remaining work area nearest the old center; the removed display's saved place and the last choice stay.
-      const bounds = started ?? circleWindow.getBounds();
-      const display = nearestDisplay({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }, screens)!;
-      putCircle(bounds, display);
+      putCircle(bounds, nearestDisplay(diskCenter(bounds), screens)!);
     }
     if (bubbleWindow.isVisible()) bubbleWindow.setBounds(reclamp(bubbleWindow.getBounds(), screens.map((d) => d.workArea)));
     anchor();
@@ -425,7 +513,10 @@ async function start(): Promise<void> {
     router?.diagnose([mainEvent("native", "ok", "display-change")]);
     const display = screens.find((d) => d.id === String(changed.id));
     // Same normalized place on the resized work area, then clamped; a drag in progress keeps following the pointer.
-    if (display && at?.displayId === display.id && !gesture.active) putCircle(fromPlacement(at, display.workArea), display);
+    if (display && at?.displayId === display.id && !gesture.active) {
+      collapse(true);
+      putCircle(fromPlacement(at, display.workArea), display);
+    }
     if (bubbleWindow.isVisible()) bubbleWindow.setBounds(reclamp(bubbleWindow.getBounds(), screens.map((d) => d.workArea)));
     anchor();
   });
@@ -458,6 +549,8 @@ async function start(): Promise<void> {
       const json = JSON.stringify(view);
       if (json !== circleSent) {
         circleSent = json;
+        // A goal added or gone while the column is out resizes it.
+        fitCircle();
         circleWindow.webContents.send("dum:circle", view);
       }
     });
@@ -628,7 +721,7 @@ async function start(): Promise<void> {
   const native: Native = {
     choosePath: (kind, purpose) => held(async () => {
       const options = {
-        title: purpose === "follow" ? "Choose a folder for Dum to follow in this zone" : kind === "folder" ? "Share a folder with this request" : "Share a file with this request",
+        title: purpose === "follow" ? "Choose a folder for Dum to follow for this goal" : kind === "folder" ? "Share a folder with this request" : "Share a file with this request",
         buttonLabel: purpose === "follow" ? "Follow" : "Share",
         properties: [kind === "folder" ? "openDirectory" : "openFile"] as ("openDirectory" | "openFile")[],
       };
@@ -689,37 +782,49 @@ async function start(): Promise<void> {
     dismissWindow,
     windowVisible: () => work.isVisible(),
     windowFocused: () => work.isFocused(),
-    openView(view) {
-      void showWindow();
-      void work.webContents.loadFile(INDEX, { query: { view: "window" }, hash: view });
-    },
+    placePanel: () => anchor(),
+    circleExpanded: () => expanded,
+    circleCollapse: () => collapse(),
     circleBegin() {
-      focusedAtPress = work.isVisible() && work.isFocused();
       setIgnore(false);
-      return gesture.begin(screen.getCursorScreenPoint(), circleWindow.getBounds());
+      const pointer = screen.getCursorScreenPoint();
+      pressOnColumn = expanded;
+      if (!expanded) return gesture.begin(pointer, circleRect ?? circleWindow.getBounds());
+      overAt = Date.now();
+      const column = circleWindow.getBounds();
+      return gesture.begin(pointer, column, insideColumn(pointer, column));
     },
     async circleEnd(gestureId) {
       const pointer = screen.getCursorScreenPoint();
+      if (pressOnColumn) {
+        // A click on a disk picks that circle, resolved from main's own sample; anything else does nothing.
+        if (gesture.end(gestureId, pointer) !== "toggle" || !expanded) return;
+        const slots = router!.circle().slots;
+        const index = slotAt(pointer, circleWindow.getBounds(), slots.length);
+        if (index !== null) await router!.pick(slots[index]!.ref);
+        return;
+      }
       const moved = gesture.move(gestureId, pointer);
       const display = moved && nearestDisplay(pointer, screens);
       if (moved && display) putCircle(moved, display);
       const ended = gesture.end(gestureId, pointer);
       if (ended === "drag") {
-        // Committed once, on a successful drag end; the window re-anchors beside it.
+        // Committed once, on a successful drag end; the panel re-anchors at its corner.
         positioning = null;
         remember();
         anchor();
         broadcast();
       } else if (ended === "toggle") {
-        await toggle(focusedAtPress);
+        await clickCircle();
       }
     },
     circleCancel,
-    circleToggle: () => toggle(work.isVisible() && work.isFocused()),
+    circleToggle: clickCircle,
     circlePosition(action) {
       if (action === "begin") {
-        if (!at) throw new Error("There's no display to put the circle on.");
-        positioning = { bounds: circleWindow.getBounds(), at: { ...at } };
+        if (!at || !circleRect) throw new Error("There's no display to put the circle on.");
+        collapse(true);
+        positioning = { bounds: circleRect, at: { ...at } };
       } else if (positioning && action === "commit") {
         positioning = null;
         remember();
@@ -734,18 +839,18 @@ async function start(): Promise<void> {
     },
     circleNudge(dx, dy) {
       const display = currentDisplay();
-      if (!positioning || !display) throw new Error("Start Move circle first.");
-      const bounds = circleWindow.getBounds();
-      putCircle({ ...bounds, x: bounds.x + dx, y: bounds.y + dy }, display);
+      if (!positioning || !display || !circleRect) throw new Error("Start Move circle first.");
+      putCircle({ ...circleRect, x: circleRect.x + dx, y: circleRect.y + dy }, display);
       return displaysView();
     },
     circleDisplay(displayId) {
       const display = screens.find((d) => d.id === displayId);
       if (!display) throw new Error("That display isn't connected any more.");
       // That display's cached place, the user's choice from now on.
+      collapse(true);
       putCircle(placementOn(display), display);
       remember();
-      if (positioning && at) positioning = { bounds: circleWindow.getBounds(), at: { ...at } };
+      if (positioning && at && circleRect) positioning = { bounds: circleRect, at: { ...at } };
       anchor();
       return displaysView();
     },
@@ -808,12 +913,13 @@ async function start(): Promise<void> {
 
   const away = () => {
     router?.stopVoice();
-    bubble.dismiss();
+    bubble.suspend(true);
     hideCircle();
     router?.diagnose([mainEvent("native", "ok", "sleep")]);
   };
   // Back without activation, once neither sleep nor the lock screen is in the way.
   const back = () => {
+    if (!asleep && !locked) bubble.suspend(false);
     showCircle();
     router?.diagnose([mainEvent("native", "ok", "unlock")]);
   };
@@ -855,7 +961,8 @@ async function start(): Promise<void> {
       observer.close();
       captures.discard();
       agent.cancel();
-      bubble.dismiss();
+      clearTimeout(foldTimer ?? undefined);
+      bubble.suspend(true);
       globalShortcut.unregisterAll();
       const timeout = sleep(7_000, undefined, { ref: false });
       const shutdown = Promise.allSettled([host.close(), dictation.close(), focus.close()]).then(() => undefined);

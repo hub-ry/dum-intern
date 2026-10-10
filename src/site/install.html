@@ -22,7 +22,7 @@
      the order below. Test builds also come out of the
      <a href="https://github.com/hub-ry/dum-intern/actions/workflows/desktop-macos.yml">desktop macOS workflow</a>
      on pushes to <code>main</code>; only signed-in GitHub accounts can download them, and the older
-     test prerelease on the releases page predates zones and doesn't match these docs.</p>
+     test prerelease on the releases page predates goals and doesn't match these docs.</p>
 
   <h2>1. Prerequisites</h2>
   <ul>
@@ -36,8 +36,8 @@
         <code>rust</code> has no rustup and the build refuses it.</li>
     <li>Network during the build (it fetches whisper.cpp and Swift packages) and once more when you
         download a speech model.</li>
-    <li>A backend to power Dum: your own Anthropic API key for Claude, or models running on your Mac in
-        Ollama or LM Studio. See <a href="/docs#backends">who powers Dum</a>.</li>
+    <li>A backend to power Dum: your own Anthropic API key for Claude. See
+        <a href="/docs#backends">who powers Dum</a>.</li>
   </ul>
   <p class="note">The app carries its own Claude Code. You don't install anything else to use
      Claude.</p>
@@ -58,8 +58,8 @@ npm install &amp;&amp; npm run desktop:mac</code></pre>
 
   <h2>4. First launch</h2>
   <ol>
-    <li>Dum's window opens by itself and asks <em>What are you trying to learn?</em> The answer
-        becomes your first zone. Nothing is sent to a model for this.</li>
+    <li>Dum's panel opens by itself and asks <em>What do you want to work toward?</em> The answer
+        becomes your first goal. Nothing is sent to a model for this.</li>
     <li>macOS asks for Screen Recording permission, for Dum's look. If you say no, Dum looks at app
         switches and saved files only.</li>
     <li>Click <em>Who powers Dum?</em> and pick a backend and three models: Dum's model, the helper
@@ -67,8 +67,9 @@ npm install &amp;&amp; npm run desktop:mac</code></pre>
         workspace: a key created outside one fails with <em>must include the anthropic-workspace-id
         header</em>. Create it at console.anthropic.com inside a Workspace, or use a key that already
         belongs to one.</li>
-    <li>Dum and the Wizard then start goal alignment for your first zone. From now on, click the
-        circle, or press <code>⌘⇧D</code> from anywhere, to open or hide Dum's window.</li>
+    <li>Dum and the Wizard then start goal alignment for your first goal. From now on, click the
+        circle to unfold your goals and open a panel, or press <code>⌘⇧D</code> from anywhere to
+        open or hide Dum's panel.</li>
   </ol>
 
   <h2>5. Verify for pictures, if you pick Haiku</h2>
@@ -97,7 +98,7 @@ npm install &amp;&amp; npm run desktop:mac</code></pre>
         becomes selected when the download finishes. Close the window.</li>
     <li>Check the voice line in Settings reads <em>Hold the voice shortcut and talk…</em>. Any other
         line names the step still missing: microphone, model or shortcut.</li>
-    <li>Open a zone with an empty draft. Hold <code>Control+Option+Space</code>, speak, release. The
+    <li>Open a goal with an empty draft. Hold <code>Control+Option+Space</code>, speak, release. The
         bubble shows <em>Listening…</em>, then <em>Transcribing…</em>, then your text. A draft that
         isn't empty refuses the press; clear it first.</li>
     <li>The transcript is in your draft only. Send it with <code>⌘⇧Return</code>, or open Dum and

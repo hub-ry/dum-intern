@@ -1,34 +1,22 @@
-// Records and Skills, inside the Chat region. Records: Memory, earlier History, Context (zone notes,
-// inherited context, followed folders), Evidence, Boundary, Suggested projects and Changes. Skills: your
-// global tree, tier progress and the Web tree link. The host writes record text on request; nothing here
-// grants anything.
+// Records over a goal's panel: Memory, Suggested projects (with handing a project in) and Changes.
+// Skills: your global tree, tier progress and the Web tree link. The host writes record text on
+// request; nothing here grants anything.
 
 import type { Snapshot, TreeSync, ViewName } from "../protocol.ts";
 import type { View as TreeData } from "../../web/view.ts";
-import { ZONE_LIMITS } from "../../zone-types.ts";
-import { h, icon, iconButton, plain, type Client, type IconName } from "./dom.ts";
+import { h, icon, iconButton, plain, type Client } from "./dom.ts";
 import { ChangesPane } from "./change-view.ts";
 import { SkillTree } from "./tree.ts";
 
-export type RecordTab = Extract<ViewName, "memory" | "history" | "context" | "evidence" | "boundary" | "projects" | "changes">;
+export type RecordTab = Extract<ViewName, "memory" | "projects" | "changes">;
 
-export const RECORD_TABS: Record<RecordTab, { label: string; icon: IconName }> = {
-  memory: { label: "Memory", icon: "memory" },
-  history: { label: "History", icon: "history" },
-  context: { label: "Context", icon: "context" },
-  evidence: { label: "Evidence", icon: "evidence" },
-  boundary: { label: "Boundary", icon: "boundary" },
-  projects: { label: "Suggested projects", icon: "tools" },
-  changes: { label: "Changes", icon: "undo" },
-};
-/** Tabs whose text the host writes into the stage when asked. */
-const TEXT_TABS: RecordTab[] = ["memory", "history", "context", "evidence", "boundary", "projects"];
+export const RECORD_TITLES: Record<RecordTab, string> = { memory: "Memory", projects: "Suggested projects", changes: "Changes" };
 
 /** `:projects`, `:submit` and `:remember` run through the existing command path; their answer lands in Chat. */
 async function command(client: Client, name: "projects" | "submit" | "remember", argument: string) {
   const binding = client.requestBinding();
   if (!binding) {
-    client.showError("Enter a zone first.");
+    client.showError("Open a goal first.");
     return null;
   }
   return client.call({ type: "command", name, argument, binding });
@@ -36,8 +24,8 @@ async function command(client: Client, name: "projects" | "submit" | "remember",
 
 const textInput = (label: string, placeholder: string) => h("input", { class: "input", type: "text", spellcheck: "false", placeholder, "aria-label": label });
 
-function form(label: string, input: HTMLInputElement, submit: string, run: (value: string) => Promise<unknown>, hint = ""): HTMLFormElement {
-  const f = h("form", { class: "tool" }, h("label", { class: "field" }, h("span", {}, label), input, hint ? h("span", { class: "hint" }, hint) : null), h("button", { type: "submit", class: "btn" }, submit));
+function form(label: string, input: HTMLInputElement, submit: string, run: (value: string) => Promise<unknown>): HTMLFormElement {
+  const f = h("form", { class: "tool" }, h("label", { class: "field" }, h("span", {}, label), input), h("button", { type: "submit", class: "btn small" }, submit));
   f.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!input.value.trim()) return input.focus();
@@ -51,93 +39,65 @@ export class RecordsView {
   readonly el = h("div", { class: "records" });
   private tab: RecordTab = "memory";
   private awaiting = false;
-  private tabs = new Map<RecordTab, HTMLButtonElement>();
-  private body = h("div", { class: "records-body", role: "tabpanel", id: "records-panel" });
   private infoText = h("pre", { class: "info-text" });
   private changes: ChangesPane;
+  private shares = h("ul", { class: "shares", "aria-label": "Shared for the hand-in" });
   private extras: Partial<Record<RecordTab, HTMLElement>>;
-  private contextText = h("textarea", { class: "input", rows: "5", "aria-label": "Notes for this zone" });
-  private inherited = h("div", { class: "inherited" });
-  private follows = h("ul", { class: "follows" });
-  private followAdd = h("button", { type: "button", class: "btn ghost", onclick: () => void this.client.call({ type: "follow-add" }) }, icon("plus"), "Follow a folder…");
 
   /** `answered` runs after a command whose answer appears in Chat. */
   constructor(private client: Client, private answered: () => void) {
     this.changes = new ChangesPane(client);
-    const nav = h("div", { class: "records-tabs", role: "tablist", "aria-label": "Records" });
-    for (const [name, meta] of Object.entries(RECORD_TABS) as [RecordTab, (typeof RECORD_TABS)[RecordTab]][]) {
-      const tab = h("button", { type: "button", role: "tab", class: "pane-tab", "aria-controls": "records-panel", tabindex: "-1", onclick: () => void this.show(name) }, icon(meta.icon), h("span", {}, meta.label));
-      this.tabs.set(name, tab);
-      nav.append(tab);
-    }
-    nav.addEventListener("keydown", (e) => {
-      const list = [...this.tabs.values()];
-      const i = list.findIndex((t) => t === document.activeElement);
-      const to = e.key === "ArrowRight" ? list[(i + 1) % list.length] : e.key === "ArrowLeft" ? list[(i - 1 + list.length) % list.length] : e.key === "Home" ? list[0] : e.key === "End" ? list[list.length - 1] : undefined;
-      if (!to) return;
-      e.preventDefault();
-      to.focus();
-      to.click();
-    });
-    this.extras = { memory: this.memoryExtras(), context: this.contextExtras(), projects: this.projectsExtras() };
-    this.el.append(nav, this.body);
+    this.extras = { memory: this.memoryExtras(), projects: this.projectsExtras() };
   }
 
   get title(): string {
-    return RECORD_TABS[this.tab].label;
+    return RECORD_TITLES[this.tab];
   }
 
-  /** Opens one record; the host fills text records into the stage. */
+  /** Opens one record; the host fills Memory and Suggested projects into the stage. */
   async show(tab: RecordTab) {
     this.tab = tab;
-    this.awaiting = TEXT_TABS.includes(tab);
+    this.awaiting = tab !== "changes";
     if (this.client.snap) this.update(this.client.snap);
-    this.tabs.get(tab)?.focus();
     await this.client.call({ type: "view", view: tab });
     this.awaiting = false;
     if (this.client.snap) this.update(this.client.snap);
   }
 
   update(s: Snapshot) {
-    for (const [name, tab] of this.tabs) {
-      tab.setAttribute("aria-selected", String(name === this.tab));
-      tab.tabIndex = name === this.tab ? 0 : -1;
-    }
     const kids: Node[] = [];
-    if (!s.activeZone) kids.push(h("p", { class: "muted" }, "Enter a zone to see its records."));
+    if (!s.activeZone) kids.push(h("p", { class: "muted" }, "Open a goal to see its records."));
     else if (this.tab === "changes") {
       this.changes.update(s);
       kids.push(this.changes.el);
     } else {
       const stage = s.state?.stage;
       this.infoText.textContent = this.awaiting ? "loading…" : stage?.kind === "info" ? plain(stage.body) || "nothing here yet." : "nothing to show.";
-      if (this.tab === "history") kids.push(h("p", { class: "hint" }, "Earlier history (before trails): the zone's bounded conversation log. Sessions and their trails are in Full story."));
       kids.push(this.infoText);
       const extra = this.extras[this.tab];
       if (extra) kids.push(extra);
-      if (this.tab === "context") this.renderContext(s);
+      if (this.tab === "projects") this.drawShares(s);
     }
-    if (this.body.childNodes.length !== kids.length || kids.some((k, i) => this.body.childNodes[i] !== k)) this.body.replaceChildren(...kids);
+    if (this.el.childNodes.length !== kids.length || kids.some((k, i) => this.el.childNodes[i] !== k)) this.el.replaceChildren(...kids);
   }
 
-  private renderContext(s: Snapshot) {
-    const zone = s.activeZone;
-    if (!zone) return;
-    const own = zone.notes.find((n) => n.id === zone.id);
-    if (document.activeElement !== this.contextText) this.contextText.value = own?.text ?? "";
-    const others = zone.notes.filter((n) => n.id !== zone.id && n.text.trim());
-    this.inherited.replaceChildren(
-      h("h4", {}, "Inherited from zones above"),
-      ...(zone.ancestorGoals.length ? zone.ancestorGoals.map((g) => h("p", {}, h("span", { class: "muted" }, "Goal above: "), g.goal)) : []),
-      ...(others.length ? others.map((n) => h("details", {}, h("summary", {}, icon("chevron"), `${n.name}'s notes`), h("p", { class: "excerpt" }, n.text))) : [h("p", { class: "muted" }, "No notes from zones above.")]),
-      h("p", { class: "hint" }, "Personal background is separate: Settings → Use personal context. Inspect it from Current context → Inspect."),
+  private drawShares(s: Snapshot) {
+    const shared = s.shares.filter((g) => g.scope === "request");
+    this.shares.replaceChildren(
+      ...shared.map((g) =>
+        h(
+          "li",
+          { class: "share" },
+          icon(g.kind === "folder" ? "folder" : "file"),
+          h("span", {}, g.label),
+          iconButton("close", `Stop sharing ${g.label}`, () => {
+            const binding = this.client.requestBinding();
+            if (binding) void this.client.call({ type: "share-remove", shareId: g.id, binding });
+          }, "", "icon-btn tiny"),
+        ),
+      ),
     );
-    this.follows.replaceChildren(
-      ...(s.follows.length
-        ? s.follows.map((f) => h("li", { class: "follow" }, icon("folder"), h("span", {}, f.label), h("span", { class: "muted small" }, `${f.files} file${f.files === 1 ? "" : "s"}`), iconButton("close", `Stop following ${f.label}`, () => void this.client.call({ type: "follow-remove", followId: f.id }), "", "icon-btn tiny")))
-        : [h("li", { class: "muted" }, "None in this zone.")]),
-    );
-    this.followAdd.disabled = !s.activeZone;
+    this.shares.hidden = !shared.length;
   }
 
   private memoryExtras(): HTMLElement {
@@ -147,34 +107,8 @@ export class RecordsView {
       form("Remember a note", textInput("Note", "e.g. I prefer small functions"), "Remember", async (note) => {
         const r = await command(this.client, "remember", note);
         if (r?.ok) void this.client.call({ type: "view", view: "memory" });
-      }, "Notes stay in this zone and come back next time. They never count as evidence."),
-      h("button", { type: "button", class: "link-btn", onclick: () => void this.client.call({ type: "open-record", record: "memory" }) }, icon("external"), h("span", {}, "open the memory file to edit it, then Reload context")),
-    );
-  }
-
-  private contextExtras(): HTMLElement {
-    const save = h("form", { class: "tool" }, h("h3", {}, "Notes for this zone"), this.contextText, h("p", { class: "hint" }, "Background Dum reads in this zone and the zones inside it. It's context, never permission. Saving it changes the context, so a ready handoff needs a refresh."), h("button", { type: "submit", class: "btn" }, "Save notes"));
-    save.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const s = this.client.snap;
-      if (!s?.activeZone) return;
-      if (new TextEncoder().encode(this.contextText.value).length > ZONE_LIMITS.contextBytes) return this.client.showError("Those notes are too long.");
-      const r = await this.client.call({ type: "zone-context", id: s.activeZone.id, text: this.contextText.value, expectedRevision: s.zones.revision });
-      if (r.ok) void this.client.call({ type: "view", view: "context" });
-    });
-    return h(
-      "div",
-      { class: "pane-extras" },
-      save,
-      this.inherited,
-      h(
-        "div",
-        { class: "tool", role: "group", "aria-labelledby": "follow-title" },
-        h("h3", { id: "follow-title" }, "Followed folders"),
-        h("p", { class: "hint" }, "Folders in this zone whose saved files Dum may read. Dum notices when you save code there. Stopping revokes it."),
-        this.follows,
-        this.followAdd,
-      ),
+      }),
+      h("button", { type: "button", class: "link-btn", onclick: () => void this.client.call({ type: "open-record", record: "memory" }) }, icon("external"), h("span", {}, "Open the memory file")),
     );
   }
 
@@ -184,6 +118,10 @@ export class RecordsView {
       if (r?.ok) this.answered();
       return r;
     };
+    const share = (kind: "file" | "folder") => () => {
+      const binding = this.client.requestBinding();
+      if (binding) void this.client.call({ type: "share-choose", kind, binding });
+    };
     const unaided = h("input", { type: "checkbox" });
     const submitTask = textInput("Project", "p1");
     const submitFiles = textInput("Files", "src/walk.rs src/tree.rs");
@@ -191,10 +129,12 @@ export class RecordsView {
       "form",
       { class: "tool" },
       h("h3", {}, "Hand in a project"),
+      h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost small", onclick: share("file") }, icon("file"), "Share a file…"), h("button", { type: "button", class: "btn ghost small", onclick: share("folder") }, icon("folder"), "Share a folder…")),
+      this.shares,
       h("label", { class: "field" }, h("span", {}, "Project"), submitTask),
-      h("label", { class: "field" }, h("span", {}, "Files"), submitFiles, h("span", { class: "hint" }, "Share the files from the message box first, then name them here.")),
+      h("label", { class: "field" }, h("span", {}, "Files"), submitFiles),
       h("label", { class: "check" }, unaided, h("span", {}, "I wrote this myself, without AI help or copied code")),
-      h("button", { type: "submit", class: "btn" }, "Hand it in"),
+      h("button", { type: "submit", class: "btn small" }, "Hand it in"),
     );
     handIn.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -212,17 +152,10 @@ export class RecordsView {
       { class: "pane-extras" },
       h(
         "div",
-        { class: "tool" },
-        h("h3", {}, "Suggested projects"),
-        h("p", { class: "hint" }, "Projects sized to what you're learning, from your skill tree, this zone and its notes. You build them yourself; that's what unlocks the next handoff."),
-        h(
-          "div",
-          { class: "actions" },
-          h("button", { type: "button", class: "btn", onclick: () => void run("projects", "new") }, "Suggest projects for this zone"),
-          h("button", { type: "button", class: "btn ghost", onclick: () => void run("projects", "stop") }, "Stop the project I'm on"),
-        ),
+        { class: "actions" },
+        h("button", { type: "button", class: "btn small", onclick: () => void run("projects", "new") }, "Suggest projects"),
+        h("button", { type: "button", class: "btn ghost small", onclick: () => void run("projects", "stop") }, "Stop the project I'm on"),
       ),
-      form("Projects for one skill", textInput("Skill", "recursion in rust"), "Suggest", (skill) => run("projects", skill)),
       form("Start a project", textInput("Project id", "p1"), "Start", (id) => run("projects", `start ${id}`)),
       handIn,
     );
@@ -235,7 +168,7 @@ export function tierInfo(tree: TreeData | null): { pct: number; tier: "newbie" |
   return { pct: Math.min(built / 64, 1), tier: built >= 64 ? "cracked" : built >= 24 ? "good" : built >= 8 ? "intern" : "newbie", built };
 }
 
-/** Skills: global progress, the tree, and the Web tree disclosure. Works without a zone or a model. */
+/** Skills: global progress, the tree, and the Web tree disclosure. Works without a goal or a model. */
 export class SkillsView {
   readonly el = h("div", { class: "skills" });
   private tree: SkillTree;
@@ -263,7 +196,7 @@ export class SkillsView {
         "details",
         { class: "group web-tree" },
         h("summary", {}, icon("chevron"), "Web tree"),
-        h("p", { class: "hint" }, "Keep a copy of your skill tree at a private link you can open and edit in a browser. Only the tree goes there: no zones, sessions, story, conversations, holds, evidence or files."),
+        h("p", { class: "hint" }, "Keep a copy of your skill tree at a private link you can open and edit in a browser. Only the tree goes there: no goals, sessions, story, conversations, holds, evidence or files."),
         h("label", { class: "field" }, h("span", {}, "Server"), this.webServer),
         h(
           "div",

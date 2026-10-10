@@ -24,24 +24,24 @@ const choice = (backend: BackendId, login: AgentChoice["login"]): AgentChoice =>
   helper: { backend, model: "small", effort: null },
   look: { backend, model: "eyes", effort: "low" },
 });
-const released = new Set<BackendId>(["claude", "local"]);
+const released = new Set<BackendId>(["claude"]);
 
-test("RELEASED keeps ChatGPT and Copilot hidden until their gates", () => {
-  assert.deepEqual({ ...RELEASED }, { claude: true, local: true, chatgpt: false, copilot: false });
+test("RELEASED offers only Claude and keeps ChatGPT and Copilot hidden until their gates", () => {
+  assert.deepEqual({ ...RELEASED }, { claude: true, chatgpt: false, copilot: false });
 });
 
 test("chosen() throws until a choice is set, and clears with null", () => {
-  const r = createRegistry([fake("claude"), fake("local")], released);
+  const r = createRegistry([fake("claude")], released);
   assert.throws(() => r.chosen(), /Choose who powers Dum/);
   assert.throws(() => r.selector("intern"), /Choose who powers Dum/);
-  r.set(choice("local", "none"));
-  assert.equal(r.chosen().backend, "local");
+  r.set(choice("claude", "anthropic-key"));
+  assert.equal(r.chosen().backend, "claude");
   r.set(null);
   assert.throws(() => r.chosen(), /Choose who powers Dum/);
 });
 
 test("selector() returns the chosen role's selector", () => {
-  const r = createRegistry([fake("claude"), fake("local")], released);
+  const r = createRegistry([fake("claude")], released);
   r.set(choice("claude", "anthropic-key"));
   assert.deepEqual(r.selector("intern"), { backend: "claude", model: "big", effort: "high" });
   assert.deepEqual(r.selector("helper"), { backend: "claude", model: "small", effort: null });
@@ -52,9 +52,9 @@ test("unreleased and unregistered backends throw, and are never chosen", () => {
   const r = createRegistry([fake("claude"), fake("chatgpt")], released);
   assert.equal(r.backend("claude").id, "claude");
   assert.throws(() => r.backend("chatgpt"), /released/);
-  assert.throws(() => r.backend("local"));
+  assert.throws(() => r.backend("copilot"));
   assert.throws(() => r.set(choice("chatgpt", "chatgpt")));
-  assert.throws(() => r.set(choice("local", "none")));
+  assert.throws(() => r.set(choice("copilot", "github")));
   assert.throws(() => r.chosen(), /Choose who powers Dum/);
   assert.throws(() => createRegistry([fake("claude"), fake("claude")], released));
 });
@@ -66,16 +66,15 @@ test("AgentChoiceSchema takes Claude only with an API key: a subscription login 
 
 test("AgentChoiceSchema rejects backend and login mismatches, and needs every role on the backend", () => {
   const s = AgentChoiceSchema;
-  assert.equal(s.safeParse(choice("local", "none")).success, true);
   assert.equal(s.safeParse(choice("chatgpt", "chatgpt")).success, true);
   assert.equal(s.safeParse(choice("claude", "chatgpt")).success, false);
-  assert.equal(s.safeParse(choice("local", "anthropic-key")).success, false);
-  assert.equal(s.safeParse(choice("chatgpt", "none")).success, false);
+  assert.equal(s.safeParse(choice("chatgpt", "anthropic-key")).success, false);
+  assert.equal(s.safeParse(choice("chatgpt", "github")).success, false);
   assert.equal(s.safeParse(choice("copilot", "anthropic-key")).success, false);
-  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), helper: { backend: "local", model: "small", effort: null } }).success, false);
-  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), look: { backend: "local", model: "eyes", effort: null } }).success, false);
+  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), helper: { backend: "chatgpt", model: "small", effort: null } }).success, false);
+  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), look: { backend: "chatgpt", model: "eyes", effort: null } }).success, false);
   const { look: _look, ...noLook } = choice("claude", "anthropic-key");
   assert.equal(s.safeParse(noLook).success, false, "the look role is required");
-  assert.equal(s.safeParse({ ...choice("local", "none"), backend: "ollama" }).success, false);
-  assert.equal(s.safeParse({ ...choice("local", "none"), fallback: "claude" }).success, false);
+  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), backend: "gemini" }).success, false);
+  assert.equal(s.safeParse({ ...choice("claude", "anthropic-key"), fallback: "chatgpt" }).success, false);
 });
