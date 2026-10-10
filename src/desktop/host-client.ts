@@ -371,7 +371,7 @@ export class HostController {
       const state = before ? { ...before, busy: false, prompt: null, status: message } : null;
       const seen = look.seen ? { ...look.seen, stale: true } : null;
       this.current = {
-        ...this.current, state, zoneEpoch: null, canAttach: false, shares: [], decision: null,
+        ...this.current, state, zoneEpoch: null, runningRequestId: null, canAttach: false, shares: [], decision: null,
         look: { ...look, status: "failed", reason: null, seen },
       };
     }

@@ -381,6 +381,8 @@ if (process.env.DUM_FAKE_HOST === "1") {
     const help = await host.call({ op: "send", binding: binding(opened), text: ":help", shares: [] });
     assert.equal(help.ok, true, help.error);
     const shown = await host.until((s) => s.state?.stage.kind === "info" && /:projects/.test(s.state.stage.body) && s.canAttach);
+    assert.equal(shown.runningRequestId, null);
+    await host.ok({ op: "agent-verify-images", selector: { backend: "claude", model: "sk-test-model", effort: null }, login: "anthropic-key" });
     const projects = await host.call({ op: "send", binding: binding(shown), text: ":projects recursion", shares: [] });
     assert.equal(projects.ok, false);
     assert.match(projects.error!, /Choose who powers Dum/);
@@ -392,6 +394,11 @@ if (process.env.DUM_FAKE_HOST === "1") {
     await host.zone("Python", null);
     await host.ok({ op: "agent-select", choice: CHOICE });
     let s = await host.until((e) => e.state?.models.intern?.model === "fake-intern" && e.state.prompt?.type === "next");
+    await host.ok({ op: "send", binding: binding(s), text: ":self", shares: [] });
+    s = await host.until((e) => !!e.state?.transcript.some((x) => x.kind === "note" && /Nothing was sent/.test(x.text)));
+    assert.equal(s.runningRequestId, null);
+    assert.equal(s.state!.prompt?.type, "next");
+    await host.ok({ op: "agent-verify-images", selector: { backend: "claude", model: "sk-test-model", effort: null }, login: "anthropic-key" });
     await host.ok({ op: "send", binding: binding(s), text: "hello", shares: [] });
     s = await host.until((e) => !!e.state?.transcript.some((x) => x.kind === "say" && x.text === "from claude") && e.state.prompt?.type === "next");
     assert.equal(s.state!.transcript.some((x) => x.kind === "note" && /never chosen/.test(x.text)), false);
@@ -418,13 +425,16 @@ if (process.env.DUM_FAKE_HOST === "1") {
     const old = binding(s);
     const alphaSession = s.session!.id;
     await host.ok({ op: "send", binding: old, text: "SLOW please", shares: [] });
+    assert.equal(host.latest().runningRequestId, old.requestId);
     s = await host.until((e) => e.activeZone?.id === a.id && !!e.state?.busy);
+    assert.equal(s.runningRequestId, old.requestId);
     // A verify call is a model call of its own: refused while a request runs.
     await host.refused({ op: "agent-verify-images", selector: { backend: "claude", model: "sk-slow", effort: null }, login: "anthropic-key" }, /finish what dum is doing first/);
     await host.ok({ op: "zone-enter", zoneId: b.id, expectedRevision: s.registry.revision });
     // Everything the host posted after it replied to the switch.
     const mark = host.events.length;
     const switched = await host.ready(b.id);
+    assert.equal(switched.runningRequestId, null);
     assert.notEqual(switched.zoneEpoch, old.zoneEpoch);
     // A round trip after the switch: everything the old run did late has been processed by now.
     await host.ok({ op: "view", view: "tree" });

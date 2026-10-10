@@ -1014,8 +1014,14 @@ export class DesktopController {
     }
     this.use(init, live, { kind: "request", id: binding.requestId }, this.requestRefs(init, live));
     files.activate();
-    live.next = { files, binding, ctx, handoff };
+    const next = { files, binding, ctx, handoff };
+    live.next = next;
+    store.closeBoard();
     store.submit(text);
+    if (store.getSnapshot().prompt === prompt) {
+      live.next = null;
+      this.finish(init, live, next, null);
+    }
   }
 
   /** A yes/no button for the question the running request parked. */
@@ -1649,6 +1655,7 @@ export class DesktopController {
     prepare(live.zone, init.settings.mode, live.store, this.personal(init), init.evidence, request.files, init.registry, request.binding, this.hooks(init, live, request.binding));
     request.files.activate();
     live.running = request;
+    live.store.closeBoard();
     this.changed();
     void live.store.command(name, argument).finally(() => this.finish(init, live, request, null));
   }
@@ -2095,6 +2102,7 @@ export class DesktopController {
         activeZone: live?.zone ?? null,
         zoneEpoch: live?.epoch ?? null,
         inputToken: this.tokenOf(live),
+        runningRequestId: (live?.running ?? live?.next)?.binding.requestId ?? null,
         canAttach: !!live && !live.running && live.store.canAttach,
         shares: live ? (live.running?.files ?? live.pending)?.grants().filter((g) => g.scope === "request") ?? [] : [],
         follows: live?.follows.list() ?? [],
@@ -2138,6 +2146,7 @@ export function serve(o: Omit<ControllerOptions, "post">): DesktopController {
     if (request.op === "close") closing = true;
     try {
       const result = await controller.handle(request);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       post({ type: "reply", epoch: o.epoch, id: request.id, ok: true, ...(result ? { result } : {}) });
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : "the host couldn't complete that action";

@@ -558,12 +558,15 @@ const state = {
 };
 const stateEvent = {
   type: "state", epoch: "e1", zoneEpoch: "z1", state, tree: { tracks: [], off: [], count: 0, usableBuilt: 0 }, registry, activeZone: context,
-  inputToken: "t1", canAttach: true, shares: [], follows: [], changes: [], look: hostLook,
+  inputToken: "t1", runningRequestId: null, canAttach: true, shares: [], follows: [], changes: [], look: hostLook,
   direction: directionView, decision, handoff: handoffView, contextUse, session: meta, trail: trailView,
 };
 
 test("host events are validated too", () => {
   ok(HostEventSchema, wire(stateEvent));
+  ok(HostEventSchema, wire({ ...stateEvent, runningRequestId: "r1", canAttach: false }));
+  bad(HostEventSchema, wire({ ...stateEvent, runningRequestId: undefined }));
+  bad(HostEventSchema, wire({ ...stateEvent, runningRequestId: "" }));
   ok(HostEventSchema, wire({ ...stateEvent, zoneEpoch: null }));
   ok(HostEventSchema, wire({ ...stateEvent, activeZone: null, state: null, direction: null, decision: null, handoff: null, session: null, trail: null, contextUse: { ...contextUse, subject: null, contextRevision: null, cursor: null } }));
   bad(HostEventSchema, wire({ ...stateEvent, zoneEpoch: undefined }));

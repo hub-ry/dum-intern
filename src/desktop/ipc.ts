@@ -215,8 +215,6 @@ export function circleView(s: Snapshot, hostFailure: string, keyRejected = false
 export class Router {
   /** The next request's ID; rotated after each Send, Do this and decision turn, and each zone epoch. */
   private next = randomUUID();
-  /** The request a Send or Do this started, until the host shows a fresh "what's next" prompt. */
-  private running: { requestId: string; token: string; seen: boolean } | null = null;
   /** A Send or Do this is being handed to the host: a second one is refused, never queued. */
   private submitting = false;
   /** The first-run goal binding's epoch; fresh once the goal became a zone. */
@@ -240,7 +238,7 @@ export class Router {
     const view = this.o.host.view;
     if (!view) return null;
     if (view.zoneEpoch && view.activeZone) {
-      const requestId = this.running?.requestId ?? this.next;
+      const requestId = view.runningRequestId ?? this.next;
       return { zoneId: view.activeZone.id, zoneEpoch: view.zoneEpoch, inputToken: view.inputToken, requestId };
     }
     if (view.registry.activeZoneId === null) return { zoneId: null, zoneEpoch: this.goalEpoch, inputToken: view.inputToken, requestId: this.next };
@@ -251,7 +249,7 @@ export class Router {
   changed(): void {
     const view = this.o.host.view;
     if (!view) this.reported = "";
-    this.settle(view);
+    this.windowChanged();
     const live = this.live();
     const before = this.last;
     if (before && (live?.zoneId !== before.zoneId || live?.zoneEpoch !== before.zoneEpoch)) {
@@ -260,7 +258,6 @@ export class Router {
       this.o.captures.discard();
       void this.o.dictation.cancel().catch(() => undefined);
       this.voice = IDLE_VOICE;
-      this.running = null;
       this.following = null;
       this.next = randomUUID();
       this.o.bubble.dismiss();
@@ -472,37 +469,32 @@ export class Router {
     this.secrets = [...(await this.o.secrets())];
   }
 
-  /** A sent request ends when the host shows a fresh "what's next" prompt with nothing running. */
-  private settle(view: HostView | null): void {
-    const run = this.running;
-    const state = view?.state;
-    if (!run || !state) return;
-    const working = state.busy || state.prompt?.type !== "next";
-    if (working) run.seen = true;
-    else if (run.seen || view.inputToken !== run.token) {
-      this.running = null;
-      this.next = randomUUID();
-    }
+  windowChanged(): void {
+    if (this.o.native.windowVisible() && this.o.native.windowFocused() && this.o.bubble.current?.kind === "reply") this.o.bubble.dismiss();
   }
 
   /** The bubble follows the request they sent, typed or spoken: status while it works, then what Dum said. */
   private follow(view: HostView | null): void {
     const sent = this.following;
-    const state = view?.state;
-    if (!sent || !state) return;
+    if (!sent || !view?.state) return;
+    const { state } = view;
     const { bubble, native } = this.o;
     const fresh = state.transcript.filter((e) => e.id > sent.after);
     const said = fresh.flatMap((e) => (e.kind === "say" ? [e.text] : []));
+    const notes = fresh.flatMap((e) => (e.kind === "note" ? [e.text] : []));
     const asked = fresh.flatMap((e) => (e.kind === "question" ? [e.question] : []));
     const quips = fresh.flatMap((e) => (e.kind === "quip" ? [e.text] : []));
     const wizard = quips.length ? quips.join(" ") : null;
-    const done = this.running?.requestId !== sent.requestId;
+    const done = view.runningRequestId !== sent.requestId;
     const prompt = state.prompt;
     const asking = prompt?.type === "question";
-    if (done) this.following = null;
+    if (done) {
+      this.following = null;
+      this.next = randomUUID();
+    }
     // The working window is in front of them: the reply is already on screen.
     if (native.windowVisible() && native.windowFocused()) {
-      bubble.dismiss();
+      this.windowChanged();
       return;
     }
     if (asking) {
@@ -513,11 +505,16 @@ export class Router {
       return;
     }
     if (done) {
-      if (said.length || wizard) this.reply(bubbleLines(said, wizard));
+      const handoff = view.handoff?.head;
+      const result = handoff?.requestId === sent.requestId ? handoff.result : null;
+      const output = said.length ? said
+        : notes.length || result ? [...notes, ...(result ? [result] : [])]
+        : state.stage.kind === "info" ? [state.stage.title, state.stage.body] : [];
+      if (output.length || wizard) this.reply(bubbleLines(output, wizard));
       else bubble.dismiss();
       return;
     }
-    bubble.voice(said.length ? bubbleLines(said, wizard) : [state.status.slice(0, 200) || "Dum is working…"]);
+    this.reply(said.length ? bubbleLines(said, wizard) : [state.status.slice(0, 200) || "Dum is working…"]);
   }
 
   private reply(lines: string[]): void {
@@ -551,7 +548,6 @@ export class Router {
     const { host, drafts, captures } = this.o;
     if (this.submitting) throw new Error("Dum is still taking your last request - nothing was sent");
     const view = host.view!;
-    const asking = view.state?.prompt?.type === "next";
     if (draft.captureToken && !view.canAttach) throw new Error("Dum can only take a picture with your next request - nothing was sent. Send it then, or discard it.");
     this.submitting = true;
     try {
@@ -568,7 +564,6 @@ export class Router {
       this.submitting = false;
     }
     drafts.sent(live);
-    if (asking) this.running = { requestId: live.requestId, token: live.inputToken, seen: false };
   }
 
   private async send(binding: InputBinding, revision: number): Promise<void> {
@@ -587,9 +582,8 @@ export class Router {
 
   /** The bubble follows the request just submitted under `bound`; entries up to `after` are not its reply. */
   private watch(bound: RequestBinding, after: number): void {
-    this.following = { requestId: this.running?.requestId ?? bound.requestId, after };
-    const { native, bubble } = this.o;
-    if (!(native.windowVisible() && native.windowFocused())) bubble.voice(["Dum is working…"]);
+    this.following = { requestId: bound.requestId, after };
+    this.follow(this.o.host.view);
   }
 
   /**
@@ -609,9 +603,9 @@ export class Router {
   /** A decision turn: the host composes one card for their outcome, then that request ID is retired. */
   private async decisionHelp(r: Extract<WindowRequest, { type: "decision-help" }>): Promise<Extra> {
     const binding = this.requestBinding(r.binding);
-    if (this.running) throw new Error("Wait for Dum to finish, or Stop it - nothing was asked");
+    if (this.o.host.view?.runningRequestId) throw new Error("Wait for Dum to finish, or Stop it - nothing was asked");
     const decision = await this.o.host.decisionHelp(binding, r.outcome);
-    if (!this.running && this.next === binding.requestId) this.next = randomUUID();
+    if (!this.o.host.view?.runningRequestId && this.next === binding.requestId) this.next = randomUUID();
     return { decision };
   }
 
@@ -732,9 +726,13 @@ export class Router {
         // The window switches its own views; the host loads what that view shows.
         await host.selectView(r.view);
         return {};
-      case "command":
-        await host.command(r.name, r.argument, this.zoneBinding(r.binding));
+      case "command": {
+        const binding = this.requestBinding(r.binding);
+        const after = host.view?.state?.transcript.at(-1)?.id ?? -1;
+        await host.command(r.name, r.argument, binding);
+        this.watch(binding, after);
         return {};
+      }
       case "share-choose": {
         const binding = this.requestBinding(r.binding);
         const path = await native.choosePath(r.kind, "share");
@@ -869,8 +867,6 @@ export class Router {
       case "agent-models":
         return { models: await agent.models(r.backend, r.login, { models: (b, l) => host.agentModels(b, l) }) };
       case "agent-verify-images":
-        // Claude's one sign-in is the API key; the probe is refused while a request runs, like decision help.
-        if (this.running) throw new Error("Wait for Dum to finish, or Stop it - nothing was verified");
         await host.agentVerifyImages(r.selector, "anthropic-key");
         return {};
       case "agent-select":

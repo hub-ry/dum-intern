@@ -161,7 +161,7 @@ function viewIn(patch: Partial<HostView> = {}): HostView {
   return {
     zoneEpoch: "e1", state: state(), tree: null,
     registry: { version: 1, revision: 3, activeZoneId: zoneA, zones: [zone(zoneA, null, "Trees"), zone(zoneB, zoneA, "AVL")] },
-    activeZone: context(zoneA, "Trees"), inputToken: "t1", canAttach: true, shares: [], follows: [], changes: [],
+    activeZone: context(zoneA, "Trees"), inputToken: "t1", runningRequestId: null, canAttach: true, shares: [], follows: [], changes: [],
     look: LOOK, direction: null, decision: null, handoff: null, contextUse: NO_USE, session: null, trail: null, ...patch,
   };
 }
@@ -202,7 +202,10 @@ class FakeHost {
   async agentSelect() {}
   async agentModels() { return []; }
   async agentVerifyImages() {}
-  async send(binding: RequestBinding, text: string, shares: ShareGrant[], image?: SharedImage) { this.sent.push({ binding, text, shares, ...(image ? { image } : {}) }); }
+  async send(binding: RequestBinding, text: string, shares: ShareGrant[], image?: SharedImage) {
+    this.sent.push({ binding, text, shares, ...(image ? { image } : {}) });
+    this.view = { ...this.view!, runningRequestId: binding.requestId };
+  }
   async respond(binding: RequestBinding) { this.bindings.push(binding); this.calls.push("respond"); }
   async command(name: string) { this.calls.push(`command ${name}`); }
   async selectView(view: string) { this.calls.push(`view ${view}`); }
@@ -234,6 +237,7 @@ class FakeHost {
   async runHandoff(input: HandoffRunInput) {
     if (this.hold) await this.hold.promise;
     this.runs.push(input);
+    this.view = { ...this.view!, runningRequestId: input.binding.requestId };
   }
   async readHandoff(zoneId: string, handoffId: string) { this.record("handoff-read", { zoneId, handoffId }); return HANDOFF; }
   async reviewHandoff(input: unknown) { this.record("handoff-review", input); return HANDOFF; }
@@ -455,7 +459,7 @@ test("Send consumes the draft under the live binding; the next request gets a fr
   const nested = d.live();
   assert.equal(nested.requestId, live.requestId);
   ok(await d.router.handle({ type: "respond", binding: nested, decision: { kind: "attest", value: true } }, "window"));
-  d.update({ state: state(), inputToken: "t9" });
+  d.update({ runningRequestId: null, state: state(), inputToken: "t9" });
   assert.notEqual(d.live().requestId, live.requestId, "a finished request's ID is never reused");
 });
 
@@ -475,7 +479,7 @@ test("a prompt that moves under a draft keeps the text but refuses the stale Sen
 
 test("first run: the goal draft becomes the root zone, and nothing goes to a model", async () => {
   const d = desktop();
-  d.update({ zoneEpoch: null, activeZone: null, state: null, inputToken: "idle", registry: { version: 1, revision: 0, activeZoneId: null, zones: [] } });
+  d.update({ runningRequestId: null, zoneEpoch: null, activeZone: null, state: null, inputToken: "idle", registry: { version: 1, revision: 0, activeZoneId: null, zones: [] } });
   const goal = d.router.snapshot().binding!;
   assert.equal(goal.zoneId, null);
   ok(await d.router.handle({ type: "draft-set", text: "  learn   balanced trees\nproperly  ", expectedDraftRevision: 0, binding: goal }, "window"));
@@ -522,7 +526,7 @@ test("shares go with the request they were made for; a new epoch voids them", as
   assert.deepEqual(d.host.bindings[0], d.host.sent[0]!.binding, "shared and sent under one binding");
 
   d.pick("/picked/other.md");
-  d.update({ state: state(), inputToken: "t5" });
+  d.update({ runningRequestId: null, state: state(), inputToken: "t5" });
   ok(await d.router.handle({ type: "share-choose", kind: "file", binding: d.live() }, "window"));
   d.update({ zoneEpoch: "e2" });
   assert.deepEqual(d.router.snapshot().draft.shareIds, [], "a reopened zone drops the draft's shares");
@@ -545,7 +549,7 @@ test("captures need the live binding and an attach-capable prompt, and die with 
   assert.equal(d.host.sent[0]!.image?.label, "Editor - app.ts");
   assert.equal(d.captures.holding, false);
 
-  d.update({ state: state(), inputToken: "t3" });
+  d.update({ runningRequestId: null, state: state(), inputToken: "t3" });
   const again = d.router.handle({ type: "capture-preview", sourceId: "window:42:0", binding: d.live() }, "window");
   await settle();
   d.grabs[1]!.finish(Buffer.from(PNG));
@@ -593,7 +597,7 @@ test("Do this consumes the canonical draft once: its shares and picture go along
   // The command's binding is the running request until the host asks what's next again.
   d.update({ state: state({ busy: true, prompt: null }), inputToken: "idle" });
   assert.equal(d.live().requestId, live.requestId);
-  d.update({ state: state(), inputToken: "t2" });
+  d.update({ runningRequestId: null, state: state(), inputToken: "t2" });
   assert.notEqual(d.live().requestId, live.requestId);
 });
 
@@ -723,7 +727,7 @@ test("a personal record opens only when the host's file is one of main's named f
 
 test("debug chat works with no zone, carries its own binding only, and never forwards or shows a secret", async () => {
   const d = desktop();
-  d.update({ zoneEpoch: null, activeZone: null, state: null, registry: { version: 1, revision: 0, activeZoneId: null, zones: [] } });
+  d.update({ runningRequestId: null, zoneEpoch: null, activeZone: null, state: null, registry: { version: 1, revision: 0, activeZoneId: null, zones: [] } });
   d.stored.push(KEY);
   const opened = okWindow(await d.router.handle({ type: "debug-open" }, "window"));
   assert.ok(opened.debug);
@@ -790,7 +794,7 @@ test("a voice request's reply shows in the bubble; a decision stays in the windo
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
   d.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }), inputToken: "idle" });
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["A rotation keeps order."]);
-  d.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }), inputToken: "t7" });
+  d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }] }), inputToken: "t7" });
   assert.equal(d.bubbles.at(-1)?.kind, "reply");
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["A rotation keeps order."]);
 
@@ -828,7 +832,7 @@ test("replies resume after question answers when the user switches away from Dum
       d.focus(false);
       d.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "Continuing." }] }), inputToken: "idle" });
       assert.deepEqual(d.bubbles.at(-1)?.lines, ["Continuing."], `${start}/${answer}`);
-      d.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Continuing." }, { kind: "say", id: 2, text: "Finished." }] }), inputToken: "t7" });
+      d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Continuing." }, { kind: "say", id: 2, text: "Finished." }] }), inputToken: "t7" });
       assert.equal(d.bubbles.at(-1)?.kind, "reply");
       assert.deepEqual(d.bubbles.at(-1)?.lines, ["Continuing.", "Finished."]);
     }
@@ -840,7 +844,7 @@ test("a typed request's reply shows in the bubble too, with the Wizard's aside a
   await typed(d.router, d.live());
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
   d.update({
-    state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }, { kind: "quip", id: 2, text: "Nice question." }] }),
+    runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "A rotation keeps order." }, { kind: "quip", id: 2, text: "Nice question." }] }),
     inputToken: "t7",
   });
   const reply = d.bubbles.at(-1)!;
@@ -852,7 +856,7 @@ test("a typed request's reply shows in the bubble too, with the Wizard's aside a
   // A cut reply ends by pointing at Dum.
   const long = desktop();
   await typed(long.router, long.live());
-  long.update({ state: state({ transcript: [{ kind: "say", id: 1, text: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n") }] }), inputToken: "t7" });
+  long.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n") }] }), inputToken: "t7" });
   assert.equal(long.bubbles.at(-1)!.lines.at(-1), BUBBLE_OPEN);
   assert.equal(long.bubbles.at(-1)!.expiresAt - NOW, BUBBLE_TTL.reply);
 
@@ -872,14 +876,14 @@ test("no bubble while the working window is visible and focused: the reply is al
   f.focus(true);
   await typed(f.router, f.live());
   assert.equal(f.bubbles.at(-1) ?? null, null);
-  f.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "On screen." }] }), inputToken: "t7" });
+  f.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "On screen." }] }), inputToken: "t7" });
   assert.equal(f.bubbles.at(-1) ?? null, null);
 
   // Visible but not focused: they looked away, so the bubble shows.
   const g = desktop();
   g.show(true);
   await typed(g.router, g.live());
-  g.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Off to the side." }] }), inputToken: "t7" });
+  g.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Off to the side." }] }), inputToken: "t7" });
   assert.deepEqual(g.bubbles.at(-1)?.lines, ["Off to the side."]);
 
   // Focus taken mid-request, then released: the reply still arrives in the bubble.
@@ -890,8 +894,105 @@ test("no bubble while the working window is visible and focused: the reply is al
   h.update({ state: state({ busy: true, prompt: null, transcript: [{ kind: "say", id: 1, text: "Half." }] }), inputToken: "idle" });
   assert.equal(h.bubbles.at(-1) ?? null, null, "a status bubble is dismissed once they're looking at the window");
   h.focus(false);
-  h.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Half." }, { kind: "say", id: 2, text: "Whole." }] }), inputToken: "t7" });
+  h.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Half." }, { kind: "say", id: 2, text: "Whole." }] }), inputToken: "t7" });
   assert.deepEqual(h.bubbles.at(-1)?.lines, ["Half.", "Whole."]);
+});
+
+test("focusing Dum suppresses a completed reply without another host reply", async () => {
+  for (const visible of [false, true]) {
+    const d = desktop();
+    d.show(visible);
+    await typed(d.router, d.live());
+    d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Finished." }] }), inputToken: "t7" });
+    assert.equal(d.bubbles.at(-1)?.kind, "reply");
+    d.show(true);
+    d.focus(true);
+    d.router.changed();
+    assert.equal(d.bubbles.at(-1), null);
+  }
+});
+
+test("window focus leaves dictation recording and draft bubbles available", () => {
+  const d = desktop();
+  const binding = d.live();
+  d.show(true);
+  d.router.voiceEvent({ op: "recording", recordingId: "r1", binding });
+  d.focus(true);
+  d.router.changed();
+  assert.deepEqual(d.bubbles.at(-1)?.lines, ["Listening…"]);
+  d.router.voiceEvent({ op: "transcript", recordingId: "r1", binding, text: "Ready to send" });
+  d.router.changed();
+  assert.equal(d.bubbles.at(-1)?.kind, "voice");
+  assert.equal(d.bubbles.at(-1)?.lines[0], "Ready to send");
+});
+
+test("synchronous typed and voice commands finish before Verify is pressed", async () => {
+  for (const source of ["typed", "voice"]) {
+    const d = desktop();
+    const live = d.live();
+    d.host.send = async (binding, text, shares) => {
+      d.host.sent.push({ binding, text, shares });
+      d.update({ runningRequestId: null, state: state({ stage: { kind: "info", title: "dum", body: "Help for this request." } }) });
+    };
+    d.host.agentVerifyImages = async () => { d.calls.push("verify"); };
+    if (source === "voice") d.router.voiceEvent({ op: "transcript", recordingId: "r", binding: live, text: ":help" });
+    else ok(await d.router.handle({ type: "draft-set", text: ":help", expectedDraftRevision: d.router.snapshot().draft.revision, binding: live }, "window"));
+    ok(await d.router.handle({ type: "send", binding: live, draftRevision: d.router.snapshot().draft.revision }, "window"));
+    ok(await d.router.handle({ type: "agent-verify-images", backend: "claude", selector: { backend: "claude", model: "haiku", effort: null } }, "window"));
+    assert.ok(d.calls.includes("verify"));
+    assert.notEqual(d.live().requestId, live.requestId);
+    assert.deepEqual(d.bubbles.at(-1)?.lines, ["dum", "Help for this request."]);
+  }
+});
+
+test("typed, voice and button commands follow the host request through an unchanged next prompt", async () => {
+  for (const source of ["typed", "voice", "button"]) {
+    const d = desktop();
+    const live = d.live();
+    const working = () => d.update({ runningRequestId: live.requestId, inputToken: "idle", state: state({ status: ":projects" }) });
+    d.host.send = async () => { working(); };
+    d.host.command = async () => { working(); };
+    if (source === "button") ok(await d.router.handle({ type: "command", name: "projects", argument: "", binding: live }, "window"));
+    else {
+      if (source === "voice") d.router.voiceEvent({ op: "transcript", recordingId: "r", binding: live, text: ":projects" });
+      else ok(await d.router.handle({ type: "draft-set", text: ":projects", expectedDraftRevision: d.router.snapshot().draft.revision, binding: live }, "window"));
+      ok(await d.router.handle({ type: "send", binding: live, draftRevision: d.router.snapshot().draft.revision }, "window"));
+    }
+    d.update({ state: state(), inputToken: "t1" });
+    assert.equal(d.live().requestId, live.requestId);
+    d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Here are your projects." }] }) });
+    assert.deepEqual(d.bubbles.at(-1)?.lines, ["Here are your projects."]);
+    assert.equal(d.bubbles.at(-1)?.kind, "reply");
+    assert.notEqual(d.live().requestId, live.requestId);
+  }
+});
+
+test("typed, voice and handoff failures bubble their recorded outcome without model text", async () => {
+  for (const source of ["typed", "voice", "handoff"]) {
+    const d = desktop();
+    const live = d.live();
+    if (source === "handoff") ok(await d.router.handle({ type: "handoff-run", binding: live, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
+    else if (source === "voice") {
+      d.router.voiceEvent({ op: "transcript", recordingId: "r", binding: live, text: "explain" });
+      ok(await d.router.handle({ type: "send", binding: live, draftRevision: d.router.snapshot().draft.revision }, "window"));
+    } else await typed(d.router, live);
+    d.update({ runningRequestId: null, inputToken: "t7", state: state({ transcript: [{ kind: "note", id: 1, text: "The backend failed before answering." }] }), ...(source === "handoff" ? { handoff: { head: { requestId: live.requestId, state: "failed", result: "No file changed." } } as HandoffView } : {}) });
+    assert.equal(d.bubbles.at(-1)?.kind, "reply");
+    assert.ok(d.bubbles.at(-1)?.lines.includes("The backend failed before answering."));
+    if (source === "handoff") assert.ok(d.bubbles.at(-1)?.lines.includes("No file changed."));
+  }
+});
+
+test("a silent completed handoff bubbles its own result for every terminal state", async () => {
+  for (const terminal of ["done", "failed", "blocked", "cancelled", "interrupted"] as const) {
+    const d = desktop();
+    const binding = d.live();
+    ok(await d.router.handle({ type: "handoff-run", binding, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
+    const result = `${terminal}: No file changed.`;
+    d.update({ runningRequestId: null, state: state(), handoff: { head: { requestId: binding.requestId, state: terminal, result } } as HandoffView });
+    assert.deepEqual(d.bubbles.at(-1)?.lines, [result]);
+    assert.equal(d.bubbles.at(-1)?.kind, "reply");
+  }
 });
 
 test("Do this: the finished handoff's summary bubbles like a typed reply, under the same focus rule", async () => {
@@ -900,7 +1001,7 @@ test("Do this: the finished handoff's summary bubbles like a typed reply, under 
   ok(await d.router.handle({ type: "handoff-run", binding: live, handoffId: randomUUID(), revision: 1, draftRevision: d.router.snapshot().draft.revision }, "window"));
   assert.equal(d.host.runs.length, 1);
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["Dum is working…"]);
-  d.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Done: renamed the helper." }] }), inputToken: "t7" });
+  d.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Done: renamed the helper." }] }), inputToken: "t7" });
   assert.equal(d.bubbles.at(-1)?.kind, "reply");
   assert.deepEqual(d.bubbles.at(-1)?.lines, ["Done: renamed the helper."]);
 
@@ -908,7 +1009,7 @@ test("Do this: the finished handoff's summary bubbles like a typed reply, under 
   f.show(true);
   f.focus(true);
   ok(await f.router.handle({ type: "handoff-run", binding: f.live(), handoffId: randomUUID(), revision: 1, draftRevision: f.router.snapshot().draft.revision }, "window"));
-  f.update({ state: state({ transcript: [{ kind: "say", id: 1, text: "Done." }] }), inputToken: "t7" });
+  f.update({ runningRequestId: null, state: state({ transcript: [{ kind: "say", id: 1, text: "Done." }] }), inputToken: "t7" });
   assert.equal(f.bubbles.at(-1) ?? null, null, "no bubble while they're looking at the window");
 });
 

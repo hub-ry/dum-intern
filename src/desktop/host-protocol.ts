@@ -150,7 +150,7 @@ export type HostEvent =
   | { type: "ready"; epoch: string }
   | {
     type: "state"; epoch: string; zoneEpoch: string | null; state: State | null; tree: View | null; registry: ZoneRegistry; activeZone: ZoneContext | null;
-    inputToken: string; canAttach: boolean; shares: ShareGrant[]; follows: FollowGrant[]; changes: ChangeReceipt[];
+    inputToken: string; runningRequestId: string | null; canAttach: boolean; shares: ShareGrant[]; follows: FollowGrant[]; changes: ChangeReceipt[];
     look: HostLookStatus;
     direction: DirectionView | null; decision: DecisionView | null; handoff: HandoffView | null; contextUse: ContextUseView;
     session: SessionMeta | null; trail: TrailView | null;
@@ -254,7 +254,7 @@ export const HostEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ready"), epoch: TokenSchema }).strict(),
   z.object({
     type: z.literal("state"), epoch: TokenSchema, zoneEpoch: TokenSchema.nullable(), state: StateSchema.nullable(), tree: ViewSchema.nullable(), registry: ZoneRegistrySchema,
-    activeZone: ZoneContextSchema.nullable(), inputToken: TokenSchema, canAttach: z.boolean(), shares: z.array(ShareGrantSchema).max(64),
+    activeZone: ZoneContextSchema.nullable(), inputToken: TokenSchema, runningRequestId: TokenSchema.nullable(), canAttach: z.boolean(), shares: z.array(ShareGrantSchema).max(64),
     follows: z.array(FollowGrantSchema).max(64), changes: z.array(ChangeReceiptSchema).max(200), look: HostLookStatusSchema,
     direction: DirectionViewSchema.nullable(), decision: DecisionViewSchema.nullable(), handoff: HandoffViewSchema.nullable(),
     contextUse: ContextUseViewSchema, session: SessionMetaSchema.nullable(), trail: TrailViewSchema.nullable(),
