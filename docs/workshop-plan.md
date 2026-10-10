@@ -18,7 +18,7 @@ Study materials belong in the study zone, beside the attempt and teaching textbo
 
 Keep a global context for goals, preferences, and useful knowledge across subjects. Each goal has its own context, source materials, attempts, teaching records, and creations. Context updates from actual interactions; the user can inspect and correct it.
 
-A background skill tree records what was introduced, attempted with help, used independently, and needs revisiting. A single explanation or a completed presentation does not establish mastery. The tree helps choose the next session; it does not block exploration.
+The current progress view groups evidence by concept: what was introduced, attempted with help, reported as used independently, and needs revisiting. A single explanation or a completed presentation does not establish mastery. Guided lesson selection is fixed. A skill tree that helps choose the next session remains a product goal; it must not block exploration.
 
 ## The presentation: fixed pages, not a live performance
 

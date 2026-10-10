@@ -3,7 +3,6 @@
 // Idle state draws nothing animated under prefers-reduced-motion; only a game the
 // visitor starts on purpose moves, and then at reduced speed.
 
-// Palette: rose pine moon
 const OVR = '#3b3460'; // ground top edge
 const MUT = '#6e6a86'; // obstacle body
 const SUB = '#b8b2d0'; // score / game-over detail

@@ -62,7 +62,7 @@ export const MAX_MACHINERY_ITEMS = 100;
 export const MAX_MACHINERY_ITEM = 400;
 export const MAX_TEACHING_IDS_PER_PANEL = 50;
 
-// Persisted file ceilings. Generous relative to the record limits above.
+// Persisted file ceilings, enforced independently of record-count limits.
 export const MAX_STATE_BYTES = 256 * 1024 * 1024;
 export const MAX_POSITIONS_BYTES = 4 * 1024 * 1024;
 

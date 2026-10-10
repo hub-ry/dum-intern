@@ -77,4 +77,3 @@ export async function openArtifactFile(root: string, segments: string[]): Promis
   }
   return null;
 }
-

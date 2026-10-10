@@ -20,6 +20,8 @@ Teaching affects Dum's persistent context and creation choices. It does not retr
 
 Use Node 24, Docker, and a logged-in Claude Code CLI with access to the selected model. The service user needs Docker access. Builds use your CLI authentication; no separate model API key is required by this implementation.
 
+Generation sends the queued goal and global context, teaching records, and any correction text to the configured CLI provider. Corrections also send the verified parent HTML and presentation. Generation requires provider access; verification runs offline in Docker. The private reader can run the finished demo in a sandboxed frame on the separate artifact origin. Generated JavaScript never runs in the host's Node process.
+
 ```sh
 npm ci
 claude auth status
@@ -37,7 +39,7 @@ For access over a trusted private network, set `DUM_WORKSHOP_HOST` to the host's
 | `DUM_WORKSHOP_HOST` | `127.0.0.1` |
 | `DUM_WORKSHOP_PORT` | `8770`; private UI/API |
 | `DUM_WORKSHOP_ARTIFACT_PORT` | `8771`; separate artifact origin |
-| `DUM_WORKSHOP_TOKEN` | Required for non-loopback access |
+| `DUM_WORKSHOP_TOKEN` | Required for non-loopback access and notes publication, including on loopback |
 | `DUM_CLAUDE_EXECUTABLE` | `claude`; override for systemd PATH |
 | `DUM_WORKSHOP_MODEL` | `fable` |
 | `DUM_WORKSHOP_EFFORT` | `medium` |
@@ -79,7 +81,7 @@ bash deploy/deploy.sh
 
 This installs public files in `/opt/dum-public` and runs the hardened `dum-public.service` on loopback port 8070. The earlier public service is stopped and disabled; existing unrelated stored data is not deleted.
 
-`https://notes.ryhub.dev/` is a plain, read-only topic/deck journal through the existing Cloudflare Tunnel. Provision `/var/lib/dum-notes` for the private publisher, readable by the separate static service, and add `DUM_PUBLIC_NOTES_DIR=/var/lib/dum-notes` to the private environment file. Restart the workshop to generate the empty public index, then:
+`https://notes.ryhub.dev/` is a plain, read-only topic/deck journal through the existing Cloudflare Tunnel. After the public-site deployment above, run `bash deploy/deploy-notes.sh` to provision `/var/lib/dum-notes` for the hub's UID-1000 publisher and install the notes service. Add `DUM_PUBLIC_NOTES_DIR=/var/lib/dum-notes` to the private environment file, with authentication configured as above. Restart the workshop to generate the empty public index, then rerun the script to start the notes service:
 
 ```sh
 bash deploy/deploy-notes.sh
