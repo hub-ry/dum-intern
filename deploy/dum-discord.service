@@ -1,0 +1,18 @@
+[Unit]
+Description=Dum Discord delivery and slash commands
+After=network-online.target dum-workshop.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ryanhubbart/code2/dum-intern
+EnvironmentFile=%h/.config/dum-workshop/environment
+EnvironmentFile=%h/.config/dum-discord/environment
+Environment=DUM_DISCORD_STATE_DIR=%h/.local/state/dum-discord
+ExecStart=/usr/local/bin/node --import tsx src/discord/bot.ts
+Restart=always
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

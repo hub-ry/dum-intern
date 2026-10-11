@@ -62,6 +62,35 @@ journalctl --user -u dum-workshop.service
 
 Enable user lingering if the process must continue after logout: `loginctl enable-linger "$USER"`. Browser closure does not stop systemd.
 
+## Discord
+
+`src/discord/bot.ts` is a second user service that gives creations a place to live in one private Discord channel. It reads the workshop over its own API and never touches the store directly, so hub stays the record and Discord only points back to it.
+
+- One status message per creation, edited as the job moves through its real states: queued, generating and verifying, ready, or failed. These posts are silent.
+- When a creation finishes, one message pings you with up to four panel screenshots and a link to the presentation. A failure pings you with a link only; error text stays on hub.
+- `/dum status`, `/dum goals`, `/dum build goal:`, and `/dum correct creation: correction:`. Only the server owner can use them, and only in the bound channel. A correction makes a new version and leaves the original alone.
+
+The bot connects out over the gateway, so it needs no public endpoint. Delivery state lives in `~/.local/state/dum-discord/ledger.json`, and it is written only after Discord accepts a message, so a restart picks up where it left off. On its first start, the bot adopts existing jobs without posting them.
+
+Keep the bot token in a mode-600 file and the IDs in `~/.config/dum-discord/environment`:
+
+```sh
+DUM_DISCORD_TOKEN_FILE=/home/you/.config/dum-discord/token
+DUM_DISCORD_APPLICATION_ID=...
+DUM_DISCORD_GUILD_ID=...
+DUM_DISCORD_CHANNEL_ID=...
+DUM_DISCORD_OWNER_ID=...
+```
+
+```sh
+install -D -m 644 deploy/dum-discord.service ~/.config/systemd/user/dum-discord.service
+systemctl --user daemon-reload
+systemctl --user enable --now dum-discord.service
+journalctl --user -u dum-discord.service
+```
+
+Invite the bot with only View Channel, Send Messages, Embed Links, Attach Files, Read Message History, and application commands.
+
 ## Verify
 
 ```sh
@@ -103,6 +132,7 @@ The reusable [dum-publish skill](.claude/skills/dum-publish/SKILL.md) documents 
 ## Files
 
 - `src/workshop`: private runtime, materials, API, reader, generation, and isolated verifier.
+- `src/discord`: Discord delivery and slash commands, on top of the workshop API.
 - `src/art`: authored Dum and Wizard glyphs.
 - `src/site`: public product site and an explicitly labelled example presentation.
 - `src/public`: static-only public hosting; no workshop credentials or private APIs.
