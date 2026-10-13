@@ -481,7 +481,7 @@ test("progress points to the goal's full page in the workshop", async () => {
 // --- Dum's team: who can do what ---
 
 import { AGENTS, CODEX_TOOL, DENIED_AGENTS } from "./agents.ts";
-import { readStream, teamFooter } from "./chat.ts";
+import { brightspaceServer, readStream, teamFooter } from "./chat.ts";
 import { TOOLS } from "../mcp/server.ts";
 
 const SHELL = ["Bash", "Edit", "Write"];
@@ -505,6 +505,39 @@ test("every Dum tool an agent names exists, and Dum can reach all of them plus i
   for (const [name, a] of Object.entries(AGENTS)) for (const t of a.tools.filter((x) => x.startsWith("mcp__dum__"))) assert.ok(real.has(t), `${name} names ${t}, which doesn't exist`);
   for (const t of real) assert.ok(AGENTS.dum!.tools.includes(t), `dum is missing ${t}`);
   assert.ok(AGENTS.dum!.tools.includes("Agent"));
+});
+
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// The 26 tools brightspace-mcp-server 3.13.15 lists over MCP, as pinned in ~/opt/brightspace-mcp.
+const BRIGHTSPACE_SERVER = ["get_my_courses", "get_upcoming_due_dates", "get_calendar_events", "get_my_grades", "get_announcements", "get_assignments", "get_assignment_rubric", "get_assignment_files", "get_announcement_files", "get_course_content", "download_file", "get_classlist_emails", "get_roster", "get_my_groups", "get_syllabus", "get_discussions", "get_video_transcript", "get_server_info", "search_course", "sign_out", "get_dropbox_folders", "get_dropbox_submissions", "get_dropbox_user_submissions", "get_dropbox_feedback", "get_rubrics_for_object", "download_dropbox_submission_file"];
+
+test("Brightspace is read-only for the team: no sign-out, no classmates' details, downloads only for the librarian", () => {
+  const real = new Set(BRIGHTSPACE_SERVER.map((t) => `mcp__brightspace__${t}`));
+  for (const [name, a] of Object.entries(AGENTS)) {
+    const named = a.tools.filter((t) => t.startsWith("mcp__brightspace__"));
+    for (const t of named) assert.ok(real.has(t), `${name} names ${t}, which the server doesn't have`);
+    for (const t of ["sign_out", "get_roster", "get_classlist_emails"]) assert.equal(named.includes(`mcp__brightspace__${t}`), false, `${name} must not have ${t}`);
+    if (name !== "librarian") assert.equal(named.some((t) => /download/.test(t)), false, `${name} must not save Brightspace files`);
+  }
+  for (const name of ["dum", "tutor", "librarian"]) assert.ok(AGENTS[name]!.tools.includes("mcp__brightspace__get_upcoming_due_dates"), `${name} can see what's due`);
+  assert.ok(AGENTS.librarian!.tools.includes("mcp__brightspace__download_file"));
+});
+
+test("turns get Brightspace only once its launcher is installed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dum-bs-"));
+  try {
+    const launcher = join(dir, "brightspace");
+    assert.deepEqual(brightspaceServer(launcher), {}, "missing launcher: no server");
+    writeFileSync(launcher, "#!/bin/sh\n", { mode: 0o644 });
+    assert.deepEqual(brightspaceServer(launcher), {}, "not executable: no server");
+    chmodSync(launcher, 0o755);
+    assert.deepEqual(brightspaceServer(launcher), { brightspace: { command: launcher, args: [] } });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a turn's event stream gives the answer, the session, and who used what", () => {

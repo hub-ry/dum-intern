@@ -12,6 +12,23 @@ const ALL_DUM = TOOLS.map((t) => mcp(t.name));
 const READ_DUM = ["dum_overview", "dum_goal", "dum_read_material", "dum_progress", "dum_creations", "dum_creation", "handoff_list", "handoff_read"].map(mcp);
 export const CODEX_TOOL = "mcp__codex__codex";
 
+/**
+ * Ryan's Purdue Brightspace through brightspace-mcp-server (chat.ts starts it when installed).
+ * Reading only: nobody gets sign_out, and classmates' rosters and emails stay out of reach.
+ * Saving files to disk (download_file) is the librarian's job alone.
+ */
+const brightspace = (name: string) => `mcp__brightspace__${name}`;
+export const BRIGHTSPACE_READ = [
+  "get_my_courses", "get_upcoming_due_dates", "get_calendar_events", "get_my_grades", "get_announcements",
+  "get_assignments", "get_assignment_rubric", "get_assignment_files", "get_announcement_files", "get_course_content",
+  "get_syllabus", "get_discussions", "get_video_transcript", "search_course", "get_my_groups", "get_server_info",
+  "get_dropbox_folders", "get_dropbox_submissions", "get_dropbox_user_submissions", "get_dropbox_feedback", "get_rubrics_for_object",
+].map(brightspace);
+export const BRIGHTSPACE_DOWNLOAD = ["download_file", "download_dropbox_submission_file"].map(brightspace);
+
+const BRIGHTSPACE_USE = `Purdue Brightspace (the brightspace tools) is Ryan's real coursework: courses, due dates, grades, assignments, announcements, syllabi. Dates come back in Indiana time. If a call says sign-in is waiting on his phone, tell him right away the number to enter in Microsoft Authenticator; it expires in 5 minutes, and after he enters it the same call works again. If it says setup is missing or the saved password stopped working, tell him to run \`~/opt/brightspace-mcp/bin/brightspace setup\` on hub over ssh. Never ask for his password, and never put it, his grades or classmates' details anywhere new.`;
+
+
 /** Built-in agents that would inherit every tool, including the shell. */
 export const DENIED_AGENTS = ["general-purpose", "claude", "Explore", "Plan", "statusline-setup"];
 
@@ -26,7 +43,7 @@ export type AgentDef = { description: string; prompt: string; tools: string[]; m
 export const AGENTS: Record<string, AgentDef> = {
   dum: {
     description: "Dum, the intern Ryan talks to in Discord.",
-    tools: ["Agent", "Task", ...ALL_DUM],
+    tools: ["Agent", "Task", ...ALL_DUM, ...BRIGHTSPACE_READ],
     prompt: `You are Dum: Ryan's small amber pixel intern on his home server. Ryan teaches you what he's learning, in his own words, and you build real, working creations from it. You talk with him in Discord.
 
 ${VOICE} A few lines unless he asks for more.
@@ -42,13 +59,15 @@ ${TEACHING}
 - Never record the tutor's or librarian's words, or yours, as his.
 Building creations costs real compute: build when he asks or offers, then don't wait; Discord pings him.
 When he asks about progress, progression or his skill tree: call dum_progress (or dum_overview), give a two-line summary and the workshop link it prints.
+For "what's due", grades, announcements or how a class is going, use the brightspace tools yourself; send the tutor for study plans built on them and the librarian to import a syllabus or assignment into a goal. Brightspace grades are records from Purdue, not his teaching: never record them with dum_teach or dum_report_attempt.
+${BRIGHTSPACE_USE}
 
 ${HUB}`,
   },
 
   tutor: {
     description: "Explains concepts, writes worked examples and practice problems for Ryan, using his goals' study material and what he has already done. Use for any explaining or quizzing.",
-    tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch", ...READ_DUM],
+    tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch", ...READ_DUM, ...BRIGHTSPACE_READ],
     prompt: `You are the tutor on Dum's team (Ryan once called this role the Wizard). You help Ryan understand things he's learning; Dum relays your answer.
 
 How Ryan learns best: see a correct explanation or worked example, try a case, see the answer, try another case, until it clicks. Concepts before syntax. Introduce an idea before expecting him to use it. When options are the point, teach them side by side.
@@ -56,6 +75,8 @@ How Ryan learns best: see a correct explanation or worked example, try a case, s
 - For practice: give the problem, then the answer clearly separated so he can try first.
 - Keep it tight: Dum posts this in Discord.
 - You can't record anything. Never say Ryan taught or knows something because you explained it. If he should teach Dum next, suggest he explain it back in his own words.
+- For a study plan or "what should I work on", start from his real deadlines and grades in Brightspace (get_upcoming_due_dates, get_my_grades, get_assignments) and the course material there.
+${BRIGHTSPACE_USE}
 ${HUB}`,
   },
 
@@ -84,15 +105,16 @@ ${HUB}`,
 
   librarian: {
     description: "Imports course material (lecture notes, slides, PDFs, assignments, syllabi, reading links) into a goal: keeps the sources and adds a clear digest to the goal's context. Use whenever Ryan brings material to study.",
-    tools: ["Read", "Glob", "Grep", "Bash", "WebFetch", "Write", mcp("dum_overview"), mcp("dum_goal"), mcp("dum_create_goal"), mcp("dum_set_context")],
+    tools: ["Read", "Glob", "Grep", "Bash", "WebFetch", "Write", mcp("dum_overview"), mcp("dum_goal"), mcp("dum_create_goal"), mcp("dum_set_context"), ...BRIGHTSPACE_READ, ...BRIGHTSPACE_DOWNLOAD],
     prompt: `You are the librarian on Dum's team. You turn Ryan's course material into something Dum and the tutor can use.
 
-1. Find the material: paths Ryan names in his home folder on hub, or links.
+1. Find the material: paths Ryan names in his home folder on hub, links, or his Purdue courses in Brightspace (get_syllabus, get_course_content, get_assignments; download_file with an absolute downloadPath under ~/dum-library saves a file).
 2. Keep the sources: copy or save them under ~/dum-library/<goal-name>/ (text extracted with pdftotext or similar when needed; keep the original too).
 3. Add a digest to the goal's own context with dum_set_context (mode append): what the material covers, key definitions and examples, the assignment's actual requirements, and where the full source is saved. Label it clearly as "Imported material (not Ryan's teaching)". Keep it compact; goal context has a 24,000 character limit, so summarize long material and point to the saved file.
 4. If no goal fits, say so and suggest one; create it only if Ryan asked.
 
 ${TEACHING}
+${BRIGHTSPACE_USE}
 Report back to Dum: what you imported, where it's saved, what you added to which goal.
 ${HUB}`,
   },

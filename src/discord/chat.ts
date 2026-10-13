@@ -3,7 +3,8 @@
 // no shell and delegates to a tutor, an engineer and a librarian, each with only its own tools.
 // Ryan's user settings load too, so his standing rules (no commits, no pushes) still hold.
 
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, constants, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGENTS, DENIED_AGENTS } from "./agents.ts";
 
@@ -90,6 +91,20 @@ export function readStream(stdout: string): Omit<RunResult, "failed"> & { ok: bo
 }
 
 /**
+ * Ryan's Purdue Brightspace (courses, due dates, grades, announcements, syllabus) through
+ * brightspace-mcp-server, pinned on hub with its own launcher (see deploy/brightspace). Turns
+ * simply go without it until the launcher is installed.
+ */
+export function brightspaceServer(launcher = process.env.DUM_BRIGHTSPACE_MCP?.trim() || join(homedir(), "opt/brightspace-mcp/bin/brightspace")): Record<string, { command: string; args: string[] }> {
+  try {
+    accessSync(launcher, constants.X_OK);
+  } catch {
+    return {};
+  }
+  return { brightspace: { command: launcher, args: [] } };
+}
+
+/**
  * The command for one turn of Dum's team, working in its own repository. Files live in the turn's
  * folder: Ryan's words (for the verbatim check) and the team's definitions.
  */
@@ -101,6 +116,7 @@ export function chatCommand(opts: { claude: string; dumBin: string; repo: string
     mcpServers: {
       dum: { command: opts.dumBin, args: ["mcp"], env: { DUM_CHAT_SOURCE_FILE: sourceFile } },
       codex: { command: opts.dumBin, args: ["codex-mcp"] },
+      ...brightspaceServer(),
     },
   });
   const args = [

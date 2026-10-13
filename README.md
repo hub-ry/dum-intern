@@ -155,6 +155,32 @@ systemctl --user enable --now dum-internship-scan.timer dum-internship-nag.timer
 systemctl --user disable --now dum-internship-scan.timer dum-internship-nag.timer   # to stop it
 ```
 
+## Purdue Brightspace
+
+Dum reads Ryan's Purdue Brightspace (courses, due dates, grades, assignments, announcements, syllabi) through [brightspace-mcp-server](https://github.com/RohanMuppa/brightspace-mcp-server) by Rohan Muppa (MIT). It's pinned to an exact version in `~/opt/brightspace-mcp`, never `npx ...@latest`. Every chat turn starts it as a third MCP server once its launcher exists (`brightspaceServer` in `src/discord/chat.ts`; override the path with `DUM_BRIGHTSPACE_MCP`). Dum, the tutor and the librarian get its reading tools. Nobody gets `sign_out` or classmates' rosters and emails, and only the librarian can save files from it.
+
+Sign-in is a headless Chromium going through Purdue's Microsoft login. The server keeps the password and its session key in the Secret Service through `secret-tool`. Hub has no desktop to unlock a keyring, so `gnome-keyring-daemon.service` gets a drop-in that unlocks the `login` keyring at start from a random key in `~/.config/gnome-keyring-headless/unlock-key` (mode 600). D-Bus activation goes through that unit, so there is only ever the one, unlocked daemon. That keeps the password out of plain files, but anyone who can read files as ryanhubbart can read the keyring too. Don't store the authenticator setup key: Ryan's second factor stays on his phone.
+
+```sh
+sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-tools
+sudo update-alternatives --set pinentry /usr/bin/pinentry-curses   # gnome-keyring pulls in pinentry-gnome3
+install -d -m 700 ~/.config/gnome-keyring-headless
+[ -e ~/.config/gnome-keyring-headless/unlock-key ] || (umask 077; head -c 48 /dev/urandom | base64 -w0 > ~/.config/gnome-keyring-headless/unlock-key)
+install -D -m 644 deploy/brightspace/gnome-keyring-headless-unlock.conf ~/.config/systemd/user/gnome-keyring-daemon.service.d/headless-unlock.conf
+install -D -m 644 -t ~/.local/share/dbus-1/services deploy/brightspace/org.freedesktop.secrets.service deploy/brightspace/org.gnome.keyring.service
+systemctl --user daemon-reload && systemctl --user add-wants default.target gnome-keyring-daemon.service
+busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig
+systemctl --user restart gnome-keyring-daemon.service
+
+install -D -m 644 -t ~/opt/brightspace-mcp deploy/brightspace/package.json deploy/brightspace/package-lock.json
+install -D -m 755 deploy/brightspace/brightspace ~/opt/brightspace-mcp/bin/brightspace
+(cd ~/opt/brightspace-mcp && npm ci && ./node_modules/.bin/playwright install chromium && sudo ./node_modules/.bin/playwright install-deps chromium)
+```
+
+Then Ryan signs in once, himself, in a terminal on hub: `~/opt/brightspace-mcp/bin/brightspace setup`. It asks for his Purdue username and password, offers to save an authenticator setup key (leave it empty), signs in, and prints a number that he types into Microsoft Authenticator on his phone. Answer no when it offers to configure Claude Code or Codex, since that would register the unpinned `npx ...@latest`. Later sessions renew in the background with the saved password. When Microsoft wants the phone again, the tool response carries the number and Dum passes it on in Discord. `brightspace doctor` checks the setup, and `brightspace auth --logout` forgets the session.
+
+To upgrade, change the exact version in `deploy/brightspace/package.json`, check the new release against its GitHub source, then reinstall as above and run `npm test`. The test pins the server's tool list.
+
 ## Verify
 
 ```sh

@@ -1,0 +1,8 @@
+{
+  "name": "brightspace-mcp-pinned",
+  "private": true,
+  "description": "Pinned install of brightspace-mcp-server for Dum. Upgrade deliberately: change the exact version, npm install, re-verify.",
+  "dependencies": {
+    "brightspace-mcp-server": "3.13.15"
+  }
+}
