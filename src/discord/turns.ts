@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import type { SavedAttachment } from "./attachments.ts";
 
 export type TurnStatus = "queued" | "running";
 
@@ -41,8 +42,11 @@ function writeJson(path: string, value: unknown): void {
   renameSync(`${path}.tmp`, path);
 }
 
-/** Records a new turn, queued. Ryan's words go in a private file for the verbatim check. */
-export function queueTurn(root: string, input: Omit<Turn, "schemaVersion" | "id" | "createdAt" | "status" | "retried" | "resume"> & { text: string }, now = new Date()): Turn {
+/**
+ * Records a new turn, queued. Ryan's words go in a private file for the verbatim check, and what
+ * he attached (already downloaded) beside them.
+ */
+export function queueTurn(root: string, input: Omit<Turn, "schemaVersion" | "id" | "createdAt" | "status" | "retried" | "resume"> & { text: string; attachments?: SavedAttachment[] }, now = new Date()): Turn {
   const turn: Turn = {
     schemaVersion: 1,
     id: randomUUID(),
@@ -59,6 +63,7 @@ export function queueTurn(root: string, input: Omit<Turn, "schemaVersion" | "id"
   const dir = turnDir(root, turn.id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, "source.txt"), input.text, { mode: 0o600 });
+  if (input.attachments?.length) writeJson(join(dir, "attachments.json"), input.attachments);
   writeJson(join(dir, "turn.json"), turn);
   return turn;
 }
@@ -93,6 +98,17 @@ export function sourceText(root: string, id: string): string {
   return readFileSync(join(turnDir(root, id), "source.txt"), "utf8");
 }
 
+/** What Ryan attached to the turn's message; none for turns queued before attachments were kept. */
+export function turnAttachments(root: string, id: string): SavedAttachment[] {
+  const path = join(turnDir(root, id), "attachments.json");
+  try {
+    const list = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return Array.isArray(list) ? (list as SavedAttachment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Which queued turns may start now: the oldest ones, up to the parallel limit. */
 export function startable(turns: Turn[], limit: number): Turn[] {
   const room = limit - turns.filter((t) => t.status === "running").length;
@@ -103,15 +119,21 @@ export function unitName(id: string): string {
   return `dum-turn-${id.slice(0, 8)}`;
 }
 
+/** What the turn's unit runs: the command, with its input from `TURN_STDIN` and its output in the turn's folder. */
+export function turnScript(): string {
+  return `timeout ${MAX_TURN_SECONDS} "$0" "$@" < "$TURN_STDIN" > "$TURN_DIR/out.jsonl" 2> "$TURN_DIR/err.log"; echo $? > "$TURN_DIR/exit.tmp"; mv "$TURN_DIR/exit.tmp" "$TURN_DIR/exit"`;
+}
+
 /**
- * Starts a turn as its own systemd user unit. The command's events stream to out.jsonl and its
- * exit code lands in `exit` when it ends, however long the bot is away.
+ * Starts a turn as its own systemd user unit. The command reads `stdin` (a file) when it has one,
+ * its events stream to out.jsonl and its exit code lands in `exit` when it ends, however long the
+ * bot is away.
  */
-export async function launch(root: string, turn: Turn, command: { bin: string; args: string[]; cwd: string; env: Record<string, string> }): Promise<void> {
+export async function launch(root: string, turn: Turn, command: { bin: string; args: string[]; cwd: string; env: Record<string, string>; stdin?: string }): Promise<void> {
   const dir = turnDir(root, turn.id);
   for (const f of ["out.jsonl", "err.log", "exit"]) rmSync(join(dir, f), { force: true });
-  const script = `timeout ${MAX_TURN_SECONDS} "$0" "$@" > "$TURN_DIR/out.jsonl" 2> "$TURN_DIR/err.log"; echo $? > "$TURN_DIR/exit.tmp"; mv "$TURN_DIR/exit.tmp" "$TURN_DIR/exit"`;
-  const setenv = Object.entries({ ...command.env, TURN_DIR: dir }).flatMap(([k, v]) => [`--setenv=${k}=${v}`]);
+  const script = turnScript();
+  const setenv = Object.entries({ ...command.env, TURN_DIR: dir, TURN_STDIN: command.stdin ?? "/dev/null" }).flatMap(([k, v]) => [`--setenv=${k}=${v}`]);
   const args = ["--user", `--unit=${unitName(turn.id)}`, "--collect", "--quiet", `--working-directory=${command.cwd}`, ...setenv, "--", "/bin/sh", "-c", script, command.bin, ...command.args];
   await new Promise<void>((resolve, reject) => execFile("systemd-run", args, (err) => (err ? reject(err) : resolve())));
 }

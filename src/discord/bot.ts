@@ -21,7 +21,8 @@ import { approvalCard, adoptHandoffs, boardMessage, decidedCard, parseDecision, 
 import { avatarPng } from "./glyph.ts";
 import { DiscordError, gateway, gone, GUILD_MESSAGES, MISSING_PERMISSIONS, rest } from "./rest.ts";
 import { audit, chatCommand, prompt, sessionFor, splitReply, stripMentions, teamFooter, turnResult, type Sessions } from "./chat.ts";
-import { alive, finished, launch, listTurns, queueTurn, removeTurn, saveTurn, sourceText, startable, turnDir, type Turn } from "./turns.ts";
+import { alive, finished, launch, listTurns, queueTurn, removeTurn, saveTurn, sourceText, startable, turnAttachments, turnDir, type Turn } from "./turns.ts";
+import { DEFAULT_ATTACHMENTS_DIR, incomingAttachments, pruneAttachments, saveAttachments, type DiscordAttachment } from "./attachments.ts";
 import { DUM_BIN } from "../cli.ts";
 
 const POLL_MS = 5_000;
@@ -451,6 +452,8 @@ async function answer(i: Interaction & { id: string; token: string; data?: { cus
 
 const CHAT_STATE = join(process.env.HOME ?? "", ".local", "state", "dum", "chat");
 const TURNS = join(process.env.HOME ?? "", ".local", "state", "dum", "turns");
+/** Files Ryan attaches to his messages, one folder per message, kept for a month. */
+const ATTACHMENTS = process.env.DUM_ATTACHMENTS_DIR?.trim() || DEFAULT_ATTACHMENTS_DIR;
 /** Dum works in its own repository, so it can change itself. */
 const DUM_REPO = join(import.meta.dirname, "..", "..");
 /** Unset uses Ryan's default model for Claude Code. */
@@ -461,7 +464,17 @@ const LONG_NOTE_MS = 60_000;
 const STUCK_MS = 32 * 60_000;
 let sessions: Sessions = { schemaVersion: 1, channels: {} };
 
-type DiscordMessage = { id: string; channel_id: string; guild_id?: string; content: string; author: { id: string; bot?: boolean; global_name?: string; username: string }; mentions?: { id: string }[] };
+type DiscordMessage = {
+  id: string;
+  channel_id: string;
+  guild_id?: string;
+  content: string;
+  author: { id: string; bot?: boolean; global_name?: string; username: string };
+  mentions?: { id: string }[];
+  attachments?: DiscordAttachment[];
+  /** The message this one replies to, when it does. */
+  referenced_message?: { author: { id: string }; attachments?: DiscordAttachment[] } | null;
+};
 type ChannelInfo = { type: number; parent_id?: string | null };
 
 const channelInfo = new Map<string, ChannelInfo>();
@@ -493,12 +506,16 @@ async function onMessage(m: DiscordMessage): Promise<void> {
     return;
   }
   const text = stripMentions(m.content, botId);
-  if (!text) {
+  const attached = incomingAttachments(m, config.ownerId);
+  if (!text && !attached.length) {
     await discord("POST", `/channels/${m.channel_id}/messages`, { content: "hi! I'm here. ask me anything, or teach me something.", message_reference: { message_id: m.id }, allowed_mentions: NO_PINGS }).catch(() => {});
     return;
   }
+  // Downloaded now: Discord's attachment links expire, and the turn may wait for a free slot.
+  const attachments = attached.length ? await saveAttachments(ATTACHMENTS, m.id, attached) : [];
+  if (attachments.length) log(`message ${m.id} brought ${attachments.length} attachment(s), ${attachments.filter((a) => a.path).length} saved`);
   // Every request runs on its own right away and answers its message in the channel.
-  queueTurn(TURNS, { conversation: m.channel_id, messageId: m.id, replyInline: true, goalId: channels.goalFor(place.home), author: m.author.global_name || m.author.username, text });
+  queueTurn(TURNS, { conversation: m.channel_id, messageId: m.id, replyInline: true, goalId: channels.goalFor(place.home), author: m.author.global_name || m.author.username, text, attachments });
   await pump();
 }
 
@@ -514,12 +531,14 @@ function pump(): Promise<void> {
 async function start(t: Turn): Promise<void> {
   const resume = t.retried ? null : sessionFor(sessions, t.conversation, new Date());
   const place = t.goalId ? { kind: "goal" as const, goalId: t.goalId, title: await goalTitle(t.goalId) } : { kind: "lobby" as const };
+  const attachments = turnAttachments(TURNS, t.id);
   const command = chatCommand({
     claude: process.env.DUM_CLAUDE_EXECUTABLE?.trim() || "/usr/local/bin/claude",
     dumBin: DUM_BIN,
     repo: DUM_REPO,
     turnDir: turnDir(TURNS, t.id),
-    message: prompt({ message: sourceText(TURNS, t.id), author: t.author, place }),
+    message: prompt({ message: sourceText(TURNS, t.id), author: t.author, place, attachments }),
+    attachments,
     resume,
     model: CHAT_MODEL,
   });
@@ -588,8 +607,14 @@ async function complete(t: Turn, done: { code: number; stdout: string; stderr: s
 
 async function chatLoop(): Promise<never> {
   const t = trouble("chat");
+  let pruned = 0;
   for (;;) {
     try {
+      if (Date.now() - pruned > 60 * 60_000) {
+        pruned = Date.now();
+        const n = pruneAttachments(ATTACHMENTS);
+        if (n) log(`pruned ${n} old attachment folder(s)`);
+      }
       await watchTurns();
       t.ok();
     } catch (err) {

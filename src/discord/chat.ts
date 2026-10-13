@@ -7,13 +7,16 @@ import { accessSync, appendFileSync, constants, mkdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGENTS, DENIED_AGENTS } from "./agents.ts";
+import { attachmentNotes, turnInput, type SavedAttachment } from "./attachments.ts";
 
-export function prompt(input: { message: string; author: string; place: { kind: "lobby" } | { kind: "goal"; goalId: string; title: string } }): string {
+export function prompt(input: { message: string; author: string; place: { kind: "lobby" } | { kind: "goal"; goalId: string; title: string }; attachments?: SavedAttachment[] }): string {
   const where =
     input.place.kind === "goal"
       ? `This is the Discord channel for the goal "${input.place.title}" (goal id ${input.place.goalId}). Unless Ryan names another goal, he means this one.`
       : "This is #dum, the lobby: not tied to one goal. Ask which goal if it matters and isn't clear.";
-  return `${where}\n\n${input.author} says:\n${input.message}`;
+  const notes = attachmentNotes(input.attachments ?? []);
+  const said = input.message.trim() ? `${input.author} says:\n${input.message}` : `${input.author} sent this with no text.`;
+  return `${where}\n\n${said}${notes ? `\n\n${notes}` : ""}`;
 }
 
 /** The message text without the mentions of the bot itself. */
@@ -106,11 +109,14 @@ export function brightspaceServer(launcher = process.env.DUM_BRIGHTSPACE_MCP?.tr
 
 /**
  * The command for one turn of Dum's team, working in its own repository. Files live in the turn's
- * folder: Ryan's words (for the verbatim check) and the team's definitions.
+ * folder: Ryan's words (for the verbatim check), the team's definitions, and the turn's input
+ * (the prompt plus any images Ryan attached), which the command reads on stdin.
  */
-export function chatCommand(opts: { claude: string; dumBin: string; repo: string; turnDir: string; message: string; resume: string | null; model: string | null }): { bin: string; args: string[]; cwd: string; env: Record<string, string> } {
+export function chatCommand(opts: { claude: string; dumBin: string; repo: string; turnDir: string; message: string; attachments?: SavedAttachment[]; resume: string | null; model: string | null }): { bin: string; args: string[]; cwd: string; env: Record<string, string>; stdin: string } {
   const sourceFile = join(opts.turnDir, "source.txt");
   const agentsFile = join(opts.turnDir, "agents.json");
+  const inputFile = join(opts.turnDir, "input.jsonl");
+  writeFileSync(inputFile, turnInput(opts.message, opts.attachments ?? []), { mode: 0o600 });
   writeFileSync(agentsFile, JSON.stringify(Object.fromEntries(Object.entries(AGENTS).map(([k, a]) => [k, { ...a, ...(opts.model ? { model: opts.model } : {}) }]))), { mode: 0o600 });
   const mcp = JSON.stringify({
     mcpServers: {
@@ -121,7 +127,8 @@ export function chatCommand(opts: { claude: string; dumBin: string; repo: string
   });
   const args = [
     "-p",
-    opts.message,
+    "--input-format",
+    "stream-json",
     "--output-format",
     "stream-json",
     "--verbose",
@@ -148,7 +155,7 @@ export function chatCommand(opts: { claude: string; dumBin: string; repo: string
   ];
   const env: Record<string, string> = {};
   for (const k of ["PATH", "HOME", "LANG", "USER"]) if (process.env[k]) env[k] = process.env[k]!;
-  return { bin: opts.claude, args, cwd: opts.repo, env };
+  return { bin: opts.claude, args, cwd: opts.repo, env, stdin: inputFile };
 }
 
 /** One line per turn: who did what. No message text and no tool inputs, so nothing private lands here. */
