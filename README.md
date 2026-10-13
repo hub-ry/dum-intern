@@ -125,6 +125,23 @@ Dum lives on hub and stays up when the laptop is closed. You can reach it four w
 
 **The loop between hub and the laptop.** Agents hand work to each other through `~/handoff`, in the format its README defines. An agent on hub calls `handoff_create` for `laptop` when something needs the Mac: its apps, its browser, its screen. Discord pings you. The Claude app on the laptop runs a scheduled pickup every 30 minutes while it's awake. It does the task within the task's stated scope, then writes `result.md` back through the same tools. The agent on hub picks the result up with `handoff_wait`. It works in the other direction too: Claude on the laptop can hand work to `hub` for omp or Codex. Handoffs never carry secrets; a write with a credential-looking line is refused.
 
+## Hub's screen, live in Discord
+
+Hub has a screen nobody sits at: Xvfb on display `:99` with openbox, and BrowserOS running there as the agents' browser. Any agent on hub can drive that browser through its MCP server (`browseros-hub`, `http://127.0.0.1:9200/mcp`). You watch or take over in noVNC from any tailnet device at `http://100.109.151.100:6080/vnc.html`.
+
+A bot can't go live in a voice channel, so `dum-live` streams the screen another way. It grabs an 80x50 grayscale thumbnail every two seconds. When enough of it changes, it posts one silent message in a private `#hub-live` channel and swaps that message's screenshot every five seconds while the screen keeps moving. Each thumbnail pixel averages a 20x20 patch and has to move by 16 levels, at least three of them at once, so a blinking cursor or a clock doesn't count. After three quiet minutes the message is marked ended and keeps its last frame. Each stretch of work gets its own message, so the channel doubles as a log of what agents did on hub. The message names the focused window, which is usually the page BrowserOS has open, and links the noVNC page.
+
+Before anything private goes on that screen (an address, a birthday, personal answers on a form), the agent runs `dum live pause`. That stops streaming within two seconds and marks the message paused. `dum live pause 30` lasts half an hour, `dum live pause 0` lasts until `dum live resume`, and a plain pause is an hour. `dum live status` says which.
+
+```sh
+install -D -m 644 deploy/dum-live.service ~/.config/systemd/user/dum-live.service
+systemctl --user daemon-reload
+systemctl --user enable --now dum-live.service
+journalctl --user -u dum-live.service
+```
+
+It uses the bot's token and guild from `~/.config/dum-discord/environment`, makes `#hub-live` under the "Dum goals" category, and keeps its channel and current message in `~/.local/state/dum-discord/live.json`. A message left live by a restart is marked ended when the service comes back. `src/live/live.ts` holds the change detection, the live and idle rules and the message text, all tested without a screen or Discord.
+
 ## Root context
 
 The workshop's root context, which every build sees, comes from files on hub. Each goal still keeps its own. `~/context/dum-root.txt` lists the source files in priority order (home-relative globs, `!` to exclude). `src/context/root-context.ts` packs whole files into the workshop's 24,000-character limit and lists the rest by name.
@@ -235,6 +252,7 @@ The reusable [dum-publish skill](.claude/skills/dum-publish/SKILL.md) documents 
 - `src/client`: the one client for the workshop API. `src/shared`: the approval queue and the `~/handoff` exchange.
 - `src/context`: root context sync from files on hub.
 - `src/internship`: the internship board watcher and morning nag.
+- `src/live`: hub's virtual screen streamed into `#hub-live`, and `dum live pause`.
 - `src/art`: authored Dum and Wizard glyphs.
 - `src/site`: public product site and an explicitly labelled example presentation.
 - `src/public`: static-only public hosting; no workshop credentials or private APIs.

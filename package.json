@@ -11,10 +11,11 @@
     "dev": "tsx watch src/workshop/server.ts",
     "note": "tsx src/workshop/notes-cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/workshop/*.test.ts src/discord/*.test.ts src/context/*.test.ts src/mcp/*.test.ts src/internship/*.test.ts src/shared/*.test.ts",
+    "test": "node --import tsx --test src/workshop/*.test.ts src/discord/*.test.ts src/context/*.test.ts src/mcp/*.test.ts src/internship/*.test.ts src/shared/*.test.ts src/live/*.test.ts",
     "discord": "tsx src/discord/bot.ts",
     "root-context": "tsx src/context/root-context.ts",
-    "internship": "tsx src/internship/watch.ts"
+    "internship": "tsx src/internship/watch.ts",
+    "live": "tsx src/live/stream.ts"
   },
   "dependencies": {
     "tsx": "^4.23.13",

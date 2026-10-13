@@ -5,6 +5,7 @@
 //   dum mcp install            register Dum with every agent on hub: Codex, omp, Claude Code
 //   dum mcp laptop             print the one-time setup for Claude on the laptop
 //   dum codex-mcp              serve a `codex` tool that hands tasks to the Codex agent (for omp)
+//   dum live pause|resume      stop or restart hub's screen streaming into Discord
 //
 // Agents run `dum mcp` themselves; nothing listens on the network.
 
@@ -20,6 +21,8 @@ import { DEFAULT_HANDOFF_DIR } from "./shared/handoff.ts";
 import { DEFAULT_POSTS_DIR } from "./shared/file-posts.ts";
 import { DEFAULT_LOCK, holder, release, tryTake } from "./shared/lock.ts";
 import { ship } from "./shared/ship.ts";
+import { clearPause, DEFAULT_PAUSE, readPause, writePause } from "./live/pause.ts";
+import { pausedNow } from "./live/live.ts";
 
 const HOME = homedir();
 /** The stable path agents launch, a symlink to bin/dum in this checkout. */
@@ -141,7 +144,11 @@ const HELP = `dum: Dum's command line on hub
   dum codex-mcp         serve one tool, codex, that hands a task to the Codex agent (omp uses it)
   dum lock take NAME    wait for and take the lock on Dum's own code (the engineer uses it)
   dum lock release NAME let it go
-  dum ship "MESSAGE"    typecheck, test, commit as Ryan and push Dum's own code to GitHub main`;
+  dum ship "MESSAGE"    typecheck, test, commit as Ryan and push Dum's own code to GitHub main
+  dum live pause [MIN]  stop streaming hub's screen to #hub-live for MIN minutes (60; 0 until resumed)
+                        before anything private (an address, a birthday, personal answers) is on screen
+  dum live resume       stream again
+  dum live status       whether it's paused`;
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, sub] = argv;
@@ -196,6 +203,25 @@ export async function main(argv: string[]): Promise<number> {
         if (!waited) console.log(`waiting: ${r.holder.who} is changing Dum's code`);
         await new Promise((ok) => setTimeout(ok, 5000));
       }
+    }
+  }
+  if (cmd === "live") {
+    if (sub === "pause") {
+      const minutes = argv[2] === undefined ? 60 : Number(argv[2]);
+      if (!Number.isFinite(minutes) || minutes < 0) throw new Error("Minutes must be a number, 0 for until resumed: dum live pause 30");
+      const p = writePause(DEFAULT_PAUSE, minutes);
+      console.log(p.until ? `paused until ${new Date(p.until).toLocaleTimeString()}` : "paused until dum live resume");
+      return 0;
+    }
+    if (sub === "resume") {
+      clearPause(DEFAULT_PAUSE);
+      console.log("streaming again");
+      return 0;
+    }
+    if (sub === "status" || !sub) {
+      const p = readPause(DEFAULT_PAUSE);
+      console.log(!pausedNow(p, Date.now()) ? "streaming (when the screen changes)" : p!.until ? `paused until ${new Date(p!.until).toLocaleTimeString()}` : "paused until dum live resume");
+      return 0;
     }
   }
   if (cmd === "codex-mcp") {
