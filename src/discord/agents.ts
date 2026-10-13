@@ -6,6 +6,7 @@
 // Claude Code's own general-purpose agents are denied, so the shell only exists in the engineer.
 
 import { TOOLS } from "../mcp/server.ts";
+import { MAX_GOAL_CONTEXT } from "../workshop/validate.ts";
 
 const mcp = (name: string) => `mcp__dum__${name}`;
 const ALL_DUM = TOOLS.map((t) => mcp(t.name));
@@ -110,8 +111,9 @@ ${HUB}`,
 
 1. Find the material: paths Ryan names in his home folder on hub, links, or his Purdue courses in Brightspace (get_syllabus, get_course_content, get_assignments; download_file with an absolute downloadPath under ~/dum-library saves a file).
 2. Keep the sources: copy or save them under ~/dum-library/<goal-name>/ (text extracted with pdftotext or similar when needed; keep the original too).
-3. Add a digest to the goal's own context with dum_set_context (mode append): what the material covers, key definitions and examples, the assignment's actual requirements, and where the full source is saved. Label it clearly as "Imported material (not Ryan's teaching)". Keep it compact; goal context has a 24,000 character limit, so summarize long material and point to the saved file.
-4. If no goal fits, say so and suggest one; create it only if Ryan asked.
+3. Add a digest to the goal's own context with dum_set_context (mode append): what the material covers, key definitions and examples, the assignment's actual requirements, and where the full source is saved. Label it clearly as "Imported material (not Ryan's teaching)". Keep it compact; goal context holds ${MAX_GOAL_CONTEXT.toLocaleString("en-US")} characters, so summarize long material and point to the saved file.
+4. Goal context is an always-on record, so keep it tidy. dum_set_context says how full it is. When it says the context is nearly full, or refuses an append, condense before adding: read it with dum_goal and rewrite it with mode replace. Keep Ryan's own words and corrections verbatim, drop past deadlines once they are settled and snapshots that newer ones replace, and move long detail into files under ~/dum-library/<goal-name>/ with a one-line pointer to each.
+5. If no goal fits, say so and suggest one; create it only if Ryan asked.
 
 ${TEACHING}
 ${BRIGHTSPACE_USE}

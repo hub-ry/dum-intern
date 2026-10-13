@@ -40,7 +40,7 @@ import type { Socket } from "node:net";
 import { WorkshopStore, WorkshopRunner, WorkshopError } from "./runtime.js";
 import type { Attempt, ExerciseConcept, Goal, Job, Material, Progress, Teaching } from "./runtime.js";
 import { COMBINED_CONCEPT, CONDITIONS_CONCEPT, LOOPS_CONCEPT } from "./materials.js";
-import { MAX_AMBITION, MAX_CONCEPT, MAX_CONTEXT, MAX_EXERCISE_ID, MAX_TEXT, MAX_TITLE } from "./validate.ts";
+import { MAX_AMBITION, MAX_CONCEPT, MAX_EXERCISE_ID, MAX_GLOBAL_CONTEXT, MAX_GOAL_CONTEXT, MAX_TEXT, MAX_TITLE } from "./validate.ts";
 import { MAX_NOTE_BODY_BYTES, NotesProjectionError, PublicNotes } from "./public-notes.js";
 import { Shares, disposition, presentation, shareRoots } from "./shares.ts";
 import { ensurePrivateDir } from "./files.ts";
@@ -92,7 +92,8 @@ function bodyLimit(fields: Record<string, number>): number {
   return bytes;
 }
 const LOGIN_BODY = bodyLimit({ password: MAX_PASSWORD_CHARS });
-const CONTEXT_BODY = bodyLimit({ context: MAX_CONTEXT });
+const GLOBAL_CONTEXT_BODY = bodyLimit({ context: MAX_GLOBAL_CONTEXT });
+const GOAL_CONTEXT_BODY = bodyLimit({ context: MAX_GOAL_CONTEXT });
 const GOAL_BODY = bodyLimit({ title: MAX_TITLE, ambition: MAX_AMBITION });
 const GRADED_ATTEMPT_BODY = bodyLimit({ exerciseId: MAX_EXERCISE_ID, answer: MAX_ANSWER_CHARS });
 const REPORT_BODY = bodyLimit({ concept: MAX_CONCEPT, text: MAX_TEXT, helped: "false".length });
@@ -792,7 +793,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     if (path === "/api/context") {
       if (method === "GET") return sendJson(res, 200, { global: store.getGlobalContext() });
       if (method === "PUT") {
-        const body = await readJsonBody(req, CONTEXT_BODY);
+        const body = await readJsonBody(req, GLOBAL_CONTEXT_BODY);
         return sendJson(res, 200, { global: store.updateGlobalContext(field(body, "context")) });
       }
       throw new HttpError(405, "Method not allowed.");
@@ -855,7 +856,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       if (sub === "context") {
         if (method === "GET") return sendJson(res, 200, goalContextView(goalId));
         if (method === "PUT") {
-          const body = await readJsonBody(req, CONTEXT_BODY);
+          const body = await readJsonBody(req, GOAL_CONTEXT_BODY);
           store.updateGoal(goalId, { context: field(body, "context") });
           return sendJson(res, 200, goalContextView(goalId));
         }

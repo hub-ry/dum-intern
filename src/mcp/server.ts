@@ -13,6 +13,7 @@ import { createHandoff, listHandoffs, readHandoff, writeResult, HandoffError, ty
 import { queuePost } from "../shared/file-posts.ts";
 import { UPLOAD_LIMIT } from "../discord/files.ts";
 import { scrub } from "../context/root-context.ts";
+import { MAX_GOAL_CONTEXT } from "../workshop/validate.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "1.0.0";
@@ -38,6 +39,10 @@ type Json = Record<string, unknown>;
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
 class ToolError extends Error {}
+
+/** dum_set_context warns past this share of the goal context limit, before appends start failing. */
+const CONTEXT_NEARLY_FULL = 0.8;
+const count = (n: number) => n.toLocaleString("en-US");
 
 const INSTRUCTIONS = `Dum is Ryan's learning companion, running on his server "hub". Ryan teaches Dum concepts in his own words; Dum builds real, working creations from that teaching and presents them as illustrated pages. Goals organize the work; each has its own context, study materials and Discord channel.
 
@@ -69,7 +74,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "dum_set_context",
     title: "Set goal context",
-    description: "Replace or add to a goal's own context: notes, course details, constraints Dum should know. Root context comes from files on hub and can't be set here.",
+    description: `Replace or add to a goal's own context: notes, course details, constraints Dum should know. Holds up to ${MAX_GOAL_CONTEXT.toLocaleString("en-US")} characters; keep it a digest and put long material in files under ~/dum-library/<goal-name>/. Root context comes from files on hub and can't be set here.`,
     inputSchema: { type: "object", properties: { goal: goalArg, context: { type: "string" }, mode: { type: "string", enum: ["append", "replace"], description: "Default append." } }, required: ["goal", "context"] },
     annotations: write,
   },
@@ -310,8 +315,19 @@ export function createMcp(deps: Deps) {
       const text = str(args, "context");
       const replace = args.mode === "replace";
       const next = replace ? text : goal.baseContext.trim() ? `${goal.baseContext.trimEnd()}\n\n${text}` : text;
+      if (next.length > MAX_GOAL_CONTEXT) {
+        throw new ToolError(
+          `Not saved: the context of "${goal.title}" would be ${count(next.length)} characters and the limit is ${count(MAX_GOAL_CONTEXT)}. ` +
+            `It has ${count(goal.baseContext.length)} now and this ${replace ? "replacement" : "addition"} is ${count(text.length)}. ` +
+            `Condense it: read it with dum_goal, then call dum_set_context with mode "replace" and a shorter version that keeps Ryan's own words verbatim, ` +
+            `drops past deadlines once they are settled and snapshots that newer ones replace, and moves long detail into files under ~/dum-library/<goal-name>/ with a one-line pointer to each.`,
+        );
+      }
       await deps.workshop.setContext(goal.id, next);
-      return `${replace ? "Replaced" : "Added to"} the context of "${goal.title}" (${next.length} characters now).`;
+      const saved = `${replace ? "Replaced" : "Added to"} the context of "${goal.title}" (${count(next.length)} of ${count(MAX_GOAL_CONTEXT)} characters).`;
+      return next.length > CONTEXT_NEARLY_FULL * MAX_GOAL_CONTEXT
+        ? `${saved} It's nearly full: condense it soon with mode "replace", moving detail into files under ~/dum-library/<goal-name>/.`
+        : saved;
     },
 
     async dum_read_material(args) {

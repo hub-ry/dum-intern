@@ -11,9 +11,10 @@
 import { readFileSync, statSync, globSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { MAX_GLOBAL_CONTEXT } from "../workshop/validate.ts";
 
-/** The workshop's MAX_CONTEXT. */
-export const LIMIT = 24_000;
+/** The workshop's root context limit. */
+export const LIMIT = MAX_GLOBAL_CONTEXT;
 const MAX_FILE_BYTES = 256 * 1024;
 
 export type Source = { path: string; text: string };

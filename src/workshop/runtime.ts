@@ -48,7 +48,8 @@ import {
   MAX_ANSWER,
   MAX_ATTEMPTS_PER_GOAL,
   MAX_CONCEPT,
-  MAX_CONTEXT,
+  MAX_GLOBAL_CONTEXT,
+  MAX_GOAL_CONTEXT,
   MAX_ERROR_LENGTH,
   MAX_EVIDENCE_PER_GOAL,
   MAX_EXERCISE_ID,
@@ -512,7 +513,7 @@ export class WorkshopStore {
     const o = requireObject(patch, "goal update");
     const title = o.title === undefined ? undefined : requireText(o.title, "title", MAX_TITLE);
     const ambition = o.ambition === undefined ? undefined : requireText(o.ambition, "ambition", MAX_AMBITION);
-    const context = o.context === undefined ? undefined : requireBoundedString(o.context, "context", MAX_CONTEXT);
+    const context = o.context === undefined ? undefined : requireBoundedString(o.context, "goal context", MAX_GOAL_CONTEXT);
     if (title === undefined && ambition === undefined && context === undefined) {
       throw WorkshopError.invalid("goal update needs at least one of title, ambition, context");
     }
@@ -760,7 +761,7 @@ export class WorkshopStore {
 
   updateGlobalContext(context: string): GlobalContext {
     this.ensureOpen();
-    const text = requireBoundedString(context, "context", MAX_CONTEXT);
+    const text = requireBoundedString(context, "root context", MAX_GLOBAL_CONTEXT);
     this.commit((s) => {
       s.global.baseContext = text;
       s.global.updatedAt = nowIso();

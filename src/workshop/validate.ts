@@ -29,7 +29,12 @@ export const MAX_TITLE = 160;
 export const MAX_AMBITION = 4000;
 export const MAX_CONCEPT = 160;
 export const MAX_TEXT = 12000; // teaching, attempt, correction, revisit note
-export const MAX_CONTEXT = 24000;
+// Context caps are model budgets as much as storage limits. A goal's context goes whole into every
+// build for that goal and back to agents through dum_goal (whose MCP result has to stay under Claude
+// Code's 25k-token tool output limit), so 48,000 characters, about 12-15k tokens, leaves room for the
+// rest of either. The root context goes into every build of every goal and stays smaller.
+export const MAX_GOAL_CONTEXT = 48000;
+export const MAX_GLOBAL_CONTEXT = 24000;
 export const MIN_INTERVAL_MINUTES = 1;
 export const MAX_INTERVAL_MINUTES = 525600; // one year
 export const MAX_ERROR_LENGTH = 4000;
@@ -85,19 +90,24 @@ export function requireId(value: unknown, what: string): string {
   return value;
 }
 
+/** Says how long the text is as well as the limit, so whoever wrote it knows how much to cut. */
+function tooLong(what: string, length: number, max: number): string {
+  return `${what} is ${length.toLocaleString("en-US")} characters; the limit is ${max.toLocaleString("en-US")}`;
+}
+
 /** A non-empty string within `max` characters, surrounding whitespace removed. */
 export function requireText(value: unknown, what: string, max: number): string {
   if (typeof value !== "string") throw WorkshopError.invalid(`${what} must be a string`);
   const text = value.trim();
   if (!text) throw WorkshopError.invalid(`${what} must not be empty`);
-  if (text.length > max) throw WorkshopError.invalid(`${what} must be at most ${max} characters`);
+  if (text.length > max) throw WorkshopError.invalid(tooLong(what, text.length, max));
   return text;
 }
 
 /** A string within `max` characters, possibly empty. */
 export function requireBoundedString(value: unknown, what: string, max: number): string {
   if (typeof value !== "string") throw WorkshopError.invalid(`${what} must be a string`);
-  if (value.length > max) throw WorkshopError.invalid(`${what} must be at most ${max} characters`);
+  if (value.length > max) throw WorkshopError.invalid(tooLong(what, value.length, max));
   return value;
 }
 
@@ -301,7 +311,7 @@ function goalRecord(value: unknown, where: string): GoalRecord {
     id: uuid(g.id, `${where}.id`),
     title: str(g.title, `${where}.title`, MAX_TITLE),
     ambition: str(g.ambition, `${where}.ambition`, MAX_AMBITION),
-    baseContext: str(g.baseContext, `${where}.baseContext`, MAX_CONTEXT),
+    baseContext: str(g.baseContext, `${where}.baseContext`, MAX_GOAL_CONTEXT),
     materials: list(g.materials, `${where}.materials`, MAX_MATERIALS_PER_GOAL).map((m, i) => material(m, `${where}.materials[${i}]`)),
     createdAt: iso(g.createdAt, `${where}.createdAt`),
     updatedAt: iso(g.updatedAt, `${where}.updatedAt`),
@@ -412,7 +422,7 @@ function globalRecord(value: unknown, where: string): GlobalContextRecord {
   const g = obj(value, where);
   knownKeys(g, ["baseContext", "events", "updatedAt"], where);
   return {
-    baseContext: str(g.baseContext, `${where}.baseContext`, MAX_CONTEXT),
+    baseContext: str(g.baseContext, `${where}.baseContext`, MAX_GLOBAL_CONTEXT),
     events: list(g.events, `${where}.events`, MAX_GLOBAL_EVENTS).map((e, i) => globalEvent(e, `${where}.events[${i}]`)),
     updatedAt: iso(g.updatedAt, `${where}.updatedAt`),
   };

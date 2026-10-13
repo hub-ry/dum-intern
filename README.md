@@ -127,7 +127,9 @@ Dum lives on hub and stays up when the laptop is closed. You can reach it four w
 
 ## Root context
 
-The workshop's root context, which every build sees, comes from files on hub. Each goal still keeps its own. `~/context/dum-root.txt` lists the source files in priority order (home-relative globs, `!` to exclude). `src/context/root-context.ts` packs whole files into the workshop's 24,000-character limit and lists the rest by name. Lines that look like credentials are dropped before anything leaves hub, and nothing is written when the result hasn't changed.
+The workshop's root context, which every build sees, comes from files on hub. Each goal still keeps its own. `~/context/dum-root.txt` lists the source files in priority order (home-relative globs, `!` to exclude). `src/context/root-context.ts` packs whole files into the workshop's 24,000-character limit and lists the rest by name.
+
+A goal's own context holds up to 48,000 characters (about 12-15k tokens). It goes whole into every build for that goal and comes back to agents in `dum_goal`, which has to fit Claude Code's 25,000-token limit on a tool result, so the cap is a model budget rather than a storage one. It is one number for every goal, set in `src/workshop/validate.ts`. The root context stays at 24,000 because every build of every goal carries it. `dum_set_context` reports how full a goal's context is, warns past 80%, and refuses anything over the limit with the sizes involved and how to condense: rewrite it with mode `replace`, keeping Ryan's words verbatim, and move long detail into files under `~/dum-library/<goal-name>/`. Lines that look like credentials are dropped before anything leaves hub, and nothing is written when the result hasn't changed.
 
 ```sh
 npm run root-context -- --show   # preview, sends nothing

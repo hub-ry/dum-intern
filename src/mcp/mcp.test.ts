@@ -152,6 +152,30 @@ test("context appends by default and replaces on request", async () => {
   }
 });
 
+test("context past the goal cap is refused before the workshop with the sizes and how to condense; near the cap it warns", async () => {
+  const long = "x".repeat(40_000);
+  const goal = async () => ({ id: GOAL, title: "gpa", ambition: "pass", baseContext: long, materials: [], schedule: null });
+  const { text, calls, cleanup } = setup({ goal });
+  try {
+    const refused = await text("dum_set_context", { goal: GOAL, context: "y".repeat(9_000) });
+    assert.equal(refused.error, true);
+    assert.match(refused.text, /would be 49,002 characters and the limit is 48,000/);
+    assert.match(refused.text, /It has 40,000 now and this addition is 9,000/);
+    assert.match(refused.text, /mode "replace"/);
+    assert.match(refused.text, /~\/dum-library\/<goal-name>\//);
+    assert.deepEqual(calls, [], "nothing reaches the workshop");
+
+    const near = await text("dum_set_context", { goal: GOAL, context: "y".repeat(100) });
+    assert.equal(near.error, false);
+    assert.match(near.text, /\(40,102 of 48,000 characters\)\. It's nearly full/);
+
+    const tight = await text("dum_set_context", { goal: GOAL, context: "z".repeat(1_000), mode: "replace" });
+    assert.equal(tight.text, `Replaced the context of "gpa" (1,000 of 48,000 characters).`);
+  } finally {
+    cleanup();
+  }
+});
+
 test("handoffs go both ways in the README format and secrets are refused", async () => {
   const { mcp, deps, text, cleanup } = setup();
   try {
