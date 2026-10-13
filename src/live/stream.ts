@@ -196,8 +196,19 @@ async function stop(): Promise<void> {
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 
-botId = ((await discord("GET", "/users/@me")) as { id: string }).id;
-await closeLeftover();
+// At boot the network can come up after this service (a user unit can't wait for it), so the
+// first Discord calls retry instead of failing the service.
+for (let wait = 2_000; ; wait = Math.min(wait * 2, 60_000)) {
+  try {
+    botId = ((await discord("GET", "/users/@me")) as { id: string }).id;
+    await closeLeftover();
+    break;
+  } catch (err) {
+    if (err instanceof DiscordError && err.status === 401) throw err; // a bad token won't fix itself
+    log(`can't reach Discord yet (${(err as Error).message.split("\n")[0]}); trying again in ${wait / 1000} s`);
+    await sleep(wait);
+  }
+}
 log(`watching ${config.display}`);
 
 let prev: Uint8Array | null = null;
