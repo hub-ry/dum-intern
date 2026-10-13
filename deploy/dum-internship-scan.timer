@@ -1,0 +1,10 @@
+[Unit]
+Description=Dum: internship board check every 4 hours, 7am to 11pm Indiana time
+
+[Timer]
+OnCalendar=*-*-* 07,11,15,19,23:00 America/Indiana/Indianapolis
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

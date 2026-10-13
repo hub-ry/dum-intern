@@ -2,7 +2,7 @@
 // goal's Discord channel. Read and notify only. It never opens, fills in or submits an application.
 //
 //   tsx src/internship/watch.ts scan [--dry-run]   new postings since the last scan (first run: a short top list)
-//   tsx src/internship/watch.ts nag  [--dry-run]   the morning summary and push
+//   tsx src/internship/watch.ts nag  [--dry-run] [--force]   the morning summary and push (once a day)
 //
 // Runs from systemd user timers (deploy/dum-internship-*.timer). Reads the bot token from the file
 // the Discord service already uses (DUM_DISCORD_TOKEN_FILE) and the goal's channel from the bot's
@@ -25,8 +25,8 @@ const WORKSPACE = env.DUM_INTERNSHIP_HOME ?? join(home, "internship");
 const GOAL = env.DUM_INTERNSHIP_GOAL ?? "a0930111-617c-4f59-9669-1b0b49019c58";
 const DISCORD_STATE = env.DUM_DISCORD_STATE_DIR ?? join(home, ".local/state/dum-discord");
 const TZ = "America/Indiana/Indianapolis";
-const CADENCE = "4 times a day";
-const FIRST_RUN_TOP = 8;
+const CADENCE = "every 4 hours from 7am to 11pm";
+const FIRST_RUN_TOP = 10;
 const NEW_MAX = 8;
 const NAG_PICKS = 3;
 /** Consecutive failed scans before Ryan is told the watcher is broken (scans are ~4h apart). */
@@ -47,7 +47,7 @@ type ScanState = {
   /** Set once the "watcher is broken" note is posted, cleared by the next good scan. */
   brokenNoticeAt?: number;
 };
-type NagState = { schemaVersion: 1; picks: { day: string; keys: string[] }[] };
+type NagState = { schemaVersion: 1; picks: { day: string; keys: string[] }[]; /** The last day a nag was posted, so a late or repeated run stays quiet. */ lastDay?: string };
 
 function readJson<T>(name: string): T | undefined {
   const path = join(STATE_DIR, name);
@@ -200,8 +200,12 @@ async function scan(dry: boolean) {
 async function morning(dry: boolean) {
   const now = new Date();
   const day = today(now);
-  const { tracker, notes } = readWorkspace();
   const nagState = readJson<NagState>("nag.json") ?? { schemaVersion: 1, picks: [] };
+  if (nagState.lastDay === day.iso && !dry && !flags.includes("--force")) {
+    log(`already nagged on ${day.iso}; pass --force to post again`);
+    return;
+  }
+  const { tracker, notes } = readWorkspace();
   let open: { good: number; topCities: number; picks: Labeled[] } | undefined;
   try {
     const boards = await readBoards(Math.floor(now.getTime() / 1000));
@@ -223,9 +227,9 @@ async function morning(dry: boolean) {
     recent: recentApplications(tracker, day.iso),
   });
   await say(text, dry);
-  if (dry || !open) return;
-  const picks = [...nagState.picks.filter((p) => p.day !== day.iso), { day: day.iso, keys: open.picks.map((p) => p.key) }].slice(-14);
-  writeJson("nag.json", { schemaVersion: 1, picks } satisfies NagState);
+  if (dry) return;
+  const picks = open ? [...nagState.picks.filter((p) => p.day !== day.iso), { day: day.iso, keys: open.picks.map((p) => p.key) }].slice(-14) : nagState.picks;
+  writeJson("nag.json", { schemaVersion: 1, picks, lastDay: day.iso } satisfies NagState);
 }
 
 const [command, ...flags] = process.argv.slice(2);
@@ -233,7 +237,7 @@ const dry = flags.includes("--dry-run");
 const jobs: Record<string, (dry: boolean) => Promise<void>> = { scan, nag: morning };
 const job = command ? jobs[command] : undefined;
 if (!job) {
-  console.error("usage: watch.ts scan|nag [--dry-run]");
+  console.error("usage: watch.ts scan|nag [--dry-run] [--force]");
   process.exit(2);
 }
 job(dry).catch((err) => {

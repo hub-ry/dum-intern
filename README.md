@@ -113,7 +113,7 @@ Invite the bot with View Channel, Send Messages, Embed Links, Attach Files, Read
 
 Dum lives on hub and stays up when the laptop is closed. You can reach it four ways, and they all work on the same goals and records.
 
-**Discord.** Mention the bot in `#dum` or a goal's channel and just talk: "what did I teach you about loops?", "build something", "teach you: a loop repeats the same steps for each item". Each message runs Claude Code on hub as Dum and its team (below). Dum answers each mention right in the channel, as a reply to that message, and works on several at once (four by default, `DUM_CHAT_PARALLEL`), even in the same channel, so a slow request never holds up the next. Each channel keeps one ongoing conversation. A new request branches it from the latest finished answer (`--fork-session`), so requests running at the same time never share a session. Each turn runs as its own systemd user unit and is kept on disk under `~/.local/state/dum/turns/`, so restarting the bot, even when Dum's engineer does it after changing Dum's own code, doesn't lose an answer: the bot delivers it when it's back. The engineer takes `dum lock take <name>` before changing Dum's code, so two requests never edit it at once. The slash commands still work too, and `#dum-now` shows what Dum is doing, what's queued, and what's waiting on you.
+**Discord.** Mention the bot in `#dum` or a goal's channel and just talk: "what did I teach you about loops?", "build something", "teach you: a loop repeats the same steps for each item". Each message runs Claude Code on hub as Dum and its team (below). Dum answers each mention right in the channel, as a reply to that message, and works on several at once (four by default, `DUM_CHAT_PARALLEL`), even in the same channel, so a slow request never holds up the next. Each channel keeps one ongoing conversation. A new request branches it from the latest finished answer (`--fork-session`), so requests running at the same time never share a session. Each turn runs as its own systemd user unit and is kept on disk under `~/.local/state/dum/turns/`, so restarting the bot, even when Dum's engineer does it after changing Dum's own code, doesn't lose an answer: the bot delivers it when it's back. The engineer takes `dum lock take <name>` before changing Dum's code, so two requests never edit it at once. When a change works, it ships with `dum ship "what changed"`: typecheck and tests again, a scan that refuses credential-shaped values, one commit as hub-ry, and a fast-forward push to `main`. It never force-pushes, and never lists an AI as an author or co-author. The slash commands still work too, and `#dum-now` shows what Dum is doing, what's queued, and what's waiting on you.
 
 **A small team behind the chat.** The Dum you talk to has no shell. It understands you, records your exact words, and routes everything else to a specialist with only the tools that job needs. The tutor explains and makes practice problems; it reads materials and the web but can't record anything as yours. The engineer has the shell: it gives Dum new abilities in its own repo, runs tests, restarts Dum safely, sets up timers, works in your other projects, and can hand coding to Codex. The librarian turns lecture notes, PDFs and assignments into a goal's context, labelled as imported material and never as your teaching. Claude Code's built-in general-purpose agents are denied, so the shell exists only in the engineer. `src/discord/agents.ts` defines the team, and tests check that Dum has no shell, that no specialist can record your words, and that every tool an agent names exists. A reply says which specialists helped, and `~/.local/state/dum/chat/audit.jsonl` records who used which tools on every turn, without message text.
 
@@ -135,6 +135,25 @@ systemctl --user enable --now dum-root-context.timer   # every 5 minutes
 ```
 
 Root context is sent to the model with every build, so put only what you're fine sharing with the provider in those files.
+
+## Internship watch
+
+`src/internship` reads public Summer 2027 boards and posts to the internship goal's channel. It only reads boards and posts links. Nothing in it opens, fills in or submits an application.
+
+- Sources: SimplifyJobs' `listings.json` (dev branch; Software and Data/AI/ML sections, open postings only) and the speedyapply 2027 SWE README. If speedyapply can't be read, the scan carries on with Simplify alone.
+- `scan` runs every 4 hours, 7am to 11pm Indiana time. The first run posts a ranked top 10 and marks everything else seen. After that it pings only when a new posting fits.
+- `nag` runs at 8:30am. It posts the count of good open fits he hasn't applied to, the time-sensitive tracker items and a number to apply to today, at most once a day.
+- Ranking comes from his city tiers, logistics, systems and recsys roles, and the untouched target list in `~/internship/applications/tracker.md`. Companies already in the tracker are left out, or marked if they rejected him. Defense companies never appear. The tracker is only read, never written.
+- The channel comes from the bot's `channels.json` and the token from the file named in `~/.config/dum-discord/environment`. Each posted message is read back from Discord before it counts.
+- State lives in `~/.local/state/dum-internship/`: `scan.json` (seen postings) and `nag.json`. Deleting `scan.json` makes the next scan a first run again.
+
+```sh
+npm run internship -- scan --dry-run   # or nag; prints instead of posting
+install -m 644 deploy/dum-internship-*.service deploy/dum-internship-*.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now dum-internship-scan.timer dum-internship-nag.timer
+systemctl --user disable --now dum-internship-scan.timer dum-internship-nag.timer   # to stop it
+```
 
 ## Verify
 
@@ -181,6 +200,7 @@ The reusable [dum-publish skill](.claude/skills/dum-publish/SKILL.md) documents 
 - `src/mcp` and `src/cli.ts`: the `dum` command and its MCP server. `bin/dum` is what agents launch.
 - `src/client`: the one client for the workshop API. `src/shared`: the approval queue and the `~/handoff` exchange.
 - `src/context`: root context sync from files on hub.
+- `src/internship`: the internship board watcher and morning nag.
 - `src/art`: authored Dum and Wizard glyphs.
 - `src/site`: public product site and an explicitly labelled example presentation.
 - `src/public`: static-only public hosting; no workshop credentials or private APIs.

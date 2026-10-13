@@ -184,7 +184,8 @@ export function openLoops(tracker: Tracker, notes: Note[], today: string): Loop[
   const loops: Loop[] = [];
   for (const a of tracker.applications) {
     if (/promised|not delivered|not attached/i.test(a.referral)) {
-      loops.push({ urgency: 80, text: `**${a.company}**: referral was promised and never attached. Email the recruiter the req and your confirmation number today.` });
+      const since = a.applied ? ` (${daysBetween(a.applied, today)} days since you applied)` : "";
+      loops.push({ urgency: 80, text: `**${a.company}**: the referral follow-up email still isn't sent${since} and the referral isn't attached yet. Send the recruiter the req and your confirmation number today.` });
     }
     if (a.stage === "pending") {
       const due = dueDate(`${a.status} ${a.notes}`, today);

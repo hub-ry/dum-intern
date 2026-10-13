@@ -11,6 +11,8 @@ export const LIMIT = 1900;
 export type Labeled = Fit & { known: Known | "draft" | null };
 
 const clip = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`);
+/** Ryan's rule: never an em dash. Board titles sometimes carry one (or an en dash used the same way). */
+export const noDash = (s: string) => s.replace(/\s*[\u2014\u2015]\s*/g, " - ").replace(/\s+\u2013\s+/g, " - ");
 const md = (s: string) => s.replace(/([*_~`|\[\]])/g, "\\$1");
 
 /** One posting on one line: company, linked title, best city, and why it fits. */
@@ -38,8 +40,9 @@ export function chunks(lines: string[]): string[] {
       cur = [];
       len = 0;
     }
-    cur.push(l.length > LIMIT ? clip(l, LIMIT) : l);
-    len += l.length + 1;
+    const safe = noDash(l);
+    cur.push(safe.length > LIMIT ? clip(safe, LIMIT) : safe);
+    len += Math.min(safe.length, LIMIT) + 1;
   }
   if (cur.length > 0) out.push(cur.join("\n").trim());
   return out.filter(Boolean);
@@ -83,8 +86,8 @@ const OPENERS = [
 
 const CLOSERS = [
   "Mission: apply to at least **{n}** today, then log each one in tracker.md the minute you hit submit 📝",
-  "Today's quest: **{n}** applications. Log them in tracker.md right after, future you will thank you 📝",
-  "Goal: **{n}** apps before bed. Thirty seconds each to log them in tracker.md 📝",
+  "Today's quest: apply to at least **{n}**. Log them in tracker.md right after, future you will thank you 📝",
+  "Goal: apply to at least **{n}** before bed. Thirty seconds each to log them in tracker.md 📝",
 ];
 
 /** Stable per day, so a re-run on the same morning says the same thing. */

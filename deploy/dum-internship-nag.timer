@@ -1,0 +1,9 @@
+[Unit]
+Description=Dum: morning internship nag at 8:30 Indiana time
+
+[Timer]
+OnCalendar=*-*-* 08:30 America/Indiana/Indianapolis
+Persistent=true
+
+[Install]
+WantedBy=timers.target
