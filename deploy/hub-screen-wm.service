@@ -1,0 +1,15 @@
+# A small window manager so windows on the virtual screen can be moved and focused.
+[Unit]
+Description=Hub virtual screen window manager (openbox)
+BindsTo=hub-screen.service
+After=hub-screen.service
+
+[Service]
+Environment=DISPLAY=:99
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do [ -e /tmp/.X11-unix/X99 ] && exit 0; sleep 0.2; done; exit 1'
+ExecStart=/usr/bin/openbox
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

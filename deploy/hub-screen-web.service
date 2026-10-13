@@ -1,0 +1,14 @@
+# The virtual screen in a browser tab: noVNC, bound to hub's tailnet address only (no password,
+# like the workshop on Ryan's own tailnet). http://100.109.151.100:6080/vnc.html
+[Unit]
+Description=Hub virtual screen web viewer (noVNC on the tailnet)
+After=hub-screen-vnc.service tailscaled.service
+Wants=hub-screen-vnc.service
+
+[Service]
+ExecStart=/usr/bin/websockify --web /usr/share/novnc 100.109.151.100:6080 127.0.0.1:5900
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

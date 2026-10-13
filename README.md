@@ -2,6 +2,10 @@
 
 Study a small idea, try it, and teach Dum what you understood. Dum builds a real little creation from that teaching and prepares a flip-through walkthrough: screenshots, actual code, and an explanation from your intern. Reading it does not call a model.
 
+**Watch it work.** Agents on hub drive a real browser on a screen nobody sits at, and that screen streams into a private Discord channel while they work: a fresh screenshot every few seconds, the page they're on, and a link to take over. When the screen goes quiet the message closes with its last frame, so the channel doubles as a log. [How it works](#hubs-screen-live-in-discord).
+
+<img src="docs/hub-live.png" width="438" alt="A Live on hub message in Discord showing BrowserOS on hub with dumintern.com open">
+
 [The product plan](docs/workshop-plan.md) records the learning loop and design decisions. This replaces the earlier desktop app and skill-gated automation stack; that implementation remains in Git history.
 
 ## What works
@@ -13,6 +17,7 @@ Study a small idea, try it, and teach Dum what you understood. Dum builds a real
 - Offline Docker/Playwright verification of clicks, inputs, exact observed output, and real screenshots. Failed builds stay failed; no fabricated presentation or automatic retry.
 - A fixed manga reader with Dum/Wizard glyphs, keyboard navigation, saved page position, and version links such as `/#job=<job-id>`.
 - Corrections create another verified version without replacing the original.
+- Hub's screen, live in Discord. Agents work in BrowserOS on a virtual display, `#hub-live` shows it while it changes, noVNC lets you take over, and `dum live pause` keeps anything private off Discord.
 
 Teaching affects Dum's persistent context and creation choices. It does not retrain the model. Graded answers and self-reports are recorded separately; neither a polished creation nor a single explanation establishes mastery.
 
@@ -132,6 +137,23 @@ Hub has a screen nobody sits at: Xvfb on display `:99` with openbox, and Browser
 A bot can't go live in a voice channel, so `dum-live` streams the screen another way. It grabs an 80x50 grayscale thumbnail every two seconds. When enough of it changes, it posts one silent message in a private `#hub-live` channel and swaps that message's screenshot every five seconds while the screen keeps moving. Each thumbnail pixel averages a 20x20 patch and has to move by 16 levels, at least three of them at once, so a blinking cursor or a clock doesn't count. After three quiet minutes the message is marked ended and keeps its last frame. Each stretch of work gets its own message, so the channel doubles as a log of what agents did on hub. The message names the focused window, which is usually the page BrowserOS has open, and links the noVNC page.
 
 Before anything private goes on that screen (an address, a birthday, personal answers on a form), the agent runs `dum live pause`. That stops streaming within two seconds and marks the message paused. `dum live pause 30` lasts half an hour, `dum live pause 0` lasts until `dum live resume`, and a plain pause is an hour. `dum live status` says which.
+
+The screen itself is five user units in `deploy/`: Xvfb, openbox, x11vnc on localhost, noVNC on the tailnet address (edit `hub-screen-web.service` for another machine), and BrowserOS with its own profile. BrowserOS binds its agent ports (9000, 9001, 9100, 9200) on every interface, and hub's wired side sits on a campus network, so `hub-browseros-guard` drops those ports unless the traffic comes over loopback or Tailscale.
+
+```sh
+sudo apt install xvfb openbox x11vnc novnc python3-websockify ffmpeg xdotool   # plus BrowserOS's .deb
+for u in hub-screen hub-screen-wm hub-screen-vnc hub-screen-web browseros-hub; do
+  install -D -m 644 deploy/$u.service ~/.config/systemd/user/$u.service
+done
+systemctl --user daemon-reload
+systemctl --user enable --now hub-screen hub-screen-wm hub-screen-vnc hub-screen-web browseros-hub
+sudo install -D -m 644 deploy/hub-browseros-guard.nft /etc/nftables.d/hub-browseros-guard.nft
+sudo install -m 644 deploy/hub-browseros-guard.service /etc/systemd/system/
+sudo systemctl enable --now hub-browseros-guard
+claude mcp add --transport http -s user browseros-hub http://127.0.0.1:9200/mcp
+```
+
+Then the stream:
 
 ```sh
 install -D -m 644 deploy/dum-live.service ~/.config/systemd/user/dum-live.service

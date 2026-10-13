@@ -1,0 +1,10 @@
+# BrowserOS on hub binds its agent ports to 0.0.0.0. Only loopback and the tailnet may reach them.
+table inet hub_browseros_guard
+delete table inet hub_browseros_guard
+table inet hub_browseros_guard {
+  chain input {
+    type filter hook input priority -10; policy accept;
+    iifname { "lo", "tailscale0" } accept
+    tcp dport { 9000, 9001, 9100, 9200 } drop
+  }
+}

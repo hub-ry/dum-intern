@@ -1,0 +1,14 @@
+# VNC of the virtual screen, on localhost only; hub-screen-web puts it on the tailnet.
+[Unit]
+Description=Hub virtual screen VNC (localhost:5900)
+BindsTo=hub-screen.service
+After=hub-screen.service
+
+[Service]
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do [ -e /tmp/.X11-unix/X99 ] && exit 0; sleep 0.2; done; exit 1'
+ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -forever -shared -nopw -quiet -noxdamage
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
