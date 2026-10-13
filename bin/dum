@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Dum's command line. Finds its own checkout through the ~/.local/bin symlink, so agents can
+# launch it from any directory, and uses an absolute node because ssh and agents don't load nvm.
+set -euo pipefail
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+node=/usr/local/bin/node
+[ -x "$node" ] || node="$(command -v node)"
+exec "$node" --no-warnings --import "file://$root/node_modules/tsx/dist/loader.mjs" "$root/src/cli.ts" "$@"

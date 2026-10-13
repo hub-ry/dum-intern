@@ -11,5 +11,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["src/workshop/**/*.ts", "src/public/**/*.ts", "src/discord/**/*.ts"]
+  "include": ["src/workshop/**/*.ts", "src/public/**/*.ts", "src/discord/**/*.ts", "src/context/**/*.ts", "src/client/**/*.ts", "src/shared/**/*.ts", "src/mcp/**/*.ts", "src/internship/**/*.ts", "src/cli.ts"]
 }

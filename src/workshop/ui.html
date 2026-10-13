@@ -95,6 +95,17 @@ a { color: var(--ink); }
 .material { border-top: 1px solid var(--line); padding: 8px 0; }
 .material:first-child { border-top: 0; }
 .material h3 { font-size: 13px; margin: 0 0 4px; color: var(--strong); }
+#progressCard { scroll-margin-top: 64px; }
+.concepts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.concept { border: 1px solid var(--line); border-radius: 3px; padding: 8px 10px; background: var(--raised); min-width: 0; }
+.concept.untouched { background: transparent; border-style: dashed; }
+.concept h3 { font-size: 13px; margin: 0 0 6px; color: var(--strong); word-break: break-word; }
+.concept.untouched h3 { color: var(--muted); }
+.marks { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
+.mark { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.mark.on { color: var(--ink); border-color: var(--muted); }
+.mark.usedIndependently.on { color: var(--ok); border-color: var(--ok); }
+.mark.needsRevisiting.on { color: var(--bad); border-color: var(--bad); }
 </style>
 </head>
 <body>
@@ -128,6 +139,12 @@ a { color: var(--ink); }
       <div class="row"><button class="primary" id="createGoalBtn">Create goal</button><button id="cancelGoalBtn">Cancel</button><span id="goalErr" class="err"></span></div>
     </div>
     <div id="goalView"></div>
+  </section>
+
+  <section class="card wide" id="progressCard">
+    <h2>Progression</h2>
+    <p class="note">What your records say for this goal, concept by concept. These are counts of what happened, not a mastery score.</p>
+    <div id="progression"></div>
   </section>
 
   <section class="card" id="studyCard">
@@ -267,14 +284,23 @@ a { color: var(--ink); }
     openSeq: 0,
   };
 
-  // --- Deep links: #job=<uuid> only; the id is checked before it ever reaches a URL ----------
+  // --- Deep links: #job=<uuid> or #goal=<uuid>; the id is checked before it ever reaches a URL --
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-  /** Returns null for no fragment, { jobId } for a well-formed link, or { error } for anything else. */
+  /** Returns null for no fragment, { jobId } or { goalId } for a well-formed link, or { error } for anything else. */
   function parseJobHash(hash) {
     if (!hash || hash === "#") return null;
+    const g = /^#goal=([0-9a-f-]{36})$/.exec(hash);
+    if (g && UUID.test(g[1])) return { goalId: g[1] };
     const m = /^#job=([0-9a-f-]{36})$/.exec(hash);
-    if (!m || !UUID.test(m[1])) return { error: "That link is not a valid build link. Expected #job=<build id>." };
+    if (!m || !UUID.test(m[1])) return { error: "That link is not a valid link. Expected #job=<build id> or #goal=<goal id>." };
     return { jobId: m[1] };
+  }
+  /** Opens a goal at its progression. The link is used up: the address goes back to plain. */
+  async function openGoalLink(goalId) {
+    if (!state.goals.some((g) => g.id === goalId)) { toast("That goal isn't here anymore."); clearJobHash(); return false; }
+    await selectGoal(goalId);
+    $("progressCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    return true;
   }
   const jobHref = (id) => location.pathname + location.search + "#job=" + id;
   /** Records the open job in the URL. No entry is added when the fragment already says so. */
@@ -742,8 +768,35 @@ a { color: var(--ink); }
     } catch (err) { if (state.goalId === goalId) setErr("teachErr", err.message); }
   });
 
+  // --- Progression: the goal's records, concept by concept. Counts only, never a score -------
+  const MARKS = [["introduced", "studied"], ["attemptedWithHelp", "tried with help"], ["usedIndependently", "on your own"], ["needsRevisiting", "revisit"]];
+  const MARK_LABEL = Object.fromEntries(MARKS);
+  function renderProgression(ctx) {
+    const box = clear($("progression"));
+    if (!ctx) { box.append(el("p", { class: "note", text: state.goalId ? "Loading…" : "No goal selected." })); return; }
+    const concepts = new Map();
+    const touch = (name) => {
+      if (!concepts.has(name)) concepts.set(name, { name, counts: {}, latest: null, latestAt: null, taught: 0 });
+      return concepts.get(name);
+    };
+    for (const m of (ctx.goal && ctx.goal.materials) || []) touch(m.concept);
+    for (const c of (ctx.progress && ctx.progress.concepts) || []) Object.assign(touch(c.concept), { counts: c.counts || {}, latest: c.latest, latestAt: c.latestAt });
+    for (const t of ctx.teachings || []) touch(t.concept).taught++;
+    if (!concepts.size) { box.append(el("p", { class: "note", text: "Nothing yet. Study something or teach Dum, and it shows up here." })); return; }
+    const grid = el("div", { class: "concepts" });
+    for (const c of concepts.values()) {
+      const started = c.taught > 0 || MARKS.some(([k]) => c.counts[k]);
+      const chips = [el("span", { class: "mark taught" + (c.taught ? " on" : ""), text: "taught " + c.taught })];
+      for (const [k, label] of MARKS) chips.push(el("span", { class: "mark " + k + (c.counts[k] ? " on" : ""), text: label + " " + (c.counts[k] || 0) }));
+      const latest = c.latest ? "latest: " + (MARK_LABEL[c.latest] || c.latest) + (c.latestAt ? " · " + new Date(c.latestAt).toLocaleDateString() : "") : started ? "" : "not started";
+      grid.append(el("div", { class: "concept" + (started ? "" : " untouched") }, [el("h3", { text: c.name }), el("div", { class: "marks" }, chips), el("p", { class: "note m0", text: latest })]));
+    }
+    box.append(grid);
+  }
+
   // --- Context ----------------------------------------------------------------------------
   function renderContext(ctx) {
+    renderProgression(ctx);
     const obs = clear($("observations"));
     const al = clear($("attemptList"));
     if (!ctx) {
@@ -1004,7 +1057,7 @@ a { color: var(--ink); }
       // A valid #job= fragment picks the goal and the job; otherwise the first goal, as before.
       const link = parseJobHash(location.hash);
       if (link && link.error) { toast(link.error); clearJobHash(); }
-      const handled = link && link.jobId ? await openDeepLink(link.jobId) : false;
+      const handled = link && link.jobId ? await openDeepLink(link.jobId) : link && link.goalId ? await openGoalLink(link.goalId) : false;
       if (!handled) await selectGoal(state.goals.length ? state.goals[0].id : null);
     } catch (err) {
       if ($("login").classList.contains("hidden")) toast(err.message);
@@ -1019,6 +1072,7 @@ a { color: var(--ink); }
       return;
     }
     if (link.error) { toast(link.error); return; }
+    if (link.goalId) { openGoalLink(link.goalId).catch((err) => toast(err.message)); return; }
     if (state.showJob && state.showJob.id === link.jobId) return;
     openDeepLink(link.jobId).catch((err) => toast(err.message));
   });

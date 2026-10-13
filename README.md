@@ -60,17 +60,35 @@ systemctl --user enable --now dum-workshop.service
 journalctl --user -u dum-workshop.service
 ```
 
+To use the workshop without the token from your own machine, add `DUM_WORKSHOP_LOCAL_OPEN=1` to the environment file. The app and artifact servers then also listen on hub's `127.0.0.1`, and requests there addressed to `localhost` need no token. The Tailscale address keeps its login. Writes still need the page's own Origin, and the local door can't publish notes. From a laptop:
+
+```sh
+ssh -N -L 8770:127.0.0.1:8770 -L 8771:127.0.0.1:8771 hub   # then open http://localhost:8770
+```
+
+Anything else running on hub can reach that door without a token too, so leave it off on a shared machine.
+
+With `DUM_WORKSHOP_TAILNET_OPEN=1`, your own Tailscale devices skip the token at the Tailscale address too. A device counts only if `tailscale whois` says it belongs to the same user as hub. Shared-in devices still log in, and the notes rules and Origin rules above still apply.
+
 Enable user lingering if the process must continue after logout: `loginctl enable-linger "$USER"`. Browser closure does not stop systemd.
 
 ## Discord
 
-`src/discord/bot.ts` is a second user service that gives creations a place to live in one private Discord channel. It reads the workshop over its own API and never touches the store directly, so hub stays the record and Discord only points back to it.
+`src/discord/bot.ts` is a second user service. It gives each goal its own private channel under a "Dum goals" category, so the goal's requests, teaching and creations live together. It reads and writes through the workshop API and never touches the store directly. Hub stays the record and Discord points back to it.
 
-- One status message per creation, edited as the job moves through its real states: queued, generating and verifying, ready, or failed. These posts are silent.
-- When a creation finishes, one message pings you with up to four panel screenshots and a link to the presentation. A failure pings you with a link only; error text stays on hub.
-- `/dum status`, `/dum goals`, `/dum build goal:`, and `/dum correct creation: correction:`. Only the server owner can use them, and only in the bound channel. A correction makes a new version and leaves the original alone.
+`#dum` is the lobby. Start a goal there with `/dum goal`, which opens a form for the title and ambition. The bot makes its channel right away. Goals made on the web or from the terminal get a channel within a few seconds too, and a goal channel someone deletes is made again.
 
-The bot connects out over the gateway, so it needs no public endpoint. Delivery state lives in `~/.local/state/dum-discord/ledger.json`, and it is written only after Discord accepts a message, so a restart picks up where it left off. On its first start, the bot adopts existing jobs without posting them.
+Inside a goal's channel, every command applies to that goal:
+
+- `/dum teach concept:` opens a form for your explanation, in your own words. `/dum tried concept: helped:` reports an attempt the same way. Both are recorded as yours.
+- `/dum study material:` shows a study page privately. `/dum studied concept:` and `/dum revisit concept: note:` record what you did.
+- `/dum context` edits the goal's own context in a form, or adds to it once it's longer than a Discord form holds.
+- `/dum build`, `/dum correct creation: correction:` (the original is kept), and `/dum schedule minutes:` (leave it empty to turn it off).
+- `/dum progress` and `/dum status` show this goal's records and creations. In the lobby, `/dum status` covers every goal and `/dum goals` lists the channels.
+
+Each creation gets one silent status message in its goal's channel, edited through its real states: queued, generating and verifying, ready, or failed. A finished creation pings you once with up to four panel screenshots and a link to the presentation. A failure pings you with a link only, and the error text stays on hub. Reads are private to you, and changes like teaching show up in the channel as its record. Only the server owner can use any of it, and only in Dum's own channels.
+
+The bot connects out over the gateway, so it needs no public endpoint. `~/.local/state/dum-discord/` holds `ledger.json` (what was delivered where) and `channels.json` (which channel is whose). Both are written only after Discord accepts a change, so a restart picks up where it left off. If channels can't be made, delivery carries on in the lobby and the log says why.
 
 Keep the bot token in a mode-600 file and the IDs in `~/.config/dum-discord/environment`:
 
@@ -78,7 +96,7 @@ Keep the bot token in a mode-600 file and the IDs in `~/.config/dum-discord/envi
 DUM_DISCORD_TOKEN_FILE=/home/you/.config/dum-discord/token
 DUM_DISCORD_APPLICATION_ID=...
 DUM_DISCORD_GUILD_ID=...
-DUM_DISCORD_CHANNEL_ID=...
+DUM_DISCORD_CHANNEL_ID=...   # the lobby
 DUM_DISCORD_OWNER_ID=...
 ```
 
@@ -89,7 +107,34 @@ systemctl --user enable --now dum-discord.service
 journalctl --user -u dum-discord.service
 ```
 
-Invite the bot with only View Channel, Send Messages, Embed Links, Attach Files, Read Message History, and application commands.
+Invite the bot with View Channel, Send Messages, Embed Links, Attach Files, Read Message History, Manage Channels, and application commands (permissions `117776`).
+
+## Talk to Dum from anywhere
+
+Dum lives on hub and stays up when the laptop is closed. You can reach it four ways, and they all work on the same goals and records.
+
+**Discord.** Mention the bot in `#dum` or a goal's channel and just talk: "what did I teach you about loops?", "build something", "teach you: a loop repeats the same steps for each item". Each message runs Claude Code on hub as Dum and its team (below). Dum answers each mention right in the channel, as a reply to that message, and works on several at once (four by default, `DUM_CHAT_PARALLEL`), even in the same channel, so a slow request never holds up the next. Each channel keeps one ongoing conversation. A new request branches it from the latest finished answer (`--fork-session`), so requests running at the same time never share a session. Each turn runs as its own systemd user unit and is kept on disk under `~/.local/state/dum/turns/`, so restarting the bot, even when Dum's engineer does it after changing Dum's own code, doesn't lose an answer: the bot delivers it when it's back. The engineer takes `dum lock take <name>` before changing Dum's code, so two requests never edit it at once. The slash commands still work too, and `#dum-now` shows what Dum is doing, what's queued, and what's waiting on you.
+
+**A small team behind the chat.** The Dum you talk to has no shell. It understands you, records your exact words, and routes everything else to a specialist with only the tools that job needs. The tutor explains and makes practice problems; it reads materials and the web but can't record anything as yours. The engineer has the shell: it gives Dum new abilities in its own repo, runs tests, restarts Dum safely, sets up timers, works in your other projects, and can hand coding to Codex. The librarian turns lecture notes, PDFs and assignments into a goal's context, labelled as imported material and never as your teaching. Claude Code's built-in general-purpose agents are denied, so the shell exists only in the engineer. `src/discord/agents.ts` defines the team, and tests check that Dum has no shell, that no specialist can record your words, and that every tool an agent names exists. A reply says which specialists helped, and `~/.local/state/dum/chat/audit.jsonl` records who used which tools on every turn, without message text.
+
+**MCP.** `dum mcp` is an MCP server on stdio. It reaches the workshop API and the `~/handoff` exchange, and nothing listens on the network. `dum mcp install` registers it with Codex, omp and Claude Code on hub. `dum mcp laptop` prints the setup for Claude on the Mac, which launches `ssh hub ~/.local/bin/dum mcp`. The tools cover goals, context, study material, teaching, attempts, progress, builds, corrections, creations, schedules and handoffs. `dum status` prints the same overview an agent sees first. omp also gets a second server, `dum codex-mcp`. Its one tool, `codex`, hands a self-contained task to the Codex agent in a folder (`codex exec`, sandboxed to that folder by default) and returns Codex's final answer, so omp can delegate to Codex mid-conversation.
+
+**Your words stay yours.** An agent can't record anything as your own teaching or attempt. Those requests show up in the goal's channel as a card with **Yes, these are my words** and **Decline**, and only an approval writes them. There's one exception. If you teach Dum in its own Discord chat and the text it records appears word for word in your message, it's recorded right away, with a quote posted in the channel. Anything Dum rephrased still gets a card.
+
+**The loop between hub and the laptop.** Agents hand work to each other through `~/handoff`, in the format its README defines. An agent on hub calls `handoff_create` for `laptop` when something needs the Mac: its apps, its browser, its screen. Discord pings you. The Claude app on the laptop runs a scheduled pickup every 30 minutes while it's awake. It does the task within the task's stated scope, then writes `result.md` back through the same tools. The agent on hub picks the result up with `handoff_wait`. It works in the other direction too: Claude on the laptop can hand work to `hub` for omp or Codex. Handoffs never carry secrets; a write with a credential-looking line is refused.
+
+## Root context
+
+The workshop's root context, which every build sees, comes from files on hub. Each goal still keeps its own. `~/context/dum-root.txt` lists the source files in priority order (home-relative globs, `!` to exclude). `src/context/root-context.ts` packs whole files into the workshop's 24,000-character limit and lists the rest by name. Lines that look like credentials are dropped before anything leaves hub, and nothing is written when the result hasn't changed.
+
+```sh
+npm run root-context -- --show   # preview, sends nothing
+install -m 644 deploy/dum-root-context.service deploy/dum-root-context.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now dum-root-context.timer   # every 5 minutes
+```
+
+Root context is sent to the model with every build, so put only what you're fine sharing with the provider in those files.
 
 ## Verify
 
@@ -132,7 +177,10 @@ The reusable [dum-publish skill](.claude/skills/dum-publish/SKILL.md) documents 
 ## Files
 
 - `src/workshop`: private runtime, materials, API, reader, generation, and isolated verifier.
-- `src/discord`: Discord delivery and slash commands, on top of the workshop API.
+- `src/discord`: goal channels, delivery, slash commands, chat, approvals and the `#dum-now` board, on top of the workshop API.
+- `src/mcp` and `src/cli.ts`: the `dum` command and its MCP server. `bin/dum` is what agents launch.
+- `src/client`: the one client for the workshop API. `src/shared`: the approval queue and the `~/handoff` exchange.
+- `src/context`: root context sync from files on hub.
 - `src/art`: authored Dum and Wizard glyphs.
 - `src/site`: public product site and an explicitly labelled example presentation.
 - `src/public`: static-only public hosting; no workshop credentials or private APIs.

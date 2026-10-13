@@ -13,6 +13,16 @@
 // With DUM_PUBLIC_NOTES_DIR set, the app also carries /api/notes: explicit, token-authenticated
 // publication of short notes into that directory, which a separate static process serves. Without
 // a token those routes answer 401 even on loopback; the open mode never publishes anything.
+//
+// With a token set and DUM_WORKSHOP_LOCAL_OPEN=1, the app and artifact servers also listen on
+// 127.0.0.1 at the same ports, and requests that arrive there addressed to localhost need no token
+// (reach it from a laptop with `ssh -L 8770:127.0.0.1:8770 -L 8771:127.0.0.1:8771 hub`). Every
+// other address still needs the token, writes still need a matching Origin, and the local door
+// cannot publish notes.
+//
+// With DUM_WORKSHOP_TAILNET_OPEN=1 the owner's own Tailscale devices skip the token too: the peer
+// needs a Tailscale address that `tailscale whois` says belongs to this machine's own user. Shared
+// devices and anything Tailscale can't vouch for still log in. Same Origin and notes rules.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -20,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve, join } from "node:path";
 import { openArtifactFile } from "./artifacts.ts";
+import { ownDeviceCheck } from "./tailnet.ts";
 import { fileURLToPath } from "node:url";
 import type { Socket } from "node:net";
 import { WorkshopStore, WorkshopRunner, WorkshopError } from "./runtime.js";
@@ -39,11 +50,19 @@ export type WorkshopOptions = {
   token?: string;
   /** The hosting owner's public notes directory (DUM_PUBLIC_NOTES_DIR). Unset leaves /api/notes answering 503. */
   publicNotesDir?: string;
+  /** Token-free access for requests to localhost on a loopback socket (DUM_WORKSHOP_LOCAL_OPEN=1). */
+  localOpen?: boolean;
+  /** Token-free access for the owner's own Tailscale devices (DUM_WORKSHOP_TAILNET_OPEN=1). */
+  tailnetOpen?: boolean;
+  /** Decides whether a peer address is one of the owner's devices; tests pass their own. */
+  ownDevice?: (address: string) => Promise<boolean>;
 };
 
 export type WorkshopHandle = {
   appServer: Server;
   artifactServer: Server;
+  /** The extra 127.0.0.1 listeners for local open access, when the main bind isn't already 127.0.0.1. */
+  localServers: Server[];
   store: WorkshopStore;
   runner: WorkshopRunner;
   /** Present only when a public notes directory is configured. */
@@ -519,6 +538,9 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
   const home = resolve(options.home ?? (process.env.DUM_WORKSHOP_HOME?.trim() || join(homedir(), ".local", "state", "dum-workshop")));
   const token = options.token ?? process.env.DUM_WORKSHOP_TOKEN ?? "";
   const publicNotesDir = (options.publicNotesDir ?? process.env.DUM_PUBLIC_NOTES_DIR ?? "").trim();
+  const localOpen = !!token && (options.localOpen ?? process.env.DUM_WORKSHOP_LOCAL_OPEN === "1");
+  const tailnetOpen = !!token && (options.tailnetOpen ?? process.env.DUM_WORKSHOP_TAILNET_OPEN === "1");
+  const ownDevice = options.ownDevice ?? ownDeviceCheck();
   if (port === artifactPort) throw new Error("The app port and artifact port must differ: they are separate origins on purpose.");
   if (!isLoopbackBind(host) && !token) {
     throw new Error(`DUM_WORKSHOP_HOST=${host} is not loopback, so DUM_WORKSHOP_TOKEN must be set.`);
@@ -578,8 +600,30 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     ].join("; ");
   }
 
+  // The local door: 127.0.0.1 itself. Either the main bind already takes it, or the extra
+  // listeners below do; their connections are recorded so only they count.
+  const mainIsLocalDoor = host === "127.0.0.1" || host === "localhost" || isWildcardBind(host);
+  const localDoorSockets = new WeakSet<Socket>();
+
+  /** A request through the local door, from a loopback peer on 127.0.0.1, addressed to localhost. */
+  function isLocal(req: IncomingMessage): boolean {
+    if (!localOpen) return false;
+    const sock = req.socket;
+    const peer = sock.remoteAddress ?? "";
+    const loopbackPeer = peer.startsWith("127.") || peer.startsWith("::ffff:127.") || peer === "::1";
+    const viaDoor = localDoorSockets.has(sock) || (mainIsLocalDoor && /^(::ffff:)?127\.0\.0\.1$/.test(sock.localAddress ?? ""));
+    const h = parseHostHeader(req.headers.host);
+    return viaDoor && loopbackPeer && !!h && LOOPBACK_HOSTNAMES.has(h.hostname);
+  }
+
+  /** No token needed: the local door, or one of the owner's own devices on the tailnet. */
+  async function isTrusted(req: IncomingMessage): Promise<boolean> {
+    if (isLocal(req)) return true;
+    return tailnetOpen && (await ownDevice(req.socket.remoteAddress ?? ""));
+  }
+
   type Auth = "open" | "bearer" | "cookie" | null;
-  function authenticate(req: IncomingMessage): Auth {
+  async function authenticate(req: IncomingMessage): Promise<Auth> {
     if (!token) return "open";
     const header = req.headers.authorization;
     if (typeof header === "string") {
@@ -589,6 +633,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     }
     const sid = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
     if (sid && /^[0-9a-f]{64}$/.test(sid) && sessions.has(sid)) return "cookie";
+    if (await isTrusted(req)) return "open";
     return null;
   }
 
@@ -632,7 +677,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
 
     // Open routes: config (no secrets), glyphs (authored art) and login.
     if (path === "/api/config" && method === "GET") {
-      return sendJson(res, 200, { artifactOrigin: artifactOrigin(h), authRequired: !!token });
+      return sendJson(res, 200, { artifactOrigin: artifactOrigin(h), authRequired: !!token && !(await isTrusted(req)) });
     }
     if (path === "/api/glyphs" && method === "GET") {
       if (!glyphs) throw new HttpError(503, "The glyph art could not be read at startup.");
@@ -656,9 +701,9 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       return sendJson(res, 200, { ok: true }, { "set-cookie": `${SESSION_COOKIE}=${sid}; Path=/api; HttpOnly; SameSite=Strict` });
     }
 
-    const auth = authenticate(req);
+    const auth = await authenticate(req);
     if (auth === null) throw new HttpError(401, "Log in with the workshop token first.");
-    if (seg[1] === "notes" && !token) throw new HttpError(401, "Publishing notes needs a configured workshop token; the open loopback mode cannot publish.");
+    if (seg[1] === "notes" && auth === "open") throw new HttpError(401, "Publishing notes needs the workshop token; open local access cannot publish.");
 
     if (mutation) {
       const origin = req.headers.origin;
@@ -845,9 +890,9 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     sendJson(res, 500, { error: "Something went wrong on the server. The details are in its log." });
   }
 
-  const appServer = createServer((req, res) => {
+  const serveApp = (bindHost: string) => (req: IncomingMessage, res: ServerResponse) => {
     (async () => {
-      const h = requireHost(req, host, port);
+      const h = requireHost(req, bindHost, port);
       const method = req.method ?? "GET";
       const url = new URL(req.url ?? "/", `http://${h.hostname}:${h.port}`);
       if (url.pathname.startsWith("/api/") || url.pathname === "/api") return handleApi(req, res, h, url);
@@ -866,11 +911,11 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       }
       throw new HttpError(404, "Nothing lives at that path.");
     })().catch((err) => fail(res, err));
-  });
+  };
 
-  const artifactServer = createServer((req, res) => {
+  const serveArtifact = (bindHost: string) => (req: IncomingMessage, res: ServerResponse) => {
     (async () => {
-      const h = requireHost(req, host, artifactPort);
+      const h = requireHost(req, bindHost, artifactPort);
       const method = req.method ?? "GET";
       if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "Only GET and HEAD are served here.");
       const target = parseArtifactTarget(req.url);
@@ -906,10 +951,17 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       stream.on("error", () => res.destroy());
       stream.pipe(res);
     })().catch((err) => fail(res, err));
-  });
+  };
+
+  const appServer = createServer(serveApp(host));
+  const artifactServer = createServer(serveArtifact(host));
+  const LOCAL = "127.0.0.1";
+  const localServers = localOpen && !mainIsLocalDoor ? [createServer(serveApp(LOCAL)), createServer(serveArtifact(LOCAL))] : [];
+  for (const s of localServers) s.on("connection", (sock) => localDoorSockets.add(sock));
+  const all = [appServer, artifactServer, ...localServers];
 
   const sockets = new Set<Socket>();
-  for (const s of [appServer, artifactServer]) {
+  for (const s of all) {
     s.requestTimeout = 30_000;
     s.headersTimeout = 15_000;
     s.keepAliveTimeout = 5_000;
@@ -920,10 +972,10 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     });
   }
 
-  const listen = (s: Server, p: number) =>
+  const listen = (s: Server, p: number, at = host) =>
     new Promise<void>((ok, bad) => {
       s.once("error", bad);
-      s.listen(p, isWildcardBind(host) ? undefined : host, () => {
+      s.listen(p, isWildcardBind(at) ? undefined : at, () => {
         s.off("error", bad);
         ok();
       });
@@ -933,9 +985,12 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     runner.start();
     await listen(appServer, port);
     await listen(artifactServer, artifactPort);
+    if (localServers.length > 0) {
+      await listen(localServers[0]!, port, LOCAL);
+      await listen(localServers[1]!, artifactPort, LOCAL);
+    }
   } catch (err) {
-    appServer.close();
-    artifactServer.close();
+    for (const s of all) s.close();
     try {
       await runner.stop();
     } catch {
@@ -949,7 +1004,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
   const stop = () => {
     stopping ??= (async () => {
       const close = (s: Server) => new Promise<void>((ok) => s.close(() => ok()));
-      const closing = Promise.all([close(appServer), close(artifactServer)]);
+      const closing = Promise.all(all.map(close));
       for (const sock of sockets) sock.destroy();
       await closing;
       try {
@@ -961,7 +1016,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     return stopping;
   };
 
-  return { appServer, artifactServer, store, runner, notes, stop };
+  return { appServer, artifactServer, localServers, store, runner, notes, stop };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -975,6 +1030,7 @@ if (entry && entry === fileURLToPath(import.meta.url)) {
       console.log(`[workshop] app      http://${show(ws.appServer.address())}`);
       console.log(`[workshop] artifact http://${show(ws.artifactServer.address())}`);
       console.log(`[workshop] home     ${ws.store.home}`);
+      for (const s of ws.localServers) console.log(`[workshop] local    http://${show(s.address())} (no token)`);
       if (ws.notes) console.log(`[workshop] notes    ${ws.notes.publicRoot}`);
       let once = false;
       const bye = (signal: string) => {

@@ -2,26 +2,16 @@
 // no clock, no files. The bot feeds it the workshop's job list and its own ledger, and gets back
 // the exact messages to post or edit. Only real job states are shown; nothing is invented.
 
-export type JobState = "queued" | "running" | "ready" | "failed";
+import type { GoalView, JobState, JobView } from "../client/workshop.ts";
 
-/** The slice of a workshop job summary the bot reads. */
-export type JobView = {
-  id: string;
-  goalId: string;
-  state: JobState;
-  createdAt: string;
-  parentId?: string;
-  correction?: string;
-  artifactId?: string;
-  result?: { title: string; panels: { image?: string; caption: string }[] };
-};
-
-export type GoalView = { id: string; title: string };
+export type { GoalView, JobState, JobView };
 
 /** What the bot has already delivered for one job. Written only after Discord accepted it. */
 export type LedgerEntry = {
   /** The one evolving status message, absent for jobs that existed before the bot. */
   messageId?: string;
+  /** Where that message lives. Entries from before goal channels have none: the lobby. */
+  channelId?: string;
   stage: JobState;
   /** Completion or failure ping sent. */
   finalSent: boolean;
@@ -34,22 +24,34 @@ export type Ledger = {
 
 export type Links = { app: string; artifacts: string };
 
-export type Step =
-  | { kind: "postStatus"; jobId: string; stage: JobState; content: string }
-  | { kind: "editStatus"; jobId: string; messageId: string; stage: JobState; content: string }
-  | { kind: "final"; jobId: string; stage: JobState; content: string; images: string[] };
-
-const STAGE_LABEL: Record<JobState, string> = {
-  queued: "queued",
-  running: "generating and verifying",
-  ready: "ready",
-  failed: "failed",
+export type Embed = {
+  title?: string;
+  url?: string;
+  description?: string;
+  color?: number;
+  footer?: { text: string };
+  image?: { url: string };
+  thumbnail?: { url: string };
+  fields?: { name: string; value: string; inline?: boolean }[];
+  timestamp?: string;
 };
 
-const STAGE_MARK: Record<JobState, string> = { queued: "◇", running: "◆", ready: "✓", failed: "✕" };
+export type Message = { content?: string; embeds: Embed[] };
+
+export type Step =
+  | { kind: "postStatus"; jobId: string; channelId: string; stage: JobState; message: Message }
+  /** `home` is where a fresh status goes if the old message can no longer be edited. */
+  | { kind: "editStatus"; jobId: string; channelId: string; messageId: string; home: string; stage: JobState; message: Message }
+  /** `images` are artifact URLs; the embeds refer to them as attachment://panel-N.png. */
+  | { kind: "final"; jobId: string; channelId: string; stage: JobState; message: Message; images: string[] };
+
+/** Where a goal's messages go: its own channel, or the lobby until it has one. */
+export type Route = { lobbyId: string; channelFor(goalId: string): string | null };
+
+export const COLOR = { queued: 0x8b8f98, running: 0xf0c266, ready: 0x57c785, failed: 0xe5534b } as const;
 
 const MAX_IMAGES = 4;
-const MAX_TITLE = 180;
+const MAX_TITLE = 200;
 
 export function emptyLedger(): Ledger {
   return { schemaVersion: 1, jobs: {} };
@@ -68,36 +70,49 @@ export function jobLink(links: Links, jobId: string): string {
   return `${links.app}/#job=${jobId}`;
 }
 
+/** Opens the goal in the workshop at its progression. */
+export function goalLink(links: Links, goalId: string): string {
+  return `${links.app}/#goal=${goalId}`;
+}
+
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length <= max ? flat : flat.slice(0, max - 1) + "…";
 }
 
-/** Strips mention syntax so job text can never ping anyone. */
-function quiet(text: string): string {
-  return text.replace(/@/g, "@​");
+/** Strips mention syntax so job text in message content can never ping anyone. */
+export function quiet(text: string): string {
+  return text.replace(/@/g, "@​").replace(/<#/g, "<​#");
 }
 
-function heading(job: JobView, goals: Map<string, string>): string {
-  const goal = goals.get(job.goalId) ?? "unknown goal";
-  const kind = job.parentId ? "correction" : "creation";
-  return `**${quiet(clip(goal, 80))}** · ${kind} \`${job.id.slice(0, 8)}\``;
+/** The stage track: what's done, what's happening now, what's next. Only real states. */
+export function track(state: JobState): string {
+  if (state === "failed") return "✕ **failed**";
+  const steps: [JobState, string][] = [["queued", "queued"], ["running", "generating & verifying"], ["ready", "ready"]];
+  const at = steps.findIndex(([s]) => s === state);
+  return steps.map(([, label], n) => (n < at ? `✓ ${label}` : n === at ? `◆ **${label}**` : `○ ${label}`)).join("  ·  ");
 }
 
-export function statusContent(job: JobView, goals: Map<string, string>, links: Links): string {
-  const lines = [heading(job, goals), `${STAGE_MARK[job.state]} ${STAGE_LABEL[job.state]}`];
-  if (job.state === "ready" && job.result) lines.push(quiet(clip(job.result.title, MAX_TITLE)));
-  if (job.state === "ready" || job.state === "failed") lines.push(`<${jobLink(links, job.id)}>`);
-  return lines.join("\n");
+function goalName(job: JobView, goals: Map<string, string>): string {
+  return clip(goals.get(job.goalId) ?? "unknown goal", 80);
 }
 
-export function finalContent(job: JobView, goals: Map<string, string>, links: Links, ownerId: string): string {
-  const goal = quiet(clip(goals.get(job.goalId) ?? "unknown goal", 80));
-  if (job.state === "failed") {
-    return `<@${ownerId}> a build for **${goal}** failed. Details stay on hub: <${jobLink(links, job.id)}>`;
-  }
-  const title = job.result ? quiet(clip(job.result.title, MAX_TITLE)) : "untitled";
-  return `<@${ownerId}> dum finished something for **${goal}**: ${title}\nRead it: <${jobLink(links, job.id)}>`;
+export function statusMessage(job: JobView, goals: Map<string, string>, links: Links): Message {
+  const kind = job.parentId ? `correction of ${job.parentId.slice(0, 8)}` : "creation";
+  const lines = [track(job.state)];
+  if (job.correction) lines.push(`> ${clip(job.correction, 240)}`);
+  if (job.state === "failed") lines.push("The details stay on hub.");
+  return {
+    embeds: [
+      {
+        title: job.result ? clip(job.result.title, MAX_TITLE) : job.parentId ? "Dum is reworking a creation" : "Dum is making something",
+        ...(job.state === "ready" || job.state === "failed" ? { url: jobLink(links, job.id) } : {}),
+        description: lines.join("\n"),
+        color: COLOR[job.state],
+        footer: { text: `${goalName(job, goals)} · ${kind} ${job.id.slice(0, 8)}` },
+      },
+    ],
+  };
 }
 
 /** Artifact URLs for the first few panel screenshots of a ready job. */
@@ -112,36 +127,66 @@ export function panelImages(job: JobView, links: Links): string[] {
   return out;
 }
 
+export function finalMessage(job: JobView, goals: Map<string, string>, links: Links, ownerId: string): Message {
+  const goal = goalName(job, goals);
+  const url = jobLink(links, job.id);
+  if (job.state === "failed") {
+    return {
+      content: `<@${ownerId}> a build for **${quiet(goal)}** failed.`,
+      embeds: [{ title: "Build failed", url, description: "Nothing was faked: the details stay on hub. Open it to see what happened.", color: COLOR.failed, footer: { text: `${goal} · ${job.id.slice(0, 8)}` } }],
+    };
+  }
+  const panels = job.result?.panels ?? [];
+  const images = panelImages(job, links);
+  // Embeds that share a url show as one card with an image grid.
+  const gallery: Embed[] = images.slice(1).map((_, n) => ({ url, image: { url: `attachment://panel-${n + 2}.png` } }));
+  return {
+    content: `<@${ownerId}> Dum made something for **${quiet(goal)}**`,
+    embeds: [
+      {
+        title: clip(job.result?.title ?? "Untitled creation", MAX_TITLE),
+        url,
+        description: `${clip(panels[0]?.caption ?? "", 320)}\n\n**[Read the ${panels.length}-page presentation →](${url})**`,
+        color: COLOR.ready,
+        ...(images.length ? { image: { url: "attachment://panel-1.png" } } : {}),
+        footer: { text: `${goal} · ${job.parentId ? "correction" : "creation"} ${job.id.slice(0, 8)}` },
+      },
+      ...gallery,
+    ],
+  };
+}
+
 /** The steps that bring Discord up to date with the workshop, oldest job first. */
-export function plan(jobs: JobView[], goals: GoalView[], ledger: Ledger, links: Links, ownerId: string): Step[] {
+export function plan(jobs: JobView[], goals: GoalView[], ledger: Ledger, links: Links, ownerId: string, route: Route): Step[] {
   const names = new Map(goals.map((g) => [g.id, g.title]));
   const steps: Step[] = [];
   const ordered = [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const job of ordered) {
     const seen = ledger.jobs[job.id];
-    const content = statusContent(job, names, links);
+    const message = statusMessage(job, names, links);
+    const home = route.channelFor(job.goalId) ?? route.lobbyId;
     if (!seen) {
-      steps.push({ kind: "postStatus", jobId: job.id, stage: job.state, content });
+      steps.push({ kind: "postStatus", jobId: job.id, channelId: home, stage: job.state, message });
     } else if (seen.stage !== job.state) {
       // Jobs adopted from before the bot have no message yet; they get one on their next change.
       steps.push(seen.messageId
-        ? { kind: "editStatus", jobId: job.id, messageId: seen.messageId, stage: job.state, content }
-        : { kind: "postStatus", jobId: job.id, stage: job.state, content });
+        ? { kind: "editStatus", jobId: job.id, channelId: seen.channelId ?? route.lobbyId, messageId: seen.messageId, home, stage: job.state, message }
+        : { kind: "postStatus", jobId: job.id, channelId: home, stage: job.state, message });
     }
     const terminal = job.state === "ready" || job.state === "failed";
     if (terminal && !(seen?.finalSent && seen.stage === job.state)) {
-      steps.push({ kind: "final", jobId: job.id, stage: job.state, content: finalContent(job, names, links, ownerId), images: panelImages(job, links) });
+      steps.push({ kind: "final", jobId: job.id, channelId: home, stage: job.state, message: finalMessage(job, names, links, ownerId), images: panelImages(job, links) });
     }
   }
   return steps;
 }
 
-/** The ledger after one step succeeded. */
+/** The ledger after one step succeeded. An edit that became a fresh post in `home` passes its new id. */
 export function record(ledger: Ledger, step: Step, messageId?: string): Ledger {
   const prev = ledger.jobs[step.jobId];
   const jobs = { ...ledger.jobs };
-  if (step.kind === "postStatus") jobs[step.jobId] = { messageId, stage: step.stage, finalSent: false };
-  else if (step.kind === "editStatus") jobs[step.jobId] = { ...prev!, stage: step.stage };
+  if (step.kind === "postStatus") jobs[step.jobId] = { messageId, channelId: step.channelId, stage: step.stage, finalSent: false };
+  else if (step.kind === "editStatus") jobs[step.jobId] = { ...prev!, ...(messageId ? { messageId, channelId: step.home } : {}), stage: step.stage };
   else jobs[step.jobId] = { ...prev, stage: step.stage, finalSent: true };
   return { schemaVersion: 1, jobs };
 }
