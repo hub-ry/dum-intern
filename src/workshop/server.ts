@@ -23,6 +23,10 @@
 // With DUM_WORKSHOP_TAILNET_OPEN=1 the owner's own Tailscale devices skip the token too: the peer
 // needs a Tailscale address that `tailscale whois` says belongs to this machine's own user. Shared
 // devices and anything Tailscale can't vouch for still log in. Same Origin and notes rules.
+//
+// Shared files (src/workshop/shares.ts): GET /files/<share id>/<name> serves one file Dum was
+// asked to hand over, to anyone who may use the app. Creating or removing a share
+// (/api/shares) needs the token itself, like notes; the open doors can only read.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -38,6 +42,8 @@ import type { Attempt, ExerciseConcept, Goal, Job, Material, Progress, Teaching 
 import { COMBINED_CONCEPT, CONDITIONS_CONCEPT, LOOPS_CONCEPT } from "./materials.js";
 import { MAX_AMBITION, MAX_CONCEPT, MAX_CONTEXT, MAX_EXERCISE_ID, MAX_TEXT, MAX_TITLE } from "./validate.ts";
 import { MAX_NOTE_BODY_BYTES, NotesProjectionError, PublicNotes } from "./public-notes.js";
+import { Shares, disposition, presentation, shareRoots } from "./shares.ts";
+import { ensurePrivateDir } from "./files.ts";
 
 // ---------------------------------------------------------------------------------------------
 // Configuration
@@ -56,6 +62,8 @@ export type WorkshopOptions = {
   tailnetOpen?: boolean;
   /** Decides whether a peer address is one of the owner's devices; tests pass their own. */
   ownDevice?: (address: string) => Promise<boolean>;
+  /** Folders whose files may be shared. Unset shares nothing; the service passes DUM_SHARE_ROOTS or its defaults. */
+  shareRoots?: string[];
 };
 
 export type WorkshopHandle = {
@@ -67,6 +75,7 @@ export type WorkshopHandle = {
   runner: WorkshopRunner;
   /** Present only when a public notes directory is configured. */
   notes: PublicNotes | null;
+  shares: Shares;
   stop(): Promise<void>;
 };
 
@@ -94,6 +103,7 @@ const JOB_BODY = bodyLimit({});
 const SCHEDULE_BODY = bodyLimit({ intervalMinutes: MAX_NUMBER_CHARS });
 const CORRECTION_BODY = bodyLimit({ correction: MAX_TEXT });
 const POSITION_BODY = bodyLimit({ panel: MAX_NUMBER_CHARS });
+const SHARE_BODY = bodyLimit({ path: 4096 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SAFE_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 const HOSTNAME = /^(?:\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*\.?)$/;
@@ -553,7 +563,10 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
   const artifactRoot = join(store.home, "artifacts");
   let runner: WorkshopRunner;
   let notes: PublicNotes | null = null;
+  let shares: Shares;
   try {
+    shares = new Shares({ stateDir: store.home, roots: options.shareRoots ?? [] });
+    for (const m of shares.missing) console.error(`[workshop] share root ${m} doesn't exist; nothing there can be shared`);
     runner = new WorkshopRunner(store, { artifactRoot });
     if (publicNotesDir) {
       // Roots are checked and the public projection rebuilt from the private revisions before we
@@ -698,12 +711,14 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       }
       const sid = randomBytes(32).toString("hex");
       sessions.add(sid);
-      return sendJson(res, 200, { ok: true }, { "set-cookie": `${SESSION_COOKIE}=${sid}; Path=/api; HttpOnly; SameSite=Strict` });
+      // Path=/ so a logged-in browser can open shared files too.
+      return sendJson(res, 200, { ok: true }, { "set-cookie": `${SESSION_COOKIE}=${sid}; Path=/; HttpOnly; SameSite=Strict` });
     }
 
     const auth = await authenticate(req);
     if (auth === null) throw new HttpError(401, "Log in with the workshop token first.");
     if (seg[1] === "notes" && auth === "open") throw new HttpError(401, "Publishing notes needs the workshop token; open local access cannot publish.");
+    if (seg[1] === "shares" && auth === "open" && method !== "GET") throw new HttpError(401, "Sharing a file needs the workshop token; open access can only read.");
 
     if (mutation) {
       const origin = req.headers.origin;
@@ -717,7 +732,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     if (path === "/api/logout" && method === "POST") {
       const sid = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
       if (sid) sessions.delete(sid);
-      return sendJson(res, 200, { ok: true }, { "set-cookie": `${SESSION_COOKIE}=; Path=/api; HttpOnly; SameSite=Strict; Max-Age=0` });
+      return sendJson(res, 200, { ok: true }, { "set-cookie": `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` });
     }
 
     // -- public notes: explicit publication only, never without a configured token --
@@ -756,6 +771,21 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
         throw new HttpError(405, "Method not allowed.");
       }
       throw new HttpError(404, "No such route.");
+    }
+
+    // -- shared files: which exist, and making or removing one --
+    if (path === "/api/shares") {
+      if (method === "GET") return sendJson(res, 200, { shares: shares.list() });
+      if (method === "POST") {
+        const body = await readJsonBody(req, SHARE_BODY);
+        return sendJson(res, 201, { share: shares.share(field(body, "path")) });
+      }
+      throw new HttpError(405, "Method not allowed.");
+    }
+    if (seg[1] === "shares" && seg.length === 3) {
+      if (method === "GET") return sendJson(res, 200, { share: shares.get(seg[2]!) });
+      if (method === "DELETE") return sendJson(res, 200, { share: shares.unshare(seg[2]!) });
+      throw new HttpError(405, "Method not allowed.");
     }
 
     // -- global context --
@@ -896,6 +926,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       const method = req.method ?? "GET";
       const url = new URL(req.url ?? "/", `http://${h.hostname}:${h.port}`);
       if (url.pathname.startsWith("/api/") || url.pathname === "/api") return handleApi(req, res, h, url);
+      if (url.pathname.startsWith("/files/")) return serveShared(req, res);
       if (url.pathname === "/" || url.pathname === "/index.html") {
         if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "Method not allowed.");
         res.writeHead(200, {
@@ -912,6 +943,47 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
       throw new HttpError(404, "Nothing lives at that path.");
     })().catch((err) => fail(res, err));
   };
+
+  /** One shared file, to anyone who may use the app. Each request checks the file again. */
+  async function serveShared(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const method = req.method ?? "GET";
+    if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "Only GET and HEAD are served here.");
+    if ((await authenticate(req)) === null) {
+      const text = Buffer.from("This shared file opens from Ryan's own tailnet devices, or after logging in to the workshop.\n");
+      res.writeHead(401, { "content-type": "text/plain; charset=utf-8", "content-length": String(text.length), "cache-control": "no-store", "x-content-type-options": "nosniff" });
+      return void res.end(method === "HEAD" ? undefined : text);
+    }
+    const raw = (req.url ?? "").split(/[?#]/)[0]!.split("/");
+    if (raw.length !== 4 || raw[1] !== "files") throw new HttpError(404, "Not found.");
+    let name: string;
+    try {
+      name = decodeURIComponent(raw[3]!);
+    } catch {
+      throw new HttpError(404, "Not found.");
+    }
+    const opened = await shares.open(raw[2]!, name);
+    if (!opened) throw new HttpError(404, "That shared file is gone, moved, or no longer passes the sharing checks.");
+    const shown = presentation(opened.name);
+    res.writeHead(200, {
+      "content-type": shown.type,
+      "content-length": String(opened.size),
+      "content-disposition": disposition(opened.name, shown.inline),
+      // PDFs need the browser's viewer; everything else is shown with nothing allowed to run.
+      ...(shown.type === "application/pdf" ? {} : { "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox" }),
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "cross-origin-resource-policy": "same-origin",
+    });
+    if (method === "HEAD") {
+      await opened.handle.close();
+      return void res.end();
+    }
+    const stream = opened.handle.createReadStream({ autoClose: true });
+    res.once("close", () => stream.destroy());
+    stream.on("error", () => res.destroy());
+    stream.pipe(res);
+  }
 
   const serveArtifact = (bindHost: string) => (req: IncomingMessage, res: ServerResponse) => {
     (async () => {
@@ -1016,7 +1088,7 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     return stopping;
   };
 
-  return { appServer, artifactServer, localServers, store, runner, notes, stop };
+  return { appServer, artifactServer, localServers, store, runner, notes, shares, stop };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1024,7 +1096,13 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
 
 const entry = process.argv[1] ? resolve(process.argv[1]) : "";
 if (entry && entry === fileURLToPath(import.meta.url)) {
-  startWorkshopServer()
+  Promise.resolve()
+    .then(() => {
+      // The service shares from DUM_SHARE_ROOTS, or ~/internship and the dedicated ~/dum-shared.
+      const share = shareRoots(process.env.DUM_SHARE_ROOTS);
+      if (share.dedicated) ensurePrivateDir(share.dedicated);
+      return startWorkshopServer({ shareRoots: share.roots });
+    })
     .then((ws) => {
       const show = (a: ReturnType<Server["address"]>) => (a && typeof a === "object" ? `${a.address}:${a.port}` : String(a));
       console.log(`[workshop] app      http://${show(ws.appServer.address())}`);
@@ -1032,6 +1110,7 @@ if (entry && entry === fileURLToPath(import.meta.url)) {
       console.log(`[workshop] home     ${ws.store.home}`);
       for (const s of ws.localServers) console.log(`[workshop] local    http://${show(s.address())} (no token)`);
       if (ws.notes) console.log(`[workshop] notes    ${ws.notes.publicRoot}`);
+      console.log(`[workshop] shares   ${ws.shares.roots.join(", ") || "none (no share root exists)"}`);
       let once = false;
       const bye = (signal: string) => {
         if (once) return;

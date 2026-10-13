@@ -10,6 +10,9 @@ import type { GoalDetail, JobView, Workshop } from "../client/workshop.ts";
 import { WorkshopRequestError } from "../client/workshop.ts";
 import { createRequest, readRequest, listRequests, isRequestId, isVerbatim, type DumRequest } from "../shared/requests.ts";
 import { createHandoff, listHandoffs, readHandoff, writeResult, HandoffError, type HandoffStatus } from "../shared/handoff.ts";
+import { queuePost } from "../shared/file-posts.ts";
+import { UPLOAD_LIMIT } from "../discord/files.ts";
+import { scrub } from "../context/root-context.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "1.0.0";
@@ -23,6 +26,10 @@ export type Deps = {
   appUrl: string;
   /** Set only by Dum's own Discord chat: the message Ryan just sent, to check teaching against. */
   chatSource?: string;
+  /** Where shared files wait for a goal's channel (the bot posts them). */
+  postsDir: string;
+  /** Set only by Dum's own Discord chat: files shared here go with this turn's reply. */
+  chat?: { filesDir: string; goalId: string | null };
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 };
@@ -37,6 +44,7 @@ const INSTRUCTIONS = `Dum is Ryan's learning companion, running on his server "h
 Rules:
 - Teaching and attempt reports must be Ryan's own words, verbatim. Never write, paraphrase or improve them. They are sent to Ryan in Discord for approval and only recorded if he approves, so tell him to check Discord.
 - Building costs real compute. Build when Ryan asks or clearly wants it.
+- To hand Ryan a file (his resume, a PDF, notes), use dum_share_file. It gives a link that opens on his own tailnet devices and uploads the file to Discord.
 - Handoffs pass work between agents: create one for "laptop" (Claude on Ryan's Mac, with his apps and browser) or "hub" (omp/Codex on the server). Never put secrets in a handoff.
 Start with dum_overview.`;
 
@@ -114,6 +122,31 @@ export const TOOLS: ToolDef[] = [
     inputSchema: { type: "object", properties: { executor: { type: "string", description: "Substring of the assigned executor, e.g. laptop or hub." }, status: { type: "string", enum: ["open", "running", "done", "partial", "blocked", "unfinished"], description: "unfinished = open, running, partial or blocked." } } },
     annotations: read,
   },
+  {
+    name: "dum_share_file",
+    title: "Share a file with Ryan",
+    description:
+      "Hand Ryan a file on hub, like his resume. Only files in the shared folders (by default ~/internship and ~/dum-shared) can be shared; hidden files, secret-looking names and files with credential-looking lines are refused. Returns a stable link that opens on Ryan's own tailnet devices and always shows the file as it is now. In Dum's Discord chat the file is also uploaded with your reply; give a goal to post it in that goal's channel instead. Put the link in your answer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "The file's full path on hub, e.g. ~/internship/resume/hubbart_resume.pdf." },
+        goal: { ...goalArg, description: "Post it in this goal's channel (id or exact title). Leave out in chat to attach it to your reply." },
+        note: { type: "string", maxLength: 500, description: "A short line to post with the file in a goal's channel." },
+        attach: { type: "boolean", description: "Upload the file itself, not just the link (default true; files over 10 MB go as a link)." },
+      },
+      required: ["path"],
+    },
+    annotations: write,
+  },
+  { name: "dum_shared_files", title: "List shared files", description: "Every file shared with Ryan so far, with its link, and whether it still opens.", inputSchema: { type: "object", properties: {} }, annotations: read },
+  {
+    name: "dum_unshare_file",
+    title: "Stop sharing a file",
+    description: "Close a shared file's link. The file itself stays where it is.",
+    inputSchema: { type: "object", properties: { share: { type: "string", description: "The share id or its first 8 characters, from dum_shared_files." } }, required: ["share"] },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  },
   { name: "handoff_read", title: "Read a handoff", description: "A handoff's task and result.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"] }, annotations: read },
   {
     name: "handoff_create",
@@ -149,6 +182,12 @@ function waitFor(args: Json, fallback: number): number {
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max - 1) + "…";
+}
+
+function sizeOf(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export function createMcp(deps: Deps) {
@@ -359,6 +398,46 @@ export function createMcp(deps: Deps) {
       const minutes = typeof args.minutes === "number" ? args.minutes : null;
       const s = await deps.workshop.schedule(goal.id, minutes);
       return s ? `"${goal.title}" builds every ${s.intervalMinutes} minutes; next at ${s.nextRunAt}.` : `Scheduled builds are off for "${goal.title}".`;
+    },
+
+    async dum_share_file(args) {
+      const ref = str(args, "goal", false);
+      const goal = ref ? await goalOf(ref) : null;
+      const note = clip(str(args, "note", false), 500);
+      if (note && scrub(note) !== note) throw new ToolError("Refused: the note has a line that looks like a credential.");
+      const share = await deps.workshop.share(str(args, "path"));
+      const link = deps.appUrl + share.urlPath;
+      const size = share.size ?? 0;
+      const upload = args.attach !== false && size <= UPLOAD_LIMIT;
+      const record = { shareId: share.id, name: share.name, size, urlPath: share.urlPath, link, attach: upload, requestedBy: client };
+      const what = `Shared ${share.name} (${sizeOf(size)}). Link, for Ryan's own tailnet devices: ${link}`;
+      const big = args.attach !== false && !upload ? " It's over Discord's 10 MB upload limit, so only the link goes." : "";
+      if (deps.chat && (!goal || goal.id === deps.chat.goalId)) {
+        queuePost(deps.chat.filesDir, record);
+        return `${what}\n${upload ? "It's uploaded with your reply, so it opens on his phone too." : "Only the link goes with your reply."}${big} Put the link in your answer.`;
+      }
+      if (goal) {
+        queuePost(deps.postsDir, { ...record, goalId: goal.id, ...(note ? { note } : {}) });
+        return `${what}\nPosting it in the channel for "${goal.title}" within a few seconds${upload ? ", with the file uploaded" : ""}.${big}`;
+      }
+      return `${what}\nNot posted to Discord. Give a goal to post it in that goal's channel.`;
+    },
+
+    async dum_shared_files() {
+      const list = await deps.workshop.shares();
+      if (!list.length) return "Nothing shared yet.";
+      return list
+        .map((s) => `- ${s.name} · ${s.size === null ? "doesn't open now (moved, deleted or fails a check)" : sizeOf(s.size)} · ${deps.appUrl}${s.urlPath} · id ${s.id.slice(0, 8)} · ${s.path}`)
+        .join("\n");
+    },
+
+    async dum_unshare_file(args) {
+      const ref = str(args, "share").toLowerCase();
+      if (!/^[0-9a-f-]{8,36}$/.test(ref)) throw new ToolError("A share id is a UUID or its first 8 characters, from dum_shared_files.");
+      const hits = (await deps.workshop.shares()).filter((s) => s.id.startsWith(ref));
+      if (hits.length !== 1) throw new ToolError(hits.length ? `"${ref}" matches ${hits.length} shares; use more characters.` : `No share "${ref}".`);
+      const gone = await deps.workshop.unshare(hits[0]!.id);
+      return `Stopped sharing ${gone.name}; its link answers 404 now. The file itself is untouched.`;
     },
 
     async handoff_list(args) {

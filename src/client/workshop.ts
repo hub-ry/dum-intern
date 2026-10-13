@@ -33,6 +33,9 @@ export type ConceptProgress = { concept: string; counts: Record<string, number>;
 
 export type Teaching = { id: string; concept: string; text: string; createdAt: string };
 
+/** A file shared through the workshop. `size` is null when the file no longer passes its checks. */
+export type ShareView = { id: string; path: string; name: string; createdAt: string; size: number | null; urlPath: string };
+
 export type Workshop = {
   goals(): Promise<GoalView[]>;
   goal(goalId: string): Promise<GoalDetail>;
@@ -49,6 +52,11 @@ export type Workshop = {
   schedule(goalId: string, minutes: number | null): Promise<Schedule>;
   build(goalId: string): Promise<JobView>;
   correct(jobId: string, correction: string): Promise<JobView>;
+  share(path: string): Promise<ShareView>;
+  shares(): Promise<ShareView[]>;
+  unshare(shareId: string): Promise<ShareView>;
+  /** A shared file's bytes, by its /files/... path, or null when the workshop won't serve it. */
+  file(urlPath: string): Promise<Uint8Array | null>;
 };
 
 /** A workshop answer that wasn't OK. 4xx messages are the workshop's own validation text. */
@@ -105,5 +113,13 @@ export function workshopClient(config: ClientConfig): Workshop {
     schedule: async (goalId, minutes) => (await ws<{ schedule: Schedule }>(goalPath(goalId, "/schedule"), { method: "POST", body: { intervalMinutes: minutes } })).schedule,
     build: async (goalId) => (await ws<{ job: JobView }>(goalPath(goalId, "/jobs"), { method: "POST", body: {} })).job,
     correct: async (jobId, correction) => (await ws<{ job: JobView }>(`/api/jobs/${encodeURIComponent(jobId)}/correction`, { method: "POST", body: { correction } })).job,
+    share: async (path) => (await ws<{ share: ShareView }>("/api/shares", { method: "POST", body: { path } })).share,
+    shares: async () => (await ws<{ shares: ShareView[] }>("/api/shares")).shares,
+    unshare: async (shareId) => (await ws<{ share: ShareView }>(`/api/shares/${encodeURIComponent(shareId)}`, { method: "DELETE" })).share,
+    file: async (urlPath) => {
+      if (!urlPath.startsWith("/files/")) return null;
+      const res = await fetch(config.baseUrl + urlPath, { headers: { authorization: `Bearer ${config.token}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
+      return res?.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+    },
   };
 }

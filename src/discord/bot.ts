@@ -20,7 +20,9 @@ import { adoptExisting, emptyLedger, nonceFor, plan, quiet, record, type Ledger,
 import { approvalCard, adoptHandoffs, boardMessage, decidedCard, parseDecision, planNotices, type BoardGoal, type SeenHandoffs } from "./presence.ts";
 import { avatarPng } from "./glyph.ts";
 import { DiscordError, gateway, gone, GUILD_MESSAGES, MISSING_PERMISSIONS, rest } from "./rest.ts";
-import { audit, chatCommand, prompt, sessionFor, splitReply, stripMentions, teamFooter, turnResult, type Sessions } from "./chat.ts";
+import { audit, chatCommand, chatFilesDir, prompt, sessionFor, splitReply, stripMentions, teamFooter, turnResult, type Sessions } from "./chat.ts";
+import { linkLines, pickUploads, postContent } from "./files.ts";
+import { DEFAULT_POSTS_DIR, listPosts, removePost, type FilePost } from "../shared/file-posts.ts";
 import { alive, finished, launch, listTurns, queueTurn, removeTurn, saveTurn, sourceText, startable, turnAttachments, turnDir, type Turn } from "./turns.ts";
 import { DEFAULT_ATTACHMENTS_DIR, incomingAttachments, pruneAttachments, saveAttachments, type DiscordAttachment } from "./attachments.ts";
 import { DUM_BIN } from "../cli.ts";
@@ -47,6 +49,7 @@ const config = {
   artifacts: `http://${workshopUrl.hostname}:${need("DUM_WORKSHOP_ARTIFACT_PORT")}`,
   requestsDir: process.env.DUM_REQUESTS_DIR?.trim() || DEFAULT_REQUESTS_DIR,
   handoffDir: process.env.DUM_HANDOFF_DIR?.trim() || DEFAULT_HANDOFF_DIR,
+  postsDir: process.env.DUM_POSTS_DIR?.trim() || DEFAULT_POSTS_DIR,
 };
 const linkHost = process.env.DUM_DISCORD_PUBLIC_HOST?.trim() || workshopUrl.hostname;
 const links: Links = {
@@ -299,6 +302,52 @@ async function decideOnce(id: string, approve: boolean): Promise<DumRequest | nu
   }
 }
 
+// --- Shared files -----------------------------------------------------------------------------
+
+/**
+ * Posts a message with the files that fit uploaded alongside, fetched from the workshop now. A
+ * file that can't be fetched is left off; its link is already in the text.
+ */
+async function postWithFiles(channelId: string, payload: Record<string, unknown>, files: FilePost[]): Promise<string> {
+  const path = `/channels/${channelId}/messages`;
+  const form = new FormData();
+  const attachments: { id: number; filename: string }[] = [];
+  for (const f of pickUploads(files)) {
+    const bytes = await workshop.file(f.urlPath).catch(() => null);
+    if (!bytes) {
+      log(`shared file ${f.shareId.slice(0, 8)} couldn't be fetched; sending its link only`);
+      continue;
+    }
+    form.append(`files[${attachments.length}]`, new Blob([Buffer.from(bytes)]), f.name);
+    attachments.push({ id: attachments.length, filename: f.name });
+  }
+  if (!attachments.length) return (await discord("POST", path, payload)).id;
+  form.append("payload_json", JSON.stringify({ ...payload, attachments }));
+  return (await discord("POST", path, form)).id;
+}
+
+/** Files shared for a goal's channel rather than a chat reply. Each is posted once, then dropped. */
+async function deliverFilePosts(): Promise<void> {
+  for (const post of listPosts(config.postsDir)) {
+    const channelId = (post.goalId && channels.channelFor(post.goalId)) || config.lobbyId;
+    const nonce = `f${post.id.replace(/-/g, "").slice(0, 22)}`;
+    try {
+      await postWithFiles(channelId, { content: postContent(post), nonce, enforce_nonce: true, allowed_mentions: NO_PINGS }, [post]);
+    } catch (err) {
+      // A vanished channel is made again and the post retried; anything else Discord refuses for good.
+      if (gone(err) || !(err instanceof DiscordError) || err.status >= 500) {
+        if (gone(err)) lastChannelCheck = 0;
+        throw err;
+      }
+      removePost(config.postsDir, post.id);
+      log(`shared file ${post.shareId.slice(0, 8)} was refused by Discord and dropped: ${describe(err)}`);
+      continue;
+    }
+    removePost(config.postsDir, post.id);
+    log(`posted shared file ${post.shareId.slice(0, 8)} for ${post.requestedBy}`);
+  }
+}
+
 // --- Handoff notices ------------------------------------------------------------------------
 
 async function noticeHandoffs(list: ReturnType<typeof listHandoffs>): Promise<void> {
@@ -357,7 +406,7 @@ async function updateBoard(message: Message, existing: Set<string> | null): Prom
 
 // --- The loop -------------------------------------------------------------------------------
 
-const troubles = { channels: trouble("goal channels"), delivery: trouble("delivery"), approvals: trouble("approvals"), handoffs: trouble("handoff notices"), board: trouble("board") };
+const troubles = { channels: trouble("goal channels"), delivery: trouble("delivery"), approvals: trouble("approvals"), files: trouble("shared files"), handoffs: trouble("handoff notices"), board: trouble("board") };
 
 /** Each part fails on its own: a missing permission or a bad handoff file never stops delivery. */
 async function sync(): Promise<void> {
@@ -377,6 +426,7 @@ async function sync(): Promise<void> {
   await part(troubles.delivery, () => deliverJobs(jobs, goals));
   const pending = listRequests(config.requestsDir).filter((r) => r.status === "pending");
   await part(troubles.approvals, () => askPending(pending));
+  await part(troubles.files, () => deliverFilePosts());
   const handoffs = listHandoffs(config.handoffDir);
   await part(troubles.handoffs, () => noticeHandoffs(handoffs));
   await part(troubles.board, () => updateBoard(boardMessage({ goals, jobs, pending, handoffs, links, channelFor: channels.channelFor }), existing));
@@ -537,6 +587,7 @@ async function start(t: Turn): Promise<void> {
     dumBin: DUM_BIN,
     repo: DUM_REPO,
     turnDir: turnDir(TURNS, t.id),
+    goalId: t.goalId,
     message: prompt({ message: sourceText(TURNS, t.id), author: t.author, place, attachments }),
     attachments,
     resume,
@@ -589,14 +640,20 @@ async function complete(t: Turn, done: { code: number; stdout: string; stderr: s
   const started = Date.parse(t.startedAt ?? t.createdAt);
   audit(CHAT_STATE, { at: new Date().toISOString(), channel: t.conversation, failed: result.failed, agents: result.agents, tools: result.tools, ms: Date.now() - started });
   log(`turn ${t.id.slice(0, 8)} ${result.failed ? "failed" : "answered"}${result.agents.length ? ` (asked ${result.agents.join(", ")})` : ""}`);
-  const parts = result.failed ? ["sorry, my brain hiccuped. the reason is in the hub log. try again?"] : splitReply(result.text + teamFooter(result.agents));
+  // Files Dum shared during the turn go with its first message, and their links are always in the text.
+  const files = listPosts(chatFilesDir(turnDir(TURNS, t.id)));
+  const text = result.failed ? "sorry, my brain hiccuped. the reason is in the hub log. try again?" : result.text + teamFooter(result.agents);
+  const parts = splitReply(text + linkLines(text, files));
   try {
     for (const [n, part] of parts.entries()) {
-      await discord("POST", `/channels/${t.conversation}/messages`, {
+      const payload = {
         content: part,
         ...(n === 0 && t.replyInline ? { message_reference: { message_id: t.messageId, fail_if_not_exists: false } } : {}),
         allowed_mentions: NO_PINGS,
-      });
+      };
+      // An upload Discord refuses must not cost the answer: the links are in the text either way.
+      if (n === 0 && files.length) await postWithFiles(t.conversation, payload, files).catch(() => discord("POST", `/channels/${t.conversation}/messages`, payload));
+      else await discord("POST", `/channels/${t.conversation}/messages`, payload);
     }
   } catch (err) {
     log(`turn ${t.id.slice(0, 8)} answer couldn't be posted: ${describe(err)}`);

@@ -10,11 +10,13 @@ import { join } from "node:path";
 import { createMcp, PROTOCOL_VERSIONS, TOOLS, type Deps } from "./server.ts";
 import { listRequests, updateRequest } from "../shared/requests.ts";
 import { listHandoffs, parseStatus, isTaskId } from "../shared/handoff.ts";
+import { listPosts } from "../shared/file-posts.ts";
 import { mergeMcpJson } from "../cli.ts";
 import type { JobView, Workshop } from "../client/workshop.ts";
 
 const GOAL = "f57e2d4b-56c3-46eb-b854-69fda9522bda";
 const JOB = "60d885e9-16e2-46bb-87cf-ee62cd7c45d9";
+const SHARE = { id: "7b0c4f7e-2a51-4d1e-9a3c-55e0d1c2b3a4", path: "/home/r/internship/resume/hubbart_resume.pdf", name: "hubbart_resume.pdf", createdAt: "2026-10-11T00:00:00Z", size: 34711, urlPath: "/files/7b0c4f7e-2a51-4d1e-9a3c-55e0d1c2b3a4/hubbart_resume.pdf" };
 
 function setup(over: Partial<Workshop> = {}) {
   const root = mkdtempSync(join(tmpdir(), "dum-mcp-"));
@@ -37,6 +39,10 @@ function setup(over: Partial<Workshop> = {}) {
     schedule: async () => null,
     build: async (g) => (calls.push(`build ${g}`), job("queued")),
     correct: async (j, c) => (calls.push(`correct ${j} ${c}`), job("queued")),
+    share: async (path) => (calls.push(`share ${path}`), { ...SHARE, path }),
+    shares: async () => [SHARE],
+    unshare: async (id) => (calls.push(`unshare ${id}`), SHARE),
+    file: async () => null,
     ...over,
   };
   let clock = Date.parse("2026-10-11T09:00:00Z");
@@ -44,6 +50,7 @@ function setup(over: Partial<Workshop> = {}) {
     workshop,
     requestsDir: join(root, "requests"),
     handoffDir: join(root, "handoff"),
+    postsDir: join(root, "posts"),
     appUrl: "http://hub:8770",
     now: () => new Date(clock),
     sleep: async (ms) => {
@@ -242,4 +249,60 @@ test("the codex MCP server lists one tool and refuses a missing folder without r
   const r = (await handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "codex", arguments: { task: "x", cwd: "/definitely/not/here" } } })) as any;
   assert.equal(r.result.isError, true);
   assert.match(r.result.content[0].text, /No folder/);
+});
+
+test("a shared file rides with the chat reply, goes to a named goal's channel, or just returns its link", async () => {
+  const { root, deps, calls, cleanup } = setup();
+  try {
+    const link = `http://hub:8770${SHARE.urlPath}`;
+    // Outside chat with no goal: a link and nothing queued.
+    const bare = await createMcp(deps).call("dum_share_file", { path: "~/internship/resume/hubbart_resume.pdf" });
+    assert.match(bare.content[0]!.text, new RegExp(`${link.replace(/[.]/g, "\\.")}[\\s\\S]*Not posted to Discord`));
+    assert.deepEqual(calls, ["share ~/internship/resume/hubbart_resume.pdf"]);
+    assert.equal(listPosts(deps.postsDir).length, 0);
+
+    // In chat: the file is queued in the turn's folder, to upload with the reply.
+    const filesDir = join(root, "turn", "files");
+    const chat = createMcp({ ...deps, chat: { filesDir, goalId: GOAL } });
+    const inChat = await chat.call("dum_share_file", { path: SHARE.path });
+    assert.match(inChat.content[0]!.text, /uploaded with your reply/);
+    const [queued] = listPosts(filesDir);
+    assert.equal(queued!.link, link);
+    assert.equal(queued!.attach, true);
+    assert.equal(queued!.goalId, undefined);
+    // Naming the chat's own goal is the same thing.
+    await chat.call("dum_share_file", { path: SHARE.path, goal: "software" });
+    assert.equal(listPosts(filesDir).length, 2);
+    assert.equal(listPosts(deps.postsDir).length, 0);
+
+    // A goal from outside chat: posted in that goal's channel, with the note.
+    const posted = await createMcp(deps).call("dum_share_file", { path: SHARE.path, goal: "software", note: "updated resume" });
+    assert.match(posted.content[0]!.text, /Posting it in the channel for "software"/);
+    const [post] = listPosts(deps.postsDir);
+    assert.equal(post!.goalId, GOAL);
+    assert.equal(post!.note, "updated resume");
+
+    const secret = await createMcp(deps).call("dum_share_file", { path: SHARE.path, goal: "software", note: "password: hunter2hunter2" });
+    assert.equal(secret.isError, true);
+    assert.match(secret.content[0]!.text, /credential/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a file over Discord's upload limit goes as a link, and unsharing finds the share by its prefix", async () => {
+  const big = { ...SHARE, size: 11 * 1024 * 1024 };
+  const { root, text, deps, calls, cleanup } = setup({ share: async () => big, shares: async () => [big] });
+  try {
+    const filesDir = join(root, "turn", "files");
+    const r = await createMcp({ ...deps, chat: { filesDir, goalId: null } }).call("dum_share_file", { path: SHARE.path });
+    assert.match(r.content[0]!.text, /over Discord's 10 MB upload limit/);
+    assert.equal(listPosts(filesDir)[0]!.attach, false);
+    assert.match((await text("dum_shared_files")).text, /hubbart_resume\.pdf · 11\.0 MB · http:\/\/hub:8770\/files\/7b0c4f7e/);
+    assert.match((await text("dum_unshare_file", { share: "7b0c4f7e" })).text, /Stopped sharing hubbart_resume\.pdf/);
+    assert.ok(calls.includes(`unshare ${SHARE.id}`));
+    assert.equal((await text("dum_unshare_file", { share: "ffffffff" })).error, true);
+  } finally {
+    cleanup();
+  }
 });

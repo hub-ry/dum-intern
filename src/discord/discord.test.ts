@@ -12,6 +12,8 @@ import { approvalCard, adoptHandoffs, boardMessage, decidedCard, parseDecision, 
 import { parseSprite, renderPng, avatarPng } from "./glyph.ts";
 import type { DumRequest } from "../shared/requests.ts";
 import type { Handoff } from "../shared/handoff.ts";
+import { linkLines, pickUploads, postContent } from "./files.ts";
+import type { FilePost } from "../shared/file-posts.ts";
 
 /** Everything a message would show, to check what it says. */
 const shown = (s: Step) => JSON.stringify(s.message);
@@ -220,6 +222,10 @@ function ctx(calls: string[] = [], over: Partial<GoalDetail> = {}): Context {
       schedule: async (g, m) => (calls.push(`schedule ${g} ${m}`), m === null ? null : { intervalMinutes: m, nextRunAt: "2026-10-12T00:00:00Z" }),
       build: async (g) => (calls.push(`build ${g}`), job("queued", { id: "22222222-2222-2222-2222-222222222222" })),
       correct: async (j, c) => (calls.push(`correct ${j} ${c}`), job("queued", { id: "33333333-3333-3333-3333-333333333333" })),
+      share: async () => assert.fail("commands never share files"),
+      shares: async () => [],
+      unshare: async () => assert.fail("commands never unshare files"),
+      file: async () => null,
     },
   };
 }
@@ -608,4 +614,33 @@ test("the self-edit lock: one holder at a time, re-entrant for its holder, and s
   } finally {
     rmd(root, { recursive: true, force: true });
   }
+});
+
+test("shared files upload while they fit one message, and their links are always in the text", () => {
+  const post = (name: string, size: number, attach = true): FilePost => ({
+    schemaVersion: 1,
+    id: "0b1c2d3e-0000-4000-8000-000000000000",
+    createdAt: "2026-10-13T00:00:00Z",
+    shareId: "7b0c4f7e-2a51-4d1e-9a3c-55e0d1c2b3a4",
+    name,
+    size,
+    urlPath: `/files/7b0c4f7e-2a51-4d1e-9a3c-55e0d1c2b3a4/${name}`,
+    link: `http://hub:8770/files/7b0c4f7e-2a51-4d1e-9a3c-55e0d1c2b3a4/${name}`,
+    attach,
+    requestedBy: "claude-code",
+  });
+  const MB = 1024 * 1024;
+  const resume = post("resume.pdf", 34_711);
+  const video = post("demo.mp4", 11 * MB);
+  const half = post("a.zip", 6 * MB);
+  const other = post("b.zip", 6 * MB);
+  const linkOnly = post("c.pdf", 100, false);
+  assert.deepEqual(pickUploads([resume, video, half, other, linkOnly]).map((p) => p.name), ["resume.pdf", "a.zip"], "over the limit, past the total, or link-only stays a link");
+  assert.equal(pickUploads(Array.from({ length: 12 }, () => resume)).length, 10, "at most ten files on one message");
+
+  const lines = linkLines(`here's your resume: ${resume.link}`, [resume, linkOnly]);
+  assert.equal(lines, `\n-# c.pdf (100 B): <${linkOnly.link}>`, "a link Dum already wrote isn't repeated");
+  assert.equal(linkLines("done", []), "");
+  const content = postContent({ ...resume, note: "for @everyone" });
+  assert.match(content, /^for @​everyone\n\*\*resume\.pdf\*\* \(34 KB\)\n-# on your tailnet: <http:\/\/hub:8770\/files\//);
 });

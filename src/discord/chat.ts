@@ -93,6 +93,11 @@ export function readStream(stdout: string): Omit<RunResult, "failed"> & { ok: bo
   return { ok, text: ok ? result!.result! : "", sessionId: result?.session_id ?? null, agents: [...agents], tools: [...tools] };
 }
 
+/** Where a chat turn's shared files wait for its reply. */
+export function chatFilesDir(turnDir: string): string {
+  return join(turnDir, "files");
+}
+
 /**
  * Ryan's Purdue Brightspace (courses, due dates, grades, announcements, syllabus) through
  * brightspace-mcp-server, pinned on hub with its own launcher (see deploy/brightspace). Turns
@@ -112,7 +117,7 @@ export function brightspaceServer(launcher = process.env.DUM_BRIGHTSPACE_MCP?.tr
  * folder: Ryan's words (for the verbatim check), the team's definitions, and the turn's input
  * (the prompt plus any images Ryan attached), which the command reads on stdin.
  */
-export function chatCommand(opts: { claude: string; dumBin: string; repo: string; turnDir: string; message: string; attachments?: SavedAttachment[]; resume: string | null; model: string | null }): { bin: string; args: string[]; cwd: string; env: Record<string, string>; stdin: string } {
+export function chatCommand(opts: { claude: string; dumBin: string; repo: string; turnDir: string; goalId: string | null; message: string; attachments?: SavedAttachment[]; resume: string | null; model: string | null }): { bin: string; args: string[]; cwd: string; env: Record<string, string>; stdin: string } {
   const sourceFile = join(opts.turnDir, "source.txt");
   const agentsFile = join(opts.turnDir, "agents.json");
   const inputFile = join(opts.turnDir, "input.jsonl");
@@ -120,7 +125,8 @@ export function chatCommand(opts: { claude: string; dumBin: string; repo: string
   writeFileSync(agentsFile, JSON.stringify(Object.fromEntries(Object.entries(AGENTS).map(([k, a]) => [k, { ...a, ...(opts.model ? { model: opts.model } : {}) }]))), { mode: 0o600 });
   const mcp = JSON.stringify({
     mcpServers: {
-      dum: { command: opts.dumBin, args: ["mcp"], env: { DUM_CHAT_SOURCE_FILE: sourceFile } },
+      // Files Dum shares during the turn wait in its folder and go out with the reply.
+      dum: { command: opts.dumBin, args: ["mcp"], env: { DUM_CHAT_SOURCE_FILE: sourceFile, DUM_CHAT_FILES_DIR: chatFilesDir(opts.turnDir), DUM_CHAT_GOAL_ID: opts.goalId ?? "" } },
       codex: { command: opts.dumBin, args: ["codex-mcp"] },
       ...brightspaceServer(),
     },

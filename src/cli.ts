@@ -17,6 +17,7 @@ import { createMcp, serveLines, serveStdio, type Deps } from "./mcp/server.ts";
 import { createCodexMcp } from "./mcp/codex.ts";
 import { DEFAULT_REQUESTS_DIR } from "./shared/requests.ts";
 import { DEFAULT_HANDOFF_DIR } from "./shared/handoff.ts";
+import { DEFAULT_POSTS_DIR } from "./shared/file-posts.ts";
 import { DEFAULT_LOCK, holder, release, tryTake } from "./shared/lock.ts";
 import { ship } from "./shared/ship.ts";
 
@@ -31,7 +32,9 @@ function deps(): Deps {
     requestsDir: process.env.DUM_REQUESTS_DIR?.trim() || DEFAULT_REQUESTS_DIR,
     handoffDir: process.env.DUM_HANDOFF_DIR?.trim() || DEFAULT_HANDOFF_DIR,
     appUrl: process.env.DUM_PUBLIC_URL?.trim() || config.baseUrl,
+    postsDir: process.env.DUM_POSTS_DIR?.trim() || DEFAULT_POSTS_DIR,
     ...(chatSource() !== undefined ? { chatSource: chatSource() } : {}),
+    ...(process.env.DUM_CHAT_FILES_DIR?.trim() ? { chat: { filesDir: process.env.DUM_CHAT_FILES_DIR.trim(), goalId: process.env.DUM_CHAT_GOAL_ID?.trim() || null } } : {}),
   };
 }
 
