@@ -28,7 +28,6 @@ export const BRIGHTSPACE_DOWNLOAD = ["download_file", "download_dropbox_submissi
 
 const BRIGHTSPACE_USE = `Purdue Brightspace (the brightspace tools) is Ryan's real coursework: courses, due dates, grades, assignments, announcements, syllabi. Dates come back in Indiana time. If a call says sign-in is waiting on his phone, tell him right away the number to enter in Microsoft Authenticator; it expires in 5 minutes, and after he enters it the same call works again. If it says setup is missing or the saved password stopped working, tell him to run \`~/opt/brightspace-mcp/bin/brightspace setup\` on hub over ssh. Never ask for his password, and never put it, his grades or classmates' details anywhere new.`;
 
-
 /** Built-in agents that would inherit every tool, including the shell. */
 export const DENIED_AGENTS = ["general-purpose", "claude", "Explore", "Plan", "statusline-setup"];
 
