@@ -140,6 +140,10 @@ systemctl --user enable --now dum-root-context.timer   # every 5 minutes
 
 Root context is sent to the model with every build, so put only what you're fine sharing with the provider in those files.
 
+### Shared context
+
+Between the root (every goal) and a goal's own context there is shared context: a named block of text linked to several goals, like one about Ryan's career that software, gpa and internship all use. Each linked goal's rendered context includes it, labelled with the other goals that share it, so builds, `dum_goal` and chat all see it, and it's written once instead of copied into each goal. Dum manages it with `dum_set_shared_context` (text appends by default; `goals`, `add_goals` and `remove_goals` set the links), `dum_shared_contexts` and `dum_delete_shared_context`; the workshop serves it at `/api/shared-contexts`. A goal carries at most 16,000 characters from all its shared blocks together, on top of its own 48,000, so `dum_goal` still fits Claude Code's tool-result limit. Blocks live in the workshop state file next to the goals.
+
 ## Internship watch
 
 `src/internship` reads public Summer 2027 boards and posts to the internship goal's channel. It only reads boards and posts links. Nothing in it opens, fills in or submits an application.

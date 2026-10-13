@@ -225,6 +225,20 @@ export type Job = {
   attempts: number;
 };
 
+/**
+ * Context several goals share, between the root (every goal) and a goal's own. Each linked goal's
+ * rendered context includes it, so builds, dum_goal and chat all see it without copies to drift.
+ */
+export type SharedContextRecord = {
+  id: string;
+  /** Unique, case-insensitive. */
+  name: string;
+  text: string;
+  goalIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type State = {
   schemaVersion: SchemaVersion;
   goals: GoalRecord[];
@@ -233,6 +247,7 @@ export type State = {
   evidence: Evidence[];
   jobs: Job[];
   global: GlobalContextRecord;
+  shared: SharedContextRecord[];
 };
 
 export type PositionsFile = {

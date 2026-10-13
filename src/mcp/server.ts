@@ -6,14 +6,14 @@
 // attempt reports become approval requests that Ryan answers in Discord; everything else acts
 // directly and shows up where Ryan already looks.
 
-import type { GoalDetail, JobView, Workshop } from "../client/workshop.ts";
+import type { GoalDetail, JobView, SharedContext, Workshop } from "../client/workshop.ts";
 import { WorkshopRequestError } from "../client/workshop.ts";
 import { createRequest, readRequest, listRequests, isRequestId, isVerbatim, type DumRequest } from "../shared/requests.ts";
 import { createHandoff, listHandoffs, readHandoff, writeResult, HandoffError, type HandoffStatus } from "../shared/handoff.ts";
 import { queuePost } from "../shared/file-posts.ts";
 import { UPLOAD_LIMIT } from "../discord/files.ts";
 import { scrub } from "../context/root-context.ts";
-import { MAX_GOAL_CONTEXT } from "../workshop/validate.ts";
+import { MAX_GOAL_CONTEXT, MAX_SHARED_CONTEXT } from "../workshop/validate.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "1.0.0";
@@ -77,6 +77,38 @@ export const TOOLS: ToolDef[] = [
     description: `Replace or add to a goal's own context: notes, course details, constraints Dum should know. Holds up to ${MAX_GOAL_CONTEXT.toLocaleString("en-US")} characters; keep it a digest and put long material in files under ~/dum-library/<goal-name>/. Root context comes from files on hub and can't be set here.`,
     inputSchema: { type: "object", properties: { goal: goalArg, context: { type: "string" }, mode: { type: "string", enum: ["append", "replace"], description: "Default append." } }, required: ["goal", "context"] },
     annotations: write,
+  },
+  {
+    name: "dum_shared_contexts",
+    title: "List shared contexts",
+    description: "Context blocks that several goals share (for example one about Ryan's career that software, gpa and internship all use): each one's name, linked goals, size and opening lines.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: read,
+  },
+  {
+    name: "dum_set_shared_context",
+    title: "Set a shared context",
+    description: `Create or update a context block that several goals share. It appears in each linked goal's context (and so in its builds and dum_goal), so write it once instead of copying it into each goal. Up to ${MAX_SHARED_CONTEXT.toLocaleString("en-US")} characters. Text is appended by default; mode "replace" rewrites it. goals replaces the linked set; add_goals and remove_goals change it.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", maxLength: 80, description: "Short name, e.g. \"career\"." },
+        text: { type: "string" },
+        mode: { type: "string", enum: ["append", "replace"], description: "Default append." },
+        goals: { type: "array", items: goalArg, description: "Exactly these goals (ids or titles)." },
+        add_goals: { type: "array", items: goalArg },
+        remove_goals: { type: "array", items: goalArg },
+      },
+      required: ["name"],
+    },
+    annotations: write,
+  },
+  {
+    name: "dum_delete_shared_context",
+    title: "Delete a shared context",
+    description: "Remove a shared context block. The goals keep their own context.",
+    inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   },
   { name: "dum_read_material", title: "Read study material", description: "The full text of one of a goal's study materials.", inputSchema: { type: "object", properties: { goal: goalArg, material_id: { type: "string" } }, required: ["goal", "material_id"] }, annotations: read },
   {
@@ -210,6 +242,24 @@ export function createMcp(deps: Deps) {
     return deps.workshop.goal(hit.id);
   }
 
+  async function titles(): Promise<Map<string, string>> {
+    return new Map((await deps.workshop.goals()).map((g) => [g.id, g.title]));
+  }
+
+  /** The shared blocks a goal is linked to, as dum_goal shows them. */
+  function sharedFor(all: SharedContext[], goalId: string, names: Map<string, string>): string[] {
+    const mine = all.filter((c) => c.goalIds.includes(goalId));
+    if (!mine.length) return [];
+    return [
+      "Shared contexts (part of this goal's context, shared with other goals):",
+      ...mine.map((c) => {
+        const others = c.goalIds.filter((id) => id !== goalId).map((id) => names.get(id) ?? id);
+        return `## ${c.name}${others.length ? ` (also in: ${others.join(", ")})` : ""}\n${c.text.trim() || "(empty)"}`;
+      }),
+      "",
+    ];
+  }
+
   async function jobOf(ref: string): Promise<JobView> {
     const r = ref.toLowerCase();
     if (UUID.test(r)) return deps.workshop.job(r);
@@ -291,6 +341,7 @@ export function createMcp(deps: Deps) {
         "",
         `Goal context:\n${goal.baseContext.trim() || "(empty)"}`,
         "",
+        ...sharedFor(await deps.workshop.sharedContexts(), goal.id, await titles()),
         "Study materials:",
         ...goal.materials.map((m) => `- ${m.title} [concept: ${m.concept}] (material_id ${m.id})`),
         "",
@@ -328,6 +379,53 @@ export function createMcp(deps: Deps) {
       return next.length > CONTEXT_NEARLY_FULL * MAX_GOAL_CONTEXT
         ? `${saved} It's nearly full: condense it soon with mode "replace", moving detail into files under ~/dum-library/<goal-name>/.`
         : saved;
+    },
+
+    async dum_shared_contexts() {
+      const [all, names] = await Promise.all([deps.workshop.sharedContexts(), titles()]);
+      if (!all.length) return "No shared contexts yet. dum_set_shared_context makes one and links it to goals.";
+      return all
+        .map((c) => `- ${c.name}: goals ${c.goalIds.map((id) => names.get(id) ?? id).join(", ") || "none"} · ${count(c.text.length)} of ${count(MAX_SHARED_CONTEXT)} characters · updated ${c.updatedAt}\n  ${clip(c.text.replace(/\s+/g, " "), 240)}`)
+        .join("\n");
+    },
+
+    async dum_set_shared_context(args) {
+      const name = str(args, "name").trim();
+      if (!name) throw new ToolError("Give the shared context a name.");
+      const all = await deps.workshop.sharedContexts();
+      const current = all.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      const ids = async (key: string): Promise<string[] | undefined> => {
+        const v = args[key];
+        if (v === undefined) return undefined;
+        if (!Array.isArray(v)) throw new ToolError(`${key} must be a list of goal ids or titles.`);
+        return Promise.all(v.map(async (ref) => (await goalOf(String(ref))).id));
+      };
+      const [exact, add, remove] = await Promise.all([ids("goals"), ids("add_goals"), ids("remove_goals")]);
+      let goalIds: string[] | undefined;
+      if (exact || add || remove) {
+        const start = exact ?? current?.goalIds ?? [];
+        goalIds = [...new Set([...start, ...(add ?? [])])].filter((id) => !(remove ?? []).includes(id));
+      }
+      let text: string | undefined;
+      if (args.text !== undefined) {
+        const t = str(args, "text");
+        const replace = args.mode === "replace" || !current;
+        text = replace ? t : current!.text.trim() ? `${current!.text.trimEnd()}\n\n${t}` : t;
+        if (text.length > MAX_SHARED_CONTEXT) {
+          throw new ToolError(`Not saved: "${name}" would be ${count(text.length)} characters and the limit is ${count(MAX_SHARED_CONTEXT)}. Condense it with mode "replace", moving long detail into files under ~/dum-library/ with a pointer.`);
+        }
+      }
+      if (!current && text === undefined) throw new ToolError(`There's no shared context "${name}" yet. Give it text to create it.`);
+      if (text === undefined && goalIds === undefined) throw new ToolError("Nothing to change: give text, goals, add_goals or remove_goals.");
+      const saved = await deps.workshop.setShared(current?.name ?? name, { ...(text !== undefined ? { text } : {}), ...(goalIds !== undefined ? { goalIds } : {}) });
+      const names = await titles();
+      const linked = saved.goalIds.map((id) => names.get(id) ?? id).join(", ") || "no goals yet (link some with add_goals)";
+      return `${current ? "Updated" : "Created"} the shared context "${saved.name}" (${count(saved.text.length)} of ${count(MAX_SHARED_CONTEXT)} characters), linked to ${linked}. It's part of those goals' context from now on.`;
+    },
+
+    async dum_delete_shared_context(args) {
+      const gone = await deps.workshop.deleteShared(str(args, "name"));
+      return `Deleted the shared context "${gone.name}". The goals it was linked to keep their own context.`;
     },
 
     async dum_read_material(args) {

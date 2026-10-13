@@ -12,7 +12,7 @@ import { listRequests, updateRequest } from "../shared/requests.ts";
 import { listHandoffs, parseStatus, isTaskId } from "../shared/handoff.ts";
 import { listPosts } from "../shared/file-posts.ts";
 import { mergeMcpJson } from "../cli.ts";
-import type { JobView, Workshop } from "../client/workshop.ts";
+import type { JobView, SharedContext, Workshop } from "../client/workshop.ts";
 
 const GOAL = "f57e2d4b-56c3-46eb-b854-69fda9522bda";
 const JOB = "60d885e9-16e2-46bb-87cf-ee62cd7c45d9";
@@ -23,6 +23,7 @@ function setup(over: Partial<Workshop> = {}) {
   const calls: string[] = [];
   const job = (state: JobView["state"]): JobView => ({ id: JOB, goalId: GOAL, state, createdAt: "2026-10-11T00:00:00Z", ...(state === "ready" ? { result: { title: "Shelter", panels: [{ caption: "Page one", code: "for (x of y) {}" }] } } : {}) });
   let jobState: JobView["state"] = "running";
+  const shared: SharedContext[] = [];
   const workshop: Workshop = {
     goals: async () => [{ id: GOAL, title: "software" }],
     goal: async () => ({ id: GOAL, title: "software", ambition: "full stack", baseContext: "old", materials: [{ id: "m1", concept: "loops", title: "Loops", body: "# Loops" }], schedule: null }),
@@ -42,6 +43,18 @@ function setup(over: Partial<Workshop> = {}) {
     share: async (path) => (calls.push(`share ${path}`), { ...SHARE, path }),
     shares: async () => [SHARE],
     unshare: async (id) => (calls.push(`unshare ${id}`), SHARE),
+    sharedContexts: async () => structuredClone(shared),
+    setShared: async (name, patch) => {
+      let c = shared.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (!c) shared.push((c = { id: "44444444-4444-4444-8444-444444444444", name, text: "", goalIds: [], createdAt: "t", updatedAt: "t" }));
+      if (patch.text !== undefined) c.text = patch.text;
+      if (patch.goalIds !== undefined) c.goalIds = patch.goalIds;
+      return structuredClone(c);
+    },
+    deleteShared: async (name) => {
+      const i = shared.findIndex((x) => x.name.toLowerCase() === name.toLowerCase());
+      return structuredClone(shared.splice(i, 1)[0]!);
+    },
     file: async () => null,
     ...over,
   };
@@ -330,3 +343,26 @@ test("a file over Discord's upload limit goes as a link, and unsharing finds the
     cleanup();
   }
 });
+
+test("shared contexts: create by goal title, append, link and unlink goals, show in dum_goal, delete", async () => {
+  const GPA = "6fb1ec17-3895-4b1d-8277-7287fa0ef867";
+  const goals = [{ id: GOAL, title: "software" }, { id: GPA, title: "gpa" }];
+  const { text, cleanup } = setup({
+    goals: async () => goals,
+    goal: async (id) => ({ ...goals.find((g) => g.id === id)!, ambition: "a", baseContext: "", materials: [], schedule: null }),
+  });
+  try {
+    assert.match((await text("dum_shared_contexts")).text, /No shared contexts yet/);
+    assert.match((await text("dum_set_shared_context", { name: "career", text: "ML internships.", goals: ["software", "gpa"] })).text, /Created the shared context "career" .*linked to software, gpa/);
+    assert.match((await text("dum_set_shared_context", { name: "Career", text: "Summer 2027." })).text, /Updated/);
+    assert.match((await text("dum_goal", { goal: "software" })).text, /## career \(also in: gpa\)\nML internships\.\n\nSummer 2027\./);
+    assert.match((await text("dum_set_shared_context", { name: "career", remove_goals: ["gpa"] })).text, /linked to software\./);
+    assert.match((await text("dum_shared_contexts")).text, /- career: goals software · 2[0-9] of 16,000 characters/);
+    assert.equal((await text("dum_set_shared_context", { name: "nope", goals: ["gpa"] })).error, true);
+    assert.equal((await text("dum_set_shared_context", { name: "career", text: "x".repeat(16_001), mode: "replace" })).error, true);
+    assert.match((await text("dum_delete_shared_context", { name: "career" })).text, /Deleted the shared context "career"/);
+  } finally {
+    cleanup();
+  }
+});
+

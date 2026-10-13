@@ -13,6 +13,7 @@ import type {
   GlobalEvent,
   GlobalEventType,
   GoalRecord,
+  SharedContextRecord,
   Job,
   JobSnapshot,
   JobState,
@@ -35,6 +36,13 @@ export const MAX_TEXT = 12000; // teaching, attempt, correction, revisit note
 // rest of either. The root context goes into every build of every goal and stays smaller.
 export const MAX_GOAL_CONTEXT = 48000;
 export const MAX_GLOBAL_CONTEXT = 24000;
+// Shared context goes whole into every linked goal's builds and its dum_goal, on top of the goal's
+// own 48,000, and dum_goal has to fit a 25,000-token tool result. So the cap is on what one goal
+// carries from all its shared blocks together, and one block can't be bigger than that.
+export const MAX_SHARED_CONTEXT = 16000;
+export const MAX_SHARED_PER_GOAL = 16000;
+export const MAX_SHARED_CONTEXTS = 20;
+export const MAX_SHARED_NAME = 80;
 export const MIN_INTERVAL_MINUTES = 1;
 export const MAX_INTERVAL_MINUTES = 525600; // one year
 export const MAX_ERROR_LENGTH = 4000;
@@ -428,6 +436,19 @@ function globalRecord(value: unknown, where: string): GlobalContextRecord {
   };
 }
 
+function sharedRecord(value: unknown, where: string): SharedContextRecord {
+  const c = obj(value, where);
+  knownKeys(c, ["id", "name", "text", "goalIds", "createdAt", "updatedAt"], where);
+  return {
+    id: uuid(c.id, `${where}.id`),
+    name: str(c.name, `${where}.name`, MAX_SHARED_NAME),
+    text: str(c.text, `${where}.text`, MAX_SHARED_CONTEXT),
+    goalIds: list(c.goalIds, `${where}.goalIds`, MAX_GOALS).map((g, i) => uuid(g, `${where}.goalIds[${i}]`)),
+    createdAt: iso(c.createdAt, `${where}.createdAt`),
+    updatedAt: iso(c.updatedAt, `${where}.updatedAt`),
+  };
+}
+
 function snapshot(value: unknown, where: string): JobSnapshot {
   const s = obj(value, where);
   knownKeys(s, ["goal", "teachings", "globalContext"], where);
@@ -493,7 +514,7 @@ export function parseState(text: string, path: string): State {
   }
   try {
     const s = obj(raw, "state");
-    knownKeys(s, ["schemaVersion", "goals", "teachings", "attempts", "evidence", "jobs", "global"], "state");
+    knownKeys(s, ["schemaVersion", "goals", "teachings", "attempts", "evidence", "jobs", "global", "shared"], "state");
     check(s.schemaVersion === SCHEMA_VERSION, "state.schemaVersion", `expected ${SCHEMA_VERSION}, found ${String(s.schemaVersion)}`);
     const goals = list(s.goals, "state.goals", MAX_GOALS).map((g, i) => goalRecord(g, `state.goals[${i}]`));
     const goalIds = new Set<string>();
@@ -531,6 +552,12 @@ export function parseState(text: string, path: string): State {
       evidence: evidenceList,
       jobs,
       global: globalRecord(s.global, "state.global"),
+      // Older state files have no shared contexts. A link to a goal that's gone (goals have been
+      // removed by hand) is a soft reference: drop it rather than refuse to start.
+      shared: (s.shared === undefined ? [] : list(s.shared, "state.shared", MAX_SHARED_CONTEXTS).map((c, i) => sharedRecord(c, `state.shared[${i}]`))).map((c) => ({
+        ...c,
+        goalIds: c.goalIds.filter((id) => goalIds.has(id)),
+      })),
     };
   } catch (err) {
     if (err instanceof Corrupt) throw WorkshopError.corrupt(`${path} is malformed (${err.message}); the workshop won't start on it`);

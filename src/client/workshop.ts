@@ -34,6 +34,8 @@ export type ConceptProgress = { concept: string; counts: Record<string, number>;
 export type Teaching = { id: string; concept: string; text: string; createdAt: string };
 
 /** A file shared through the workshop. `size` is null when the file no longer passes its checks. */
+export type SharedContext = { id: string; name: string; text: string; goalIds: string[]; createdAt: string; updatedAt: string };
+
 export type ShareView = { id: string; path: string; name: string; createdAt: string; size: number | null; urlPath: string };
 
 export type Workshop = {
@@ -55,6 +57,10 @@ export type Workshop = {
   share(path: string): Promise<ShareView>;
   shares(): Promise<ShareView[]>;
   unshare(shareId: string): Promise<ShareView>;
+  sharedContexts(): Promise<SharedContext[]>;
+  /** Create or update by name: `text` replaces the text, `goalIds` replaces the linked goals. */
+  setShared(name: string, patch: { text?: string; goalIds?: string[] }): Promise<SharedContext>;
+  deleteShared(name: string): Promise<SharedContext>;
   /** A shared file's bytes, by its /files/... path, or null when the workshop won't serve it. */
   file(urlPath: string): Promise<Uint8Array | null>;
 };
@@ -116,6 +122,9 @@ export function workshopClient(config: ClientConfig): Workshop {
     share: async (path) => (await ws<{ share: ShareView }>("/api/shares", { method: "POST", body: { path } })).share,
     shares: async () => (await ws<{ shares: ShareView[] }>("/api/shares")).shares,
     unshare: async (shareId) => (await ws<{ share: ShareView }>(`/api/shares/${encodeURIComponent(shareId)}`, { method: "DELETE" })).share,
+    sharedContexts: async () => (await ws<{ shared: SharedContext[] }>("/api/shared-contexts")).shared,
+    setShared: async (name, patch) => (await ws<{ shared: SharedContext }>(`/api/shared-contexts/${encodeURIComponent(name)}`, { method: "PUT", body: patch })).shared,
+    deleteShared: async (name) => (await ws<{ shared: SharedContext }>(`/api/shared-contexts/${encodeURIComponent(name)}`, { method: "DELETE" })).shared,
     file: async (urlPath) => {
       if (!urlPath.startsWith("/files/")) return null;
       const res = await fetch(config.baseUrl + urlPath, { headers: { authorization: `Bearer ${config.token}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);

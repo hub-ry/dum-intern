@@ -33,6 +33,7 @@ import type {
   GlobalEventType,
   Goal,
   GoalRecord,
+  SharedContextRecord,
   GradedAttempt,
   Job,
   JobSnapshot,
@@ -50,6 +51,10 @@ import {
   MAX_CONCEPT,
   MAX_GLOBAL_CONTEXT,
   MAX_GOAL_CONTEXT,
+  MAX_SHARED_CONTEXT,
+  MAX_SHARED_CONTEXTS,
+  MAX_SHARED_NAME,
+  MAX_SHARED_PER_GOAL,
   MAX_ERROR_LENGTH,
   MAX_EVIDENCE_PER_GOAL,
   MAX_EXERCISE_ID,
@@ -217,6 +222,7 @@ function emptyState(): State {
     evidence: [],
     jobs: [],
     global: { baseContext: "", events: [], updatedAt: nowIso() },
+    shared: [],
   };
 }
 
@@ -441,13 +447,21 @@ export class WorkshopStore {
     return lines.slice(-CONTEXT_RECENT_INTERACTIONS);
   }
 
-  /** The editable base text followed by the goal's actual recent interactions, quoted from the records. */
+  /**
+   * The editable base text, then each shared context linked to the goal (labelled with the other
+   * goals that share it), then the goal's actual recent interactions, quoted from the records.
+   */
   private renderGoalContext(goal: GoalRecord): string {
     const recent = this.interactionsFor(goal.id);
-    const head = goal.baseContext.trim();
-    if (recent.length === 0) return head;
-    const body = `Recent interactions (quoted from records, oldest first):\n${recent.map((r) => `- ${r.line}`).join("\n")}`;
-    return head ? `${head}\n\n${body}` : body;
+    const title = (id: string) => this.state.goals.find((g) => g.id === id)?.title ?? id;
+    const shared = this.state.shared
+      .filter((c) => c.goalIds.includes(goal.id) && c.text.trim())
+      .map((c) => {
+        const others = c.goalIds.filter((id) => id !== goal.id).map(title);
+        return `Shared context "${c.name}"${others.length ? ` (also in: ${others.join(", ")})` : ""}:\n${c.text.trim()}`;
+      });
+    const body = recent.length ? `Recent interactions (quoted from records, oldest first):\n${recent.map((r) => `- ${r.line}`).join("\n")}` : "";
+    return [goal.baseContext.trim(), ...shared, body].filter(Boolean).join("\n\n");
   }
 
   private toGoal(goal: GoalRecord): Goal {
@@ -767,6 +781,71 @@ export class WorkshopStore {
       s.global.updatedAt = nowIso();
     });
     return this.renderGlobalContext();
+  }
+
+  // -- shared context --------------------------------------------------------------------------
+
+  listSharedContexts(): SharedContextRecord[] {
+    this.ensureOpen();
+    return clone(this.state.shared);
+  }
+
+  private findShared(name: string): SharedContextRecord | undefined {
+    const key = name.trim().toLowerCase();
+    return this.state.shared.find((c) => c.name.toLowerCase() === key);
+  }
+
+  /**
+   * Create or update a shared context by name. `text` replaces its text; `goalIds` replaces the set
+   * of goals it's linked to. Leave either out to keep it. A new one needs text.
+   */
+  setSharedContext(input: { name: string; text?: string; goalIds?: string[] }): SharedContextRecord {
+    this.ensureOpen();
+    const o = requireObject(input, "shared context");
+    const name = requireText(o.name, "name", MAX_SHARED_NAME);
+    const text = o.text === undefined ? undefined : requireBoundedString(o.text, "shared context", MAX_SHARED_CONTEXT);
+    let goalIds: string[] | undefined;
+    if (o.goalIds !== undefined) {
+      if (!Array.isArray(o.goalIds)) throw WorkshopError.invalid("goalIds must be a list of goal ids");
+      goalIds = [...new Set(o.goalIds.map((id) => requireId(id, "goal id")))];
+      for (const id of goalIds) this.goalRecord(id);
+    }
+    const existing = this.findShared(name);
+    if (!existing && text === undefined) throw WorkshopError.invalid(`there's no shared context named "${name}" yet; give it text to create it`);
+    if (!existing && this.state.shared.length >= MAX_SHARED_CONTEXTS) throw WorkshopError.conflict(`at most ${MAX_SHARED_CONTEXTS} shared contexts are kept`);
+    const id = existing?.id ?? randomUUID();
+    // What every goal this block will touch would carry from all its shared blocks together.
+    const nextText = text ?? existing?.text ?? "";
+    const nextGoals = goalIds ?? existing?.goalIds ?? [];
+    for (const gid of nextGoals) {
+      const total = this.state.shared.filter((c) => c.id !== id && c.goalIds.includes(gid)).reduce((n, c) => n + c.text.length, 0) + nextText.length;
+      if (total > MAX_SHARED_PER_GOAL) {
+        throw WorkshopError.conflict(`"${this.goalRecord(gid).title}" would carry ${total.toLocaleString("en-US")} characters of shared context and the limit is ${MAX_SHARED_PER_GOAL.toLocaleString("en-US")} per goal; shorten a block or link fewer goals`);
+      }
+    }
+    const at = nowIso();
+    this.commit((s) => {
+      const c = s.shared.find((x) => x.id === id);
+      if (c) {
+        if (text !== undefined) c.text = text;
+        if (goalIds !== undefined) c.goalIds = goalIds;
+        c.updatedAt = at;
+      } else {
+        s.shared.push({ id, name, text: text ?? "", goalIds: goalIds ?? [], createdAt: at, updatedAt: at });
+      }
+    });
+    return clone(this.state.shared.find((x) => x.id === id)!);
+  }
+
+  deleteSharedContext(name: string): SharedContextRecord {
+    this.ensureOpen();
+    const c = this.findShared(requireText(name, "name", MAX_SHARED_NAME));
+    if (!c) throw WorkshopError.notFound(`no shared context named "${name}"`);
+    const gone = clone(c);
+    this.commit((s) => {
+      s.shared = s.shared.filter((x) => x.id !== c.id);
+    });
+    return gone;
   }
 
   // -- jobs ------------------------------------------------------------------------------------

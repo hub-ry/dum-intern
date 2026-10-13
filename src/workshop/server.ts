@@ -40,7 +40,7 @@ import type { Socket } from "node:net";
 import { WorkshopStore, WorkshopRunner, WorkshopError } from "./runtime.js";
 import type { Attempt, ExerciseConcept, Goal, Job, Material, Progress, Teaching } from "./runtime.js";
 import { COMBINED_CONCEPT, CONDITIONS_CONCEPT, LOOPS_CONCEPT } from "./materials.js";
-import { MAX_AMBITION, MAX_CONCEPT, MAX_EXERCISE_ID, MAX_GLOBAL_CONTEXT, MAX_GOAL_CONTEXT, MAX_TEXT, MAX_TITLE } from "./validate.ts";
+import { MAX_AMBITION, MAX_CONCEPT, MAX_EXERCISE_ID, MAX_GLOBAL_CONTEXT, MAX_GOAL_CONTEXT, MAX_GOALS, MAX_SHARED_CONTEXT, MAX_SHARED_NAME, MAX_TEXT, MAX_TITLE } from "./validate.ts";
 import { MAX_NOTE_BODY_BYTES, NotesProjectionError, PublicNotes } from "./public-notes.js";
 import { Shares, disposition, presentation, shareRoots } from "./shares.ts";
 import { ensurePrivateDir } from "./files.ts";
@@ -94,6 +94,7 @@ function bodyLimit(fields: Record<string, number>): number {
 const LOGIN_BODY = bodyLimit({ password: MAX_PASSWORD_CHARS });
 const GLOBAL_CONTEXT_BODY = bodyLimit({ context: MAX_GLOBAL_CONTEXT });
 const GOAL_CONTEXT_BODY = bodyLimit({ context: MAX_GOAL_CONTEXT });
+const SHARED_CONTEXT_BODY = bodyLimit({ text: MAX_SHARED_CONTEXT, goalIds: MAX_GOALS * 40 });
 const GOAL_BODY = bodyLimit({ title: MAX_TITLE, ambition: MAX_AMBITION });
 const GRADED_ATTEMPT_BODY = bodyLimit({ exerciseId: MAX_EXERCISE_ID, answer: MAX_ANSWER_CHARS });
 const REPORT_BODY = bodyLimit({ concept: MAX_CONCEPT, text: MAX_TEXT, helped: "false".length });
@@ -786,6 +787,30 @@ export async function startWorkshopServer(options: WorkshopOptions = {}): Promis
     if (seg[1] === "shares" && seg.length === 3) {
       if (method === "GET") return sendJson(res, 200, { share: shares.get(seg[2]!) });
       if (method === "DELETE") return sendJson(res, 200, { share: shares.unshare(seg[2]!) });
+      throw new HttpError(405, "Method not allowed.");
+    }
+
+    // -- shared context: one text linked to several goals --
+    if (path === "/api/shared-contexts") {
+      if (method === "GET") return sendJson(res, 200, { shared: store.listSharedContexts() });
+      throw new HttpError(405, "Method not allowed.");
+    }
+    if (seg[1] === "shared-contexts" && seg.length === 3) {
+      let name: string;
+      try {
+        name = decodeURIComponent(seg[2]!);
+      } catch {
+        throw new HttpError(400, "Bad shared context name.");
+      }
+      if (name.length > MAX_SHARED_NAME) throw new HttpError(400, "Shared context name is too long.");
+      if (method === "PUT") {
+        const body = await readJsonBody(req, SHARED_CONTEXT_BODY);
+        const text = body.text === undefined ? undefined : field(body, "text");
+        const goalIds = body.goalIds === undefined ? undefined : body.goalIds;
+        if (goalIds !== undefined && (!Array.isArray(goalIds) || goalIds.some((g) => typeof g !== "string"))) throw new HttpError(400, `"goalIds" must be a list of goal ids.`);
+        return sendJson(res, 200, { shared: store.setSharedContext({ name, text, goalIds: goalIds as string[] | undefined }) });
+      }
+      if (method === "DELETE") return sendJson(res, 200, { shared: store.deleteSharedContext(name) });
       throw new HttpError(405, "Method not allowed.");
     }
 

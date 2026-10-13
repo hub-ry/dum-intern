@@ -225,6 +225,9 @@ function ctx(calls: string[] = [], over: Partial<GoalDetail> = {}): Context {
       share: async () => assert.fail("commands never share files"),
       shares: async () => [],
       unshare: async () => assert.fail("commands never unshare files"),
+      sharedContexts: async () => [],
+      setShared: async () => assert.fail("commands never set shared context"),
+      deleteShared: async () => assert.fail("commands never delete shared context"),
       file: async () => null,
     },
   };
