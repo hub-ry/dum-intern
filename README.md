@@ -4,7 +4,7 @@
 - Runs on hub, even when the laptop closes. Reach it through Discord, the private web reader, or the `dum` CLI and MCP tools.
 - Each goal keeps its own context, study materials, teaching, attempts, and creations. Corrections make a new version without replacing the original.
 - Teaching changes Dum's context, not the model's weights. Attempts and teaching are separate records, not proof of mastery. Agents need your approval to record your words, unless they quote your Discord teaching verbatim.
-- Discord chat routes work to a tutor, librarian, or engineer with scoped tools. Optional services watch internship boards, send GPA reminders, and stream hub's browser into Discord.
+- Discord chat routes work to a tutor, librarian, or engineer with scoped tools. Optional services watch internship boards and stream hub's browser into Discord.
 
 ## How it works
 
@@ -65,6 +65,6 @@ npm test
 - `src/workshop`: state, API, reader, generation, and verification.
 - `src/discord`, `src/mcp`, `src/cli.ts`: chat, approvals, notifications, and agent access.
 - `src/context`, `src/shared`: context sync, shared approvals, and handoffs.
-- `src/live`, `src/internship`, `src/gpa`: screen streaming, internship watch, and study reminders.
+- `src/live`, `src/internship`: screen streaming and internship watch.
 - `src/site`, `src/public`: public site and static hosting.
 - [Product plan](docs/workshop-plan.md) · [Demo walkthrough](docs/demo.md) · [Notes publishing guide](.claude/skills/dum-publish/SKILL.md)
