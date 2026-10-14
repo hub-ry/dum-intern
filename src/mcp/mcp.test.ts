@@ -64,6 +64,7 @@ function setup(over: Partial<Workshop> = {}) {
     requestsDir: join(root, "requests"),
     handoffDir: join(root, "handoff"),
     postsDir: join(root, "posts"),
+    codesDir: join(root, "codes"),
     appUrl: "http://hub:8770",
     now: () => new Date(clock),
     sleep: async (ms) => {

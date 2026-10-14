@@ -52,6 +52,8 @@ Open `http://127.0.0.1:8770/`. Artifacts use `http://127.0.0.1:8771/`. `npm run 
 
 - In Discord, start with `/dum goal` in the lobby. Each goal gets a private channel. Mention Dum to chat, or use `/dum teach`, `/dum tried`, `/dum build`, `/dum correct`, `/dum progress`, and `/dum schedule`.
 - `dum status` shows the overview. `dum mcp install` registers the tools with hub's agents; `dum mcp laptop` prints the Mac setup.
+- Ask Dum for a code or number from your email in plain words ("Josh just emailed me a number"), or run `dum code "WHAT" [MINUTES]`. The `mailcode` agent reads Purdue Outlook through two read-only tools (`list_mail`, `read_mail`) using the Brightspace Microsoft sign-in, and returns only the value and its sender.
+- Experimental code ledger for applications: the `code_request` tool appends the internship and the email to watch for to `~/internship/applications/codes/requests.md`. `dum-codes.service` (`dum codes watch`) runs the mail agent on mail arriving after each request, then writes the value to `codes.md`, which `code_result` reads. Each side writes only its own file.
 - Hub and laptop agents exchange scoped tasks through `~/handoff`. Teaching and attempt requests from agents arrive in Discord for approval.
 - [dumintern.com](https://dumintern.com/) is the public product site. [notes.ryhub.dev](https://notes.ryhub.dev/) contains explicitly published notes; private teaching, attempts, and context are never automatically exported.
 

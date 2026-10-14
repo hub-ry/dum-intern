@@ -1,0 +1,15 @@
+[Unit]
+Description=Dum codes (experimental): answer ~/internship/applications/codes/requests.md with codes from Purdue Outlook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ryanhubbart/code2/dum-intern
+ExecStart=/usr/local/bin/node --import tsx src/cli.ts codes watch
+Restart=always
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

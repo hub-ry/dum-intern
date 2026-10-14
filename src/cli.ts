@@ -5,6 +5,9 @@
 //   dum mcp install            register Dum with every agent on hub: Codex, omp, Claude Code
 //   dum mcp laptop             print the one-time setup for Claude on the laptop
 //   dum codex-mcp              serve a `codex` tool that hands tasks to the Codex agent (for omp)
+//   dum mailcode-mcp           the mail agent's read-only tools: list_mail and read_mail
+//   dum code "WHAT" [MIN]      ask the mail agent for a code or number described in plain words
+//   dum codes watch            mail side of the code ledger: answer requests.md into codes.md
 //   dum live pause|resume      stop or restart hub's screen streaming into Discord
 //
 // Agents run `dum mcp` themselves; nothing listens on the network.
@@ -16,6 +19,10 @@ import { join, resolve } from "node:path";
 import { loadClientConfig, workshopClient } from "./client/workshop.ts";
 import { createMcp, serveLines, serveStdio, type Deps } from "./mcp/server.ts";
 import { createCodexMcp } from "./mcp/codex.ts";
+import { createMailcodeMcp } from "./mailcode/mcp.ts";
+import { askMailAgent } from "./mailcode/agent.ts";
+import { DEFAULT_CODES_DIR } from "./mailcode/ledger.ts";
+import { watch as watchCodes } from "./mailcode/watch.ts";
 import { DEFAULT_REQUESTS_DIR } from "./shared/requests.ts";
 import { DEFAULT_HANDOFF_DIR } from "./shared/handoff.ts";
 import { DEFAULT_POSTS_DIR } from "./shared/file-posts.ts";
@@ -36,6 +43,7 @@ function deps(): Deps {
     handoffDir: process.env.DUM_HANDOFF_DIR?.trim() || DEFAULT_HANDOFF_DIR,
     appUrl: process.env.DUM_PUBLIC_URL?.trim() || config.baseUrl,
     postsDir: process.env.DUM_POSTS_DIR?.trim() || DEFAULT_POSTS_DIR,
+    codesDir: process.env.DUM_CODES_DIR?.trim() || DEFAULT_CODES_DIR,
     ...(chatSource() !== undefined ? { chatSource: chatSource() } : {}),
     ...(process.env.DUM_CHAT_FILES_DIR?.trim() ? { chat: { filesDir: process.env.DUM_CHAT_FILES_DIR.trim(), goalId: process.env.DUM_CHAT_GOAL_ID?.trim() || null } } : {}),
   };
@@ -142,6 +150,10 @@ const HELP = `dum: Dum's command line on hub
   dum mcp install       register Dum with Codex, omp and Claude Code on hub
   dum mcp laptop        print the setup for Claude on the laptop
   dum codex-mcp         serve one tool, codex, that hands a task to the Codex agent (omp uses it)
+  dum mailcode-mcp      the mail agent's read-only tools (list_mail, read_mail)
+  dum code "WHAT" [MIN] ask the mail agent for the code or number described, e.g.
+                        dum code "Josh is sending me a number" 30   (mail from the last MIN, default 15)
+  dum codes watch       answer code requests (requests.md) with codes from Outlook (codes.md)
   dum lock take NAME    wait for and take the lock on Dum's own code (the engineer uses it)
   dum lock release NAME let it go
   dum ship "MESSAGE"    typecheck, test, commit as Ryan and push Dum's own code to GitHub main
@@ -227,6 +239,24 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "codex-mcp") {
     await serveLines(createCodexMcp());
     return 0;
+  }
+  if (cmd === "mailcode-mcp") {
+    const since = Date.parse(process.env.DUM_MAIL_SINCE ?? "");
+    const handle = createMailcodeMcp(Number.isFinite(since) ? { fixedSince: since } : {});
+    await serveLines(handle);
+    await handle.close();
+    return 0;
+  }
+  if (cmd === "code" && sub) {
+    const rest = argv.slice(1);
+    const minutes = rest.length > 1 && /^\d+$/.test(rest.at(-1)!) ? Number(rest.pop()) : 15;
+    const a = await askMailAgent(rest.join(" "), Date.now() - minutes * 60_000);
+    if (a.found) console.log(`${a.value}  (from ${a.from})`);
+    else console.error(`not found: ${a.note}`);
+    return a.found ? 0 : 1;
+  }
+  if (cmd === "codes" && sub === "watch") {
+    return watchCodes(process.env.DUM_CODES_DIR?.trim() || DEFAULT_CODES_DIR);
   }
   if (cmd === "mcp" && sub === "laptop") {
     console.log(laptopSetup());

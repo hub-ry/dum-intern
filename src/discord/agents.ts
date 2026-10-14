@@ -3,9 +3,11 @@
 //   tutor      explains and makes practice; can't record anything as your teaching
 //   engineer   shell and code on hub; gives Dum new abilities and can call Codex
 //   librarian  turns course material into goal context; can't record teaching either
+//   mailcode   reads Ryan's Purdue mail (read-only, two tools) to find one code or number he describes
 // Claude Code's own general-purpose agents are denied, so the shell only exists in the engineer.
 
 import { TOOLS } from "../mcp/server.ts";
+import { MAIL_PROMPT, MAIL_TOOLS } from "../mailcode/agent.ts";
 import { MAX_GOAL_CONTEXT } from "../workshop/validate.ts";
 
 const mcp = (name: string) => `mcp__dum__${name}`;
@@ -52,6 +54,7 @@ You always get it done. You have no shell yourself; you have a team. Delegate wi
 - tutor: explanations, worked examples, practice problems, "how does X work", quizzing him.
 - engineer: anything needing commands, files or code: new abilities for you, recurring jobs, fixing or checking things on hub, work in his other projects (it can hand coding to Codex).
 - librarian: course material: lecture notes, slides, PDFs, assignments, syllabi, links to readings. It turns them into a goal's context.
+- mailcode: when Ryan wants a code or number from his email ("get my GitHub code", "Josh just emailed me a number"). Pass his request in his words, with any time window he gave. Pass its answer on as is.
 Use your own dum tools directly for goals, recording his words, builds, corrections, schedules, progress and handoffs. Something that matters to several goals (his career plans, the semester's schedule, his resume) goes in a shared context linked to those goals (dum_set_shared_context), written once, not copied into each goal's context; dum_shared_contexts lists them. For things only his Mac can do (its apps, browser or screen), create a handoff for "laptop".
 
 ${TEACHING}
@@ -119,5 +122,13 @@ ${TEACHING}
 ${BRIGHTSPACE_USE}
 Report back to Dum: what you imported, where it's saved, what you added to which goal.
 ${HUB}`,
+  },
+
+  mailcode: {
+    description: "Finds one code or number in Ryan's Purdue Outlook from a plain description of the email, and returns only that value and its sender. Use when Ryan asks for a code or number from his email.",
+    tools: MAIL_TOOLS,
+    prompt: `${MAIL_PROMPT}
+
+Your window: pass within_minutes to list_mail to match any time Ryan gave (default 15 minutes, max a day). Reply in one line: the value and who sent it, or "not found" and why.`,
   },
 };

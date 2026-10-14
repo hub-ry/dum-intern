@@ -14,6 +14,7 @@ import { queuePost } from "../shared/file-posts.ts";
 import { UPLOAD_LIMIT } from "../discord/files.ts";
 import { scrub } from "../context/root-context.ts";
 import { MAX_GOAL_CONTEXT, MAX_SHARED_CONTEXT } from "../workshop/validate.ts";
+import { addRequest, readAnswers, readRequests } from "../mailcode/ledger.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "1.0.0";
@@ -29,6 +30,8 @@ export type Deps = {
   chatSource?: string;
   /** Where shared files wait for a goal's channel (the bot posts them). */
   postsDir: string;
+  /** The code ledger (requests.md and codes.md) between the internship side and the mail side. */
+  codesDir: string;
   /** Set only by Dum's own Discord chat: files shared here go with this turn's reply. */
   chat?: { filesDir: string; goalId: string | null };
   sleep?: (ms: number) => Promise<void>;
@@ -200,6 +203,14 @@ export const TOOLS: ToolDef[] = [
     annotations: write,
   },
   { name: "handoff_wait", title: "Wait for a handoff", description: "Wait until a handoff's result reports done, partial or blocked.", inputSchema: { type: "object", properties: { task_id: { type: "string" }, wait_seconds: waitArg("the result", 60) }, required: ["task_id"] }, annotations: read },
+  {
+    name: "code_request",
+    title: "Ask for an emailed code",
+    description: "Experimental, for internship applications: when an application is about to email a code, record which internship it's for and the email to watch for, in plain words. The mail agent interprets that, finds the email in Ryan's Purdue Outlook (only mail arriving after the request) and writes the value to the codes ledger. Returns a request id for code_result.",
+    inputSchema: { type: "object", properties: { internship: { type: "string", description: "Company and role, e.g. \"Target, SWE Intern\"." }, email: { type: "string", description: "The email to watch for, in plain words: who sends it and what to pull out, e.g. \"Workday verification code for Target\" or \"someone named Josh will send a number\"." } }, required: ["internship", "email"] },
+    annotations: write,
+  },
+  { name: "code_result", title: "Get an emailed code", description: "The code for a code_request id, once the mail side has found it (it checks every 15 s and gives up after 30 min).", inputSchema: { type: "object", properties: { id: { type: "string" }, wait_seconds: waitArg("the code", 60) }, required: ["id"] }, annotations: read },
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -589,6 +600,23 @@ export function createMcp(deps: Deps) {
         if (finished || now().getTime() >= deadline) {
           return finished ? `${id} is ${h.summary.status}.\n\n${h.result}` : `${id} is still ${h.summary.status}. Wait again later.`;
         }
+        await sleep(2000);
+      }
+    },
+
+    async code_request(args) {
+      const r = addRequest(deps.codesDir, { internship: str(args, "internship"), email: str(args, "email") }, now());
+      return `Requested ${r.id} for ${r.internship}, watching for: ${r.email}. Get the value with code_result.`;
+    },
+
+    async code_result(args) {
+      const id = str(args, "id");
+      if (!readRequests(deps.codesDir).some((r) => r.id === id)) throw new ToolError(`No code request ${id}.`);
+      const deadline = now().getTime() + waitFor(args, 60) * 1000;
+      for (;;) {
+        const a = readAnswers(deps.codesDir).find((x) => x.id === id);
+        if (a) return a.code ? `${a.code}  (${a.note})` : `No code for ${a.internship}: ${a.note}`;
+        if (now().getTime() >= deadline) return `No code for ${id} yet. Wait again; the mail side checks every 15 s.`;
         await sleep(2000);
       }
     },

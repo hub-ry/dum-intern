@@ -13,13 +13,13 @@ npm run typecheck
 npm test
 ```
 
-See the [source layout](README.md#files). Tests live beside the behavior they cover. The public server must never expose the workshop home, credentials, or authenticated APIs.
+See the [source layout](README.md#development). Tests live beside the behavior they cover. The public server must never expose the workshop home, credentials, or authenticated APIs.
 
 The current guided lessons cover loops and conditions. Do not imply universal curriculum coverage. The background progress record distinguishes server-graded answers from self-reports; neither proves mastery by itself.
 
 ## Invariants
 
-- Preserve the [generation, verification, and reader boundaries](README.md#run-the-workshop). Model generation is tool-free.
+- Preserve the [generation, verification, and reader boundaries](README.md#how-it-works). Model generation is tool-free.
 - Preserve immutable teaching text and job snapshots. Do not invent quotes, learner activity, confusion, or successes.
 - Validate actual interactive output before marking a creation ready. Failure remains visible rather than being replaced with a fabricated result.
 - Corrections create versions; they do not overwrite original creations or saved reader positions.

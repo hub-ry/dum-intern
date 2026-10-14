@@ -128,6 +128,8 @@ export function chatCommand(opts: { claude: string; dumBin: string; repo: string
       // Files Dum shares during the turn wait in its folder and go out with the reply.
       dum: { command: opts.dumBin, args: ["mcp"], env: { DUM_CHAT_SOURCE_FILE: sourceFile, DUM_CHAT_FILES_DIR: chatFilesDir(opts.turnDir), DUM_CHAT_GOAL_ID: opts.goalId ?? "" } },
       codex: { command: opts.dumBin, args: ["codex-mcp"] },
+      // Only the mailcode agent gets its one tool; it returns a code, never an email.
+      mailcode: { command: opts.dumBin, args: ["mailcode-mcp"] },
       ...brightspaceServer(),
     },
   });
