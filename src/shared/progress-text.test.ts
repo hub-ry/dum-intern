@@ -13,7 +13,7 @@ const concept = (name: string, counts: Record<string, number>, latestAt: string 
 test("one line per concept with its counts, taught count and the Indiana day of its latest record", () => {
   // 02:30 UTC on the 15th is still the evening of the 14th in Indiana.
   const concepts = [
-    concept("arrays", { introduced: 2, attemptedWithHelp: 1, usedIndependently: 0, needsRevisiting: 0 }, "2026-10-15T02:30:00Z"),
+    concept("arrays", { introduced: 3, attemptedWithHelp: 1, usedIndependently: 0, needsRevisiting: 0 }, "2026-10-15T02:30:00Z"),
     concept("loops", { introduced: 1, attemptedWithHelp: 0, usedIndependently: 3, needsRevisiting: 0 }, "2026-10-10T15:00:00Z"),
   ];
   const teachings = [{ concept: "arrays" }, { concept: "arrays" }, { concept: "recursion" }];
@@ -32,7 +32,7 @@ test("one line per concept with its counts, taught count and the Indiana day of 
   assert.match(loops, /2026-10-10/);
 
   // Each non-zero count shows as a number; a zero-count kind adds nothing.
-  assert.match(arrays, /\b2\b/);
+  assert.match(arrays, /\b3\b/);
   assert.match(arrays, /\b1\b/);
   assert.match(loops, /\b1\b/);
   assert.match(loops, /\b3\b/);
@@ -47,4 +47,21 @@ test("one line per concept with its counts, taught count and the Indiana day of 
   assert.doesNotMatch(recursion, /\d{4}-\d{2}-\d{2}/);
 
   assert.deepEqual(progressLines([], []), []);
+});
+
+test("lines are alphabetical across evidence and only-taught concepts", () => {
+  const concepts = [concept("loops", { introduced: 1 }, "2026-10-10T15:00:00Z"), concept("zip", { introduced: 1 }, "2026-10-10T15:00:00Z")];
+  const teachings = [{ concept: "arrays" }, { concept: "maps" }];
+  const names = progressLines(concepts, teachings).map((l) => l.slice(0, l.indexOf(":")));
+  assert.deepEqual(names, ["arrays", "loops", "maps", "zip"]);
+});
+
+test("long concept names are clipped only when a max length is given", () => {
+  const name = "a".repeat(80);
+  const [unclipped] = progressLines([concept(name, { introduced: 1 }, null)], []);
+  assert.ok(unclipped.startsWith(name));
+  const [clipped] = progressLines([concept(name, { introduced: 1 }, null)], [], { maxConceptLength: 60 });
+  const shown = clipped.slice(0, clipped.indexOf(":"));
+  assert.equal(shown.length, 60);
+  assert.ok(shown.startsWith("a".repeat(59)));
 });

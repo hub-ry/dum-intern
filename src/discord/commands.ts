@@ -207,7 +207,7 @@ export async function handle(i: Interaction, ctx: Context): Promise<Reply | null
     case "progress": {
       const [concepts, teachings] = await Promise.all([ctx.workshop.progress(goalId), ctx.workshop.teachings(goalId)]);
       const full = `Full progression and everything else for this goal: <${goalLink(ctx.links, goalId)}>`;
-      const lines = progressLines(concepts, teachings);
+      const lines = progressLines(concepts, teachings, { maxConceptLength: 60 });
       if (lines.length === 0) return say(`No records for this goal yet.\n${full}`, { ephemeral: true });
       return say(`${lines.join("\n")}\n-# These are your records, not a mastery score.\n${full}`, { ephemeral: true });
     }
