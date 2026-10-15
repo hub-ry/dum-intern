@@ -29,7 +29,7 @@ export type JobView = {
   result?: { title: string; panels: Panel[] };
 };
 
-export type ConceptProgress = { concept: string; counts: Record<string, number>; latest: string | null };
+export type ConceptProgress = { concept: string; counts: Record<string, number>; latest: string | null; latestAt: string | null };
 
 export type Teaching = { id: string; concept: string; text: string; createdAt: string };
 

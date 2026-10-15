@@ -3,6 +3,7 @@
 // rule are testable without Discord. Long text is entered through modals, not one-line options.
 
 import type { GoalView, Workshop } from "../client/workshop.ts";
+import { progressLines } from "../shared/progress-text.ts";
 import type { Links } from "./delivery.ts";
 import { goalLink, jobLink } from "./delivery.ts";
 
@@ -204,13 +205,10 @@ export async function handle(i: Interaction, ctx: Context): Promise<Reply | null
 
   switch (s.name) {
     case "progress": {
-      const concepts = await ctx.workshop.progress(goalId);
+      const [concepts, teachings] = await Promise.all([ctx.workshop.progress(goalId), ctx.workshop.teachings(goalId)]);
       const full = `Full progression and everything else for this goal: <${goalLink(ctx.links, goalId)}>`;
-      if (concepts.length === 0) return say(`No records for this goal yet.\n${full}`, { ephemeral: true });
-      const lines = concepts.map((c) => {
-        const counts = Object.entries(c.counts).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(", ");
-        return `**${short(c.concept, 60)}**: ${counts || "no evidence"}${c.latest ? ` (latest: ${c.latest})` : ""}`;
-      });
+      const lines = progressLines(concepts, teachings, { maxConceptLength: 60 });
+      if (lines.length === 0) return say(`No records for this goal yet.\n${full}`, { ephemeral: true });
       return say(`${lines.join("\n")}\n-# These are your records, not a mastery score.\n${full}`, { ephemeral: true });
     }
     case "study": {
