@@ -22,7 +22,8 @@ import { createCodexMcp } from "./mcp/codex.ts";
 import { createMailcodeMcp } from "./mailcode/mcp.ts";
 import { askMailAgent } from "./mailcode/agent.ts";
 import { DEFAULT_CODES_DIR } from "./mailcode/ledger.ts";
-import { watch as watchCodes } from "./mailcode/watch.ts";
+import { codeLogPath, logCode, senderOf } from "./mailcode/log.ts";
+import { emailById, watch as watchCodes } from "./mailcode/watch.ts";
 import { DEFAULT_REQUESTS_DIR } from "./shared/requests.ts";
 import { DEFAULT_HANDOFF_DIR } from "./shared/handoff.ts";
 import { DEFAULT_POSTS_DIR } from "./shared/file-posts.ts";
@@ -243,7 +244,8 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (cmd === "mailcode-mcp") {
     const since = Date.parse(process.env.DUM_MAIL_SINCE ?? "");
-    const handle = createMailcodeMcp(Number.isFinite(since) ? { fixedSince: since } : {});
+    // A fixed window means the watcher's agent: the watcher logs its codes itself.
+    const handle = createMailcodeMcp(Number.isFinite(since) ? { fixedSince: since } : { logFile: codeLogPath() });
     await serveLines(handle);
     await handle.close();
     return 0;
@@ -252,8 +254,12 @@ export async function main(argv: string[]): Promise<number> {
     const rest = argv.slice(1);
     const minutes = rest.length > 1 && /^\d+$/.test(rest.at(-1)!) ? Number(rest.pop()) : 15;
     const a = await askMailAgent(rest.join(" "), Date.now() - minutes * 60_000);
-    if (a.found) console.log(`${a.value}  (from ${a.from})`);
-    else console.error(`not found: ${a.note}`);
+    if (a.found) {
+      console.log(`${a.value}  (from ${a.from})`);
+      const mail = a.email_id ? await emailById(a.email_id).catch(() => null) : null;
+      const sender = mail ? senderOf(mail.from, mail.address) : a.from;
+      logCode(codeLogPath(), { at: mail?.receivedAt || new Date().toISOString(), company: rest.join(" "), code: a.value, sender, folder: mail?.folder ?? "", usedFor: a.purpose });
+    } else console.error(`not found: ${a.note}`);
     return a.found ? 0 : 1;
   }
   if (cmd === "codes" && sub === "watch") {

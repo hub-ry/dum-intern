@@ -12,6 +12,8 @@ import { z } from "zod";
 import { HOME_TZ_ENV } from "../shared/clock.ts";
 
 export const MAIL_TOOLS = ["mcp__mailcode__list_mail", "mcp__mailcode__read_mail"];
+/** Only for the mailcode agent in Discord: the watcher logs its own codes. */
+export const MAIL_LOG_TOOL = "mcp__mailcode__log_code";
 
 export const MAIL_PROMPT = `You find one thing in Ryan's Purdue Outlook: the code, number or short value a request describes. Requests can be loose ("someone named Josh will give you a number", "the Workday code for Target"), so interpret them: senders may go by first name, nickname, company or the platform that mails for them (Workday, Greenhouse), and the value may be a verification code, a PIN, a number in a casual note, or similar.
 
@@ -28,6 +30,8 @@ export const Answer = z.object({
   value: z.string().max(64).describe("The code or number, exactly as written in the email. Empty when not found."),
   from: z.string().max(80).describe("Sender name (and address if helpful). Empty when not found."),
   note: z.string().max(160).describe("When not found: why, in one line. Otherwise empty."),
+  email_id: z.string().max(400).describe("The id list_mail gave the email the value came from. Empty when not found."),
+  purpose: z.string().max(80).describe("What the value is for, in a few words from the email (e.g. 'Greenhouse application security code'). Empty when not found."),
 });
 export type Answer = z.infer<typeof Answer>;
 
