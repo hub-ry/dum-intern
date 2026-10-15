@@ -15,6 +15,8 @@ import { UPLOAD_LIMIT } from "../discord/files.ts";
 import { scrub } from "../context/root-context.ts";
 import { MAX_GOAL_CONTEXT, MAX_SHARED_CONTEXT } from "../workshop/validate.ts";
 import { addRequest, readAnswers, readRequests } from "../mailcode/ledger.ts";
+import { createJob, listJobs, readJob, type WorkdayJob } from "../workday/jobs.ts";
+import type { Allowlist } from "../workday/allowlist.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const VERSION = "1.0.0";
@@ -34,6 +36,8 @@ export type Deps = {
   codesDir: string;
   /** Set only by Dum's own Discord chat: files shared here go with this turn's reply. */
   chat?: { filesDir: string; goalId: string | null };
+  /** The Workday worker, when hub has one: where its jobs live, its allowlist, and how a job starts. */
+  workday?: { dir: string; allow: Allowlist; launch(jobId: string): void };
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 };
@@ -211,6 +215,14 @@ export const TOOLS: ToolDef[] = [
     annotations: write,
   },
   { name: "code_result", title: "Get an emailed code", description: "The code for a code_request id, once the mail side has found it (it checks every 20 s and gives up after 30 min).", inputSchema: { type: "object", properties: { id: { type: "string" }, wait_seconds: waitArg("the code", 60) }, required: ["id"] }, annotations: read },
+  {
+    name: "dum_workday_apply",
+    title: "Prefill a Workday application",
+    description: "Start the Workday agent on one internship application (a *.myworkdayjobs.com link or another allowlisted careers site). It prefills the form from Ryan's profile in the isolated workday VM and sends him a Submit card with a screenshot in Discord; nothing is submitted unless he presses Submit.",
+    inputSchema: { type: "object", properties: { url: { type: "string", maxLength: 2000 }, note: { type: "string", maxLength: 1000, description: "Anything Ryan said about this application." }, goal: { ...goalArg, description: "Optional goal whose channel gets the Submit card." } }, required: ["url"] },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  { name: "dum_workday_status", title: "Workday applications", description: "How Workday prefill jobs are going: running, waiting on Ryan's Submit, needing his sign-in, submitted or failed. One job by id, or the latest few.", inputSchema: { type: "object", properties: { job: { type: "string" } } }, annotations: read },
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -286,6 +298,12 @@ export function createMcp(deps: Deps) {
   }
 
   function describeRequest(r: DumRequest): string {
+    if (r.kind === "workday-submit") {
+      if (r.status === "pending") return `Waiting for Ryan to press Submit on "${r.concept}" in Discord (request ${r.id}).`;
+      if (r.status === "declined") return `Ryan said not to submit "${r.concept}".`;
+      if (r.status === "failed") return `Ryan approved "${r.concept}", but it wasn't submitted: ${r.outcome ?? "see the bot's log on hub"}.`;
+      return `Ryan approved "${r.concept}". ${r.outcome ?? ""}`.trim();
+    }
     const what = r.kind === "teach" ? `teaching "${r.concept}"` : `attempt report on "${r.concept}"`;
     if (r.status === "pending" && r.verbatim) return `Recording ${what} in Ryan's exact words (request ${r.id}).`;
     if (r.status === "pending") return `Waiting for Ryan to approve ${what} in Discord (request ${r.id}). Check later with dum_request_status.`;
@@ -619,6 +637,34 @@ export function createMcp(deps: Deps) {
         if (now().getTime() >= deadline) return `No code for ${id} yet. Wait again; the mail side checks every 20 s.`;
         await sleep(2000);
       }
+    },
+
+    async dum_workday_apply(args) {
+      if (!deps.workday) throw new ToolError("The Workday worker isn't set up on hub yet; see deploy/workday/README.md.");
+      const url = str(args, "url");
+      if (!deps.workday.allow.allowsUrl(url)) throw new ToolError(`That isn't an allowlisted application site. Allowed: ${deps.workday.allow.entries.join(", ")}.`);
+      const goalRef = str(args, "goal", false);
+      const goal = goalRef ? await goalOf(goalRef) : null;
+      const job = createJob(deps.workday.dir, { url, note: str(args, "note", false), goalId: goal?.id ?? "", requestedBy: client }, now());
+      deps.workday.launch(job.id);
+      return `Started Workday job ${job.id} for ${new URL(url).host}. The Workday agent prefills it in the workday VM and sends Ryan a Submit card with a screenshot in Discord${goal ? ` (in ${goal.title})` : ""}; nothing is submitted until he presses Submit. If the site wants a sign-in, Ryan logs in through the worker's noVNC screen first. Check with dum_workday_status.`;
+    },
+
+    async dum_workday_status(args) {
+      if (!deps.workday) throw new ToolError("The Workday worker isn't set up on hub yet; see deploy/workday/README.md.");
+      const id = str(args, "job", false);
+      const jobs: WorkdayJob[] = id ? [readJob(deps.workday.dir, id)].filter((j): j is WorkdayJob => j !== null) : listJobs(deps.workday.dir).slice(-5).reverse();
+      if (id && !jobs.length) throw new ToolError(`No Workday job ${id}.`);
+      if (!jobs.length) return "No Workday applications yet.";
+      return jobs
+        .map((j) => {
+          const req = j.requestId ? readRequest(deps.requestsDir, j.requestId) : null;
+          const lines = [`- ${j.id} · ${new URL(j.url).host} · ${j.status}`];
+          if (req) lines.push(`  ${describeRequest(req)}`);
+          if (j.agentNote) lines.push(`  The Workday agent's note (its words, not Ryan's): ${JSON.stringify(j.agentNote)}`);
+          return lines.join("\n");
+        })
+        .join("\n");
     },
   };
 

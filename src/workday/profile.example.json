@@ -1,0 +1,15 @@
+{
+  "name": { "first": "Pat", "last": "Example", "preferred": "Pat" },
+  "email": "pat.example@example.edu",
+  "phone": "555-010-0199",
+  "address": { "city": "West Lafayette", "state": "IN", "postalCode": "47906", "country": "United States" },
+  "school": { "name": "Example University", "degree": "B.S.", "major": "Computer Science", "gradDate": "2028-05", "gpa": "3.5" },
+  "links": { "github": "https://github.com/pat-example", "linkedin": "https://www.linkedin.com/in/pat-example" },
+  "resumes": { "default": "example_resume.pdf" },
+  "answers": {
+    "work_authorized_us": "Yes",
+    "needs_sponsorship": "No",
+    "how_did_you_hear": "LinkedIn",
+    "why_company": "I want to build reliable software with a team that ships to real users."
+  }
+}

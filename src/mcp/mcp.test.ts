@@ -8,7 +8,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMcp, PROTOCOL_VERSIONS, TOOLS, type Deps } from "./server.ts";
-import { listRequests, updateRequest } from "../shared/requests.ts";
+import { createRequest, listRequests, updateRequest } from "../shared/requests.ts";
+import { allowlist, WORKDAY_HOSTS } from "../workday/allowlist.ts";
+import { listJobs, updateJob } from "../workday/jobs.ts";
 import { listHandoffs, parseStatus, isTaskId } from "../shared/handoff.ts";
 import { listPosts } from "../shared/file-posts.ts";
 import { mergeMcpJson } from "../cli.ts";
@@ -367,3 +369,37 @@ test("shared contexts: create by goal title, append, link and unlink goals, show
   }
 });
 
+test("dum_workday_apply starts a job only for allowlisted sites, and status shows Ryan's Submit", async () => {
+  const { deps, text, root, cleanup } = setup();
+  try {
+    assert.equal((await text("dum_workday_apply", { url: "https://acme.wd1.myworkdayjobs.com/job/1" })).error, true, "not set up yet");
+    const launched: string[] = [];
+    const dir = join(root, "workday");
+    deps.workday = { dir, allow: allowlist(WORKDAY_HOSTS), launch: (id) => void launched.push(id) };
+
+    const off = await text("dum_workday_apply", { url: "https://evil.example/myworkdayjobs.com" });
+    assert.equal(off.error, true);
+    assert.match(off.text, /isn't an allowlisted/);
+    assert.deepEqual(listJobs(dir), []);
+    assert.deepEqual(launched, []);
+
+    const r = await text("dum_workday_apply", { url: "https://acme.wd1.myworkdayjobs.com/job/1", note: "the backend one", goal: "software" });
+    assert.equal(r.error, false, r.text);
+    const [job] = listJobs(dir);
+    assert.deepEqual(launched, [job!.id]);
+    assert.equal(job!.goalId, GOAL);
+    assert.equal(job!.note, "the backend one");
+    assert.equal(job!.status, "queued");
+
+    const req = createRequest(deps.requestsDir, { kind: "workday-submit", goalId: GOAL, concept: "Submit: Acme intern", text: "review", requestedBy: "the Workday agent", workday: { nonce: "N".repeat(24), fingerprint: "f".repeat(64), url: job!.url } });
+    updateJob(dir, job!.id, { status: "awaiting_approval", requestId: req.id, agentNote: "Prefilled; asked Ryan." });
+    const status = await text("dum_workday_status", { job: job!.id });
+    assert.match(status.text, /awaiting_approval/);
+    assert.match(status.text, /Waiting for Ryan to press Submit on "Submit: Acme intern"/);
+    updateRequest(deps.requestsDir, req.id, { status: "approved", outcome: "Submitted." });
+    assert.match((await text("dum_workday_status")).text, /Ryan approved "Submit: Acme intern"\. Submitted\./);
+    assert.equal((await text("dum_workday_status", { job: "00000000-0000-4000-8000-000000000000" })).error, true);
+  } finally {
+    cleanup();
+  }
+});

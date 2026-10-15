@@ -1,0 +1,17 @@
+# hub user unit: the workday VM's only way out (allowlist mode). Not installed by default;
+# deploy/workday/egress.sh runs the same command as a transient unit of the same name.
+# To make it survive reboots:
+#   cp deploy/workday/dum-workday-egress.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now dum-workday-egress
+[Unit]
+Description=Dum workday VM egress proxy (10.77.0.1:3128, allowlist)
+After=network-online.target snap.lxd.daemon.service
+
+[Service]
+# lxdbr0 (10.77.0.1) appears when LXD starts; retry until it can bind.
+ExecStart=/usr/local/bin/node %h/.local/lib/dum-workday/egress-proxy.mjs --listen 10.77.0.1:3128 --allowlist %h/.config/dum-workday/egress-allowlist.txt
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

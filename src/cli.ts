@@ -8,12 +8,14 @@
 //   dum mailcode-mcp           the mail agent's read-only tools: list_mail and read_mail
 //   dum code "WHAT" [MIN]      ask the mail agent for a code or number described in plain words
 //   dum codes watch            mail side of the code ledger: answer requests.md into codes.md
+//   dum workday-mcp            the Workday agent's tools, forwarded to the worker in the VM
+//   dum workday run|keygen|submit   run a prefill job, make the approval keys, re-hand an approval
 //   dum live pause|resume      stop or restart hub's screen streaming into Discord
 //
 // Agents run `dum mcp` themselves; nothing listens on the network.
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadClientConfig, workshopClient } from "./client/workshop.ts";
@@ -31,6 +33,12 @@ import { ship } from "./shared/ship.ts";
 import { localTime } from "./shared/clock.ts";
 import { clearPause, DEFAULT_PAUSE, readPause, writePause } from "./live/pause.ts";
 import { pausedNow } from "./live/live.ts";
+import { allowlist, WORKDAY_HOSTS } from "./workday/allowlist.ts";
+import { DEFAULT_WORKDAY_DIR } from "./workday/jobs.ts";
+import { createWorkdayMcp } from "./workday/mcp.ts";
+import { workdayUrl, workerFromEnv } from "./workday/client.ts";
+import { runJob } from "./workday/agent.ts";
+import { DEFAULT_KEY_DIR, generateApprovalKeys, handApprovalToWorker } from "./workday/approval.ts";
 
 const HOME = homedir();
 /** The stable path agents launch, a symlink to bin/dum in this checkout. */
@@ -47,7 +55,25 @@ function deps(): Deps {
     codesDir: process.env.DUM_CODES_DIR?.trim() || DEFAULT_CODES_DIR,
     ...(chatSource() !== undefined ? { chatSource: chatSource() } : {}),
     ...(process.env.DUM_CHAT_FILES_DIR?.trim() ? { chat: { filesDir: process.env.DUM_CHAT_FILES_DIR.trim(), goalId: process.env.DUM_CHAT_GOAL_ID?.trim() || null } } : {}),
+    ...(workdayUrl() ? { workday: { dir: workdayDir(), allow: workdayAllow(), launch: launchWorkdayJob } } : {}),
   };
+}
+
+function workdayDir(): string {
+  return process.env.DUM_WORKDAY_JOBS_DIR?.trim() || DEFAULT_WORKDAY_DIR;
+}
+
+/** Hub's copy of the worker's allowlist: Workday's hosts plus DUM_WORKDAY_ALLOW (comma-separated). */
+function workdayAllow() {
+  const extra = (process.env.DUM_WORKDAY_ALLOW ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return allowlist([...WORKDAY_HOSTS, ...extra]);
+}
+
+/** Runs `dum workday run <job>` on its own, logging next to the job; the MCP call returns at once. */
+function launchWorkdayJob(jobId: string): void {
+  mkdirSync(workdayDir(), { recursive: true, mode: 0o700 });
+  const log = openSync(join(workdayDir(), `${jobId}.log`), "a", 0o600);
+  spawn(DUM_BIN, ["workday", "run", jobId], { detached: true, stdio: ["ignore", log, log] }).unref();
 }
 
 /** Dum's Discord chat passes Ryan's message in a private file so teaching can be checked against it. */
@@ -155,6 +181,10 @@ const HELP = `dum: Dum's command line on hub
   dum code "WHAT" [MIN] ask the mail agent for the code or number described, e.g.
                         dum code "Josh is sending me a number" 30   (mail from the last MIN, default 15)
   dum codes watch       answer code requests (requests.md) with codes from Outlook (codes.md)
+  dum workday-mcp       the Workday agent's tools, forwarded to the worker (DUM_WORKDAY_URL or ~/.config/dum-workday/worker-url)
+  dum workday run JOB   run the Workday agent for a job dum_workday_apply queued
+  dum workday keygen    make the key pair that signs Ryan's Submit approvals (~/.config/dum-workday)
+  dum workday submit REQUEST   hand an approved submit to the worker again (if it was down)
   dum lock take NAME    wait for and take the lock on Dum's own code (the engineer uses it)
   dum lock release NAME let it go
   dum ship "MESSAGE"    typecheck, test, commit as Ryan and push Dum's own code to GitHub main
@@ -247,6 +277,36 @@ export async function main(argv: string[]): Promise<number> {
     await serveLines(handle);
     await handle.close();
     return 0;
+  }
+  if (cmd === "workday-mcp") {
+    const worker = workerFromEnv();
+    if (!worker) throw new Error("There's no Workday worker set up: set DUM_WORKDAY_URL or ~/.config/dum-workday/worker-url.");
+    const job = process.env.DUM_WORKDAY_JOB?.trim();
+    await serveLines(
+      createWorkdayMcp({
+        worker,
+        requestsDir: process.env.DUM_REQUESTS_DIR?.trim() || DEFAULT_REQUESTS_DIR,
+        requestedBy: "the Workday agent",
+        goalId: process.env.DUM_WORKDAY_GOAL_ID?.trim() || "",
+        ...(job ? { job: { dir: workdayDir(), id: job } } : {}),
+      }),
+    );
+    return 0;
+  }
+  if (cmd === "workday" && sub === "run" && argv[2]) {
+    const job = await runJob(argv[2], { jobsDir: workdayDir(), requestsDir: process.env.DUM_REQUESTS_DIR?.trim() || DEFAULT_REQUESTS_DIR });
+    console.log(`${job.id} ${job.status}${job.agentNote ? `: ${job.agentNote}` : ""}`);
+    return job.status === "failed" ? 1 : 0;
+  }
+  if (cmd === "workday" && sub === "keygen") {
+    const { publicPath } = generateApprovalKeys(process.env.DUM_WORKDAY_KEY_DIR?.trim() || DEFAULT_KEY_DIR);
+    console.log(`made the approval key pair; push ${publicPath} to the worker (deploy/workday/provision.sh does)`);
+    return 0;
+  }
+  if (cmd === "workday" && sub === "submit" && argv[2]) {
+    const req = await handApprovalToWorker(process.env.DUM_REQUESTS_DIR?.trim() || DEFAULT_REQUESTS_DIR, argv[2], workerFromEnv());
+    console.log(req.outcome ?? req.status);
+    return req.outcome === "Submitted." ? 0 : 1;
   }
   if (cmd === "code" && sub) {
     const rest = argv.slice(1);

@@ -1,0 +1,27 @@
+# LXD first-time init for the workday VM (provision.sh feeds this to `lxd init --preseed` when LXD
+# has neither the `default` pool nor `lxdbr0`). No NAT and no LXD firewall rules: hub's FORWARD
+# policy is DROP anyway, and the VM reaches the web only through hub's egress proxy on 10.77.0.1:3128.
+config: {}
+networks:
+- name: lxdbr0
+  type: bridge
+  config:
+    ipv4.address: 10.77.0.1/24
+    ipv4.dhcp.ranges: 10.77.0.100-10.77.0.200
+    ipv4.nat: "false"
+    ipv4.firewall: "false"
+    ipv6.address: none
+storage_pools:
+- name: default
+  driver: dir
+profiles:
+- name: default
+  devices:
+    root:
+      path: /
+      pool: default
+      type: disk
+    eth0:
+      name: eth0
+      network: lxdbr0
+      type: nic

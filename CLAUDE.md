@@ -14,6 +14,7 @@ Never violate these. A PR that does is wrong even if tests pass.
 6. **Verification is Docker/Playwright only, and failed builds stay failed.** No fabricated results, no retries that mask a failure, no "ready" without a real report. Corrections create versions; originals are never overwritten.
 7. **Reading a prepared presentation needs no model call.**
 8. **The public server exposes nothing private.** `src/public/server.ts` serves only the explicit public tree. Notes are published on purpose, never exported from learning history.
+9. **A Workday application is submitted only for Ryan's signed approval.** The worker (`src/workday/`, in the `workday` VM) presses Submit only for an Ed25519 approval the Discord bot signs when Ryan presses Submit on the card (`src/workday/approval.ts` `decideSubmit`), bound to that page and used once. Never add another path that signs or submits, never give the Workday agent a general browser, JavaScript, files or navigation outside the allowlist, and never let a vault value into a tool result, a request file or a screenshot.
 
 ## Commands
 
@@ -51,6 +52,7 @@ Never run `dum live *`, never restart a service directly. If a change needs a re
 | `src/shared` | Clock (Indiana time), repo lock, handoffs, approval requests, file posts, `dum ship`, test isolation | |
 | `src/mailcode` | Outlook read-only tools, code ledger and log, mail agent | |
 | `src/live`, `src/internship`, `src/gpa` | Screen streaming, internship watch, GPA reminders (systemd timers) | |
+| `src/workday` | Workday application worker: allowlisted browser, vault placeholders, the submit approval gate (runs in the `workday` VM); hub side: `dum workday-mcp`, the Workday agent, jobs | `worker.ts`, `serve.ts`, `mcp.ts` |
 | `src/site`, `src/public` | Public site and the dependency-free static server | |
 | `src/nightly` | Nightly main check and weekly draft-only issue triage, in their own clone (`deploy/dum-nightly.*`, `deploy/dum-triage.*`) | `check.ts`, `triage.ts` |
 | `deploy/` | systemd user units. Agents don't edit these without being asked. | |

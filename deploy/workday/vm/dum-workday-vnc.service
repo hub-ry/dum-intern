@@ -1,0 +1,15 @@
+# workday VM: VNC of :1 on localhost:5901 only, password from ~worker/.vnc/passwd (rfbauth).
+[Unit]
+Description=Dum workday VNC (x11vnc localhost:5901)
+BindsTo=dum-workday-xvfb.service
+After=dum-workday-xvfb.service
+
+[Service]
+User=worker
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do [ -e /tmp/.X11-unix/X1 ] && exit 0; sleep 0.2; done; exit 1'
+ExecStart=/usr/bin/x11vnc -display :1 -localhost -rfbport 5901 -rfbportv6 -1 -rfbauth /home/worker/.vnc/passwd -forever -shared -quiet -noxdamage
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

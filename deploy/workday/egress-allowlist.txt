@@ -1,0 +1,22 @@
+# Hosts the workday VM may reach through hub's egress proxy in normal (non --provision) mode.
+# `example.com` matches exactly; `*.example.com` matches any subdomain (not the apex).
+# provision.sh installs this as ~/.config/dum-workday/egress-allowlist.txt only if that file is
+# missing; edit the installed copy (the proxy re-reads it on change). The worker's own allowlist
+# (config.json "allow") is checked first; a host must be on both lists.
+
+# Workday
+*.myworkdayjobs.com
+*.myworkday.com
+*.myworkdaysite.com
+*.workday.com
+*.myworkdaycdn.com
+
+# reCAPTCHA used by Workday sign-in/create-account pages
+www.google.com
+www.gstatic.com
+www.recaptcha.net
+
+# Ubuntu security updates for the VM itself
+archive.ubuntu.com
+*.archive.ubuntu.com
+security.ubuntu.com

@@ -1,0 +1,10 @@
+# workday VM: lets Playwright's Chromium create user namespaces for its sandbox
+# (installed as /etc/apparmor.d/dum-workday-chrome by setup.sh).
+abi <abi/4.0>,
+include <tunables/global>
+
+profile dum-workday-chrome /opt/ms-playwright/chromium-*/chrome-linux64/chrome flags=(unconfined) {
+  userns,
+
+  include if exists <local/dum-workday-chrome>
+}

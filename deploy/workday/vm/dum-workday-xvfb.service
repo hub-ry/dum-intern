@@ -1,0 +1,12 @@
+# workday VM: the virtual screen (:1) the worker's Chromium draws on and Ryan sees through noVNC.
+[Unit]
+Description=Dum workday virtual screen (Xvfb :1)
+
+[Service]
+User=worker
+ExecStart=/usr/bin/Xvfb :1 -screen 0 1440x900x24 -nolisten tcp -ac
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
