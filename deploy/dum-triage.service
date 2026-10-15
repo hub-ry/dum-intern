@@ -1,0 +1,16 @@
+[Unit]
+Description=Dum: weekly read-only issue triage in the nightly clone; writes a draft, files nothing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=TZ=America/Indiana/Indianapolis
+Type=oneshot
+WorkingDirectory=/home/ryanhubbart/code2/dum-intern
+EnvironmentFile=%h/.config/dum-discord/environment
+Environment=DUM_NIGHTLY_DIR=%h/.local/state/dum-nightly
+# Automation tier from docs/workshop-plan.md: Opus at low effort (triage.ts passes --effort low).
+Environment=DUM_TRIAGE_MODEL=opus
+ExecStart=/usr/local/bin/node --import tsx src/nightly/triage.ts
+TimeoutStartSec=30min
+UMask=0077
