@@ -36,6 +36,7 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { WorkshopError } from "./errors.ts";
 import { ensurePrivateDir, intendedRealPath, isWithin, readPrivateFile } from "./files.ts";
+import { localDay } from "../shared/clock.ts";
 
 // ---------------------------------------------------------------------------------------------
 // Limits and shapes
@@ -233,8 +234,9 @@ function escape(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/** The day a note was written, as Ryan saw it (not the UTC day it was stored under). */
 function dateOf(iso: string): string {
-  return iso.slice(0, 10);
+  return localDay(Date.parse(iso));
 }
 
 export const NOTES_CSS = `html{background:#f7f5f0;color:#1d1d1b}

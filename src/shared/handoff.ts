@@ -7,6 +7,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, renameSy
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { scrub } from "../context/root-context.ts";
+import { localDay, localStamp } from "./clock.ts";
 
 export const DEFAULT_HANDOFF_DIR = join(homedir(), "handoff");
 
@@ -130,7 +131,7 @@ export function createHandoff(
   const title = input.title.replace(/\s+/g, " ").trim();
   if (!title) throw new HandoffError("A handoff needs a title.");
   if (!input.executor.trim()) throw new HandoffError("Say who should do it: laptop or hub.");
-  const date = now.toISOString().slice(0, 10);
+  const date = localDay(now);
   const base = `${date}-${slugify(title)}`;
   let id = base;
   for (let n = 2; existsSync(join(root, id)); n++) id = `${base}-${n}`;
@@ -171,7 +172,7 @@ export function writeResult(root: string, input: { id: string; executor: string;
       "",
       `- Task ID: ${input.id}`,
       `- Executor: ${input.executor.trim()}`,
-      `- Date: ${now.toISOString().slice(0, 10)}`,
+      `- Date: ${localDay(now)}`,
       `- Status: ${input.status}`,
       "",
       input.body.trim(),
@@ -179,7 +180,7 @@ export function writeResult(root: string, input: { id: string; executor: string;
     ].join("\n");
   } else {
     const statusLine = /^- Status:.*$/m.test(existing) ? existing.replace(/^- Status:.*$/m, `- Status: ${input.status}`) : existing;
-    text = `${statusLine.trimEnd()}\n\n## Update ${now.toISOString().slice(0, 16).replace("T", " ")} UTC\n\n- Status: ${input.status}\n\n${input.body.trim()}\n`;
+    text = `${statusLine.trimEnd()}\n\n## Update ${localStamp(now)}\n\n- Status: ${input.status}\n\n${input.body.trim()}\n`;
   }
   if (text.length > MAX_READ) throw new HandoffError("The result file is full (64 KB). Start a follow-up task instead.");
   writeFile(path, text);

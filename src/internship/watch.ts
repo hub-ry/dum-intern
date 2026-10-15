@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, exists
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { rest } from "../discord/rest.ts";
+import { HOME_TZ } from "../shared/clock.ts";
 import { GOOD, shortlist, spread, type Prefs } from "./fit.ts";
 import { merge, parseSimplify, parseSpeedyApply, SOURCES, type Posting, type Source } from "./listings.ts";
 import { broken, firstRun, nag, newPostings, type Labeled } from "./messages.ts";
@@ -24,7 +25,7 @@ const STATE_DIR = env.DUM_INTERNSHIP_STATE_DIR ?? join(home, ".local/state/dum-i
 const WORKSPACE = env.DUM_INTERNSHIP_HOME ?? join(home, "internship");
 const GOAL = env.DUM_INTERNSHIP_GOAL ?? "a0930111-617c-4f59-9669-1b0b49019c58";
 const DISCORD_STATE = env.DUM_DISCORD_STATE_DIR ?? join(home, ".local/state/dum-discord");
-const TZ = "America/Indiana/Indianapolis";
+const TZ = HOME_TZ;
 const CADENCE = "every 4 hours from 7am to 11pm";
 const FIRST_RUN_TOP = 10;
 const NEW_MAX = 8;

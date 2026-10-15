@@ -4,6 +4,8 @@ After=network-online.target dum-workshop.service
 Wants=network-online.target
 
 [Service]
+# Ryan's clock (Indiana), not hub's UTC: anything that reads the local date or time.
+Environment=TZ=America/Indiana/Indianapolis
 Type=simple
 WorkingDirectory=/home/ryanhubbart/code2/dum-intern
 EnvironmentFile=%h/.config/dum-workshop/environment

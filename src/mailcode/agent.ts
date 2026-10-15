@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { HOME_TZ_ENV } from "../shared/clock.ts";
 
 export const MAIL_TOOLS = ["mcp__mailcode__list_mail", "mcp__mailcode__read_mail"];
 
@@ -67,7 +68,7 @@ export async function askMailAgent(request: string, since: number, opts: { claud
   // An empty folder, so no project settings, CLAUDE.md or files are anywhere near it.
   const cwd = mkdtempSync(join(tmpdir(), "dum-mail-agent-"));
   try {
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = { ...HOME_TZ_ENV };
     for (const k of ["PATH", "HOME", "LANG", "USER", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"]) if (process.env[k]) env[k] = process.env[k]!;
     const child = spawn(claude, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], timeout: opts.timeoutMs ?? 180_000 });
     let stdout = "";

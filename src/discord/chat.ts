@@ -8,15 +8,21 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGENTS, DENIED_AGENTS } from "./agents.ts";
 import { attachmentNotes, turnInput, type SavedAttachment } from "./attachments.ts";
+import { HOME_TZ_ENV, localNow } from "../shared/clock.ts";
 
-export function prompt(input: { message: string; author: string; place: { kind: "lobby" } | { kind: "goal"; goalId: string; title: string }; attachments?: SavedAttachment[] }): string {
+/**
+ * One turn's message to Dum. It opens with Ryan's local time when the turn starts, so "today",
+ * "tonight" and "tomorrow" mean what they mean in Indiana, however long the conversation runs.
+ */
+export function prompt(input: { message: string; author: string; place: { kind: "lobby" } | { kind: "goal"; goalId: string; title: string }; attachments?: SavedAttachment[]; now?: Date }): string {
+  const clock = `It's ${localNow(input.now ?? new Date())} for Ryan (Indiana time). Use this for today, tonight and tomorrow.`;
   const where =
     input.place.kind === "goal"
       ? `This is the Discord channel for the goal "${input.place.title}" (goal id ${input.place.goalId}). Unless Ryan names another goal, he means this one.`
       : "This is #dum, the lobby: not tied to one goal. Ask which goal if it matters and isn't clear.";
   const notes = attachmentNotes(input.attachments ?? []);
   const said = input.message.trim() ? `${input.author} says:\n${input.message}` : `${input.author} sent this with no text.`;
-  return `${where}\n\n${said}${notes ? `\n\n${notes}` : ""}`;
+  return `${clock}\n${where}\n\n${said}${notes ? `\n\n${notes}` : ""}`;
 }
 
 /** The message text without the mentions of the bot itself. */
@@ -161,7 +167,8 @@ export function chatCommand(opts: { claude: string; dumBin: string; repo: string
     // Branch from the channel's conversation, so turns running at the same time never share a session.
     ...(opts.resume ? ["--resume", opts.resume, "--fork-session"] : []),
   ];
-  const env: Record<string, string> = {};
+  // Ryan's timezone, whatever the bot's: Claude Code dates its own prompt from the local clock.
+  const env: Record<string, string> = { ...HOME_TZ_ENV };
   for (const k of ["PATH", "HOME", "LANG", "USER"]) if (process.env[k]) env[k] = process.env[k]!;
   return { bin: opts.claude, args, cwd: opts.repo, env, stdin: inputFile };
 }

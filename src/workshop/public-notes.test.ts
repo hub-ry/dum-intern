@@ -13,6 +13,7 @@ import { WorkshopError } from "./errors.ts";
 import { WorkshopStore } from "./runtime.ts";
 import { MAX_NOTES_LISTED, MAX_REVISIONS_PER_NOTE, NotesProjectionError, PublicNotes, noteUrl, topicSlug, validateNotePayload } from "./public-notes.ts";
 import { startWorkshopServer } from "./server.ts";
+import { localDay } from "../shared/clock.ts";
 
 const dirs: string[] = [];
 
@@ -350,7 +351,8 @@ test("pages carry their position and navigation links; restart reproduces the sa
     assert.ok(html.includes(`<a href="/">Home</a>`));
     assert.ok(html.includes(`href="/topics/${topicSlug("Loops & conditions")}/">Loops &amp; conditions</a>`));
     assert.ok(html.includes(`<a href="https://example.com/code" rel="noopener">the code</a>`));
-    assert.ok(html.includes(note.createdAt.slice(0, 10)));
+    // The day Ryan wrote it, in Indiana: in the evening the UTC day is already tomorrow.
+    assert.ok(html.includes(localDay(Date.parse(note.createdAt))));
   }
   assert.ok(p1.includes("Page 1 of 3"));
   assert.ok(p1.includes(`<p class="text">line one\n  indented line\n\nparagraph two</p>`));

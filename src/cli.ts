@@ -28,6 +28,7 @@ import { DEFAULT_HANDOFF_DIR } from "./shared/handoff.ts";
 import { DEFAULT_POSTS_DIR } from "./shared/file-posts.ts";
 import { DEFAULT_LOCK, holder, release, tryTake } from "./shared/lock.ts";
 import { ship } from "./shared/ship.ts";
+import { localTime } from "./shared/clock.ts";
 import { clearPause, DEFAULT_PAUSE, readPause, writePause } from "./live/pause.ts";
 import { pausedNow } from "./live/live.ts";
 
@@ -222,7 +223,7 @@ export async function main(argv: string[]): Promise<number> {
       const minutes = argv[2] === undefined ? 60 : Number(argv[2]);
       if (!Number.isFinite(minutes) || minutes < 0) throw new Error("Minutes must be a number, 0 for until resumed: dum live pause 30");
       const p = writePause(DEFAULT_PAUSE, minutes);
-      console.log(p.until ? `paused until ${new Date(p.until).toLocaleTimeString()}` : "paused until dum live resume");
+      console.log(p.until ? `paused until ${localTime(Date.parse(p.until))}` : "paused until dum live resume");
       return 0;
     }
     if (sub === "resume") {
@@ -232,7 +233,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (sub === "status" || !sub) {
       const p = readPause(DEFAULT_PAUSE);
-      console.log(!pausedNow(p, Date.now()) ? "streaming (when the screen changes)" : p!.until ? `paused until ${new Date(p!.until).toLocaleTimeString()}` : "paused until dum live resume");
+      console.log(!pausedNow(p, Date.now()) ? "streaming (when the screen changes)" : p!.until ? `paused until ${localTime(Date.parse(p!.until))}` : "paused until dum live resume");
       return 0;
     }
   }
