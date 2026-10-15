@@ -1,0 +1,24 @@
+# workday VM: the Workday application worker (API on 0.0.0.0:8790, Chromium on :1).
+# Skipped until push-code.sh has put src/workday/serve.ts in /opt/dum-workday and provision.sh has
+# pushed approval.pub (the worker refuses to start without it).
+[Unit]
+Description=Dum workday application worker
+After=network-online.target dum-workday-xvfb.service
+Wants=network-online.target dum-workday-xvfb.service
+ConditionPathExists=/opt/dum-workday/src/workday/serve.ts
+ConditionPathExists=/home/worker/workday/approval.pub
+
+[Service]
+User=worker
+WorkingDirectory=/opt/dum-workday
+Environment=DUM_WORKDAY_HOME=/home/worker/workday
+Environment=DUM_WORKDAY_LISTEN=0.0.0.0:8790
+Environment=DUM_WORKDAY_UPSTREAM_PROXY=http://10.77.0.1:3128
+Environment=DISPLAY=:1
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+ExecStart=/usr/local/bin/node --import tsx /opt/dum-workday/src/workday/serve.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

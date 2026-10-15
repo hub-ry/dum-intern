@@ -11,13 +11,14 @@
     "dev": "tsx watch src/workshop/server.ts",
     "note": "tsx src/workshop/notes-cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --import ./src/shared/test-isolation.ts --test src/workshop/*.test.ts src/discord/*.test.ts src/context/*.test.ts src/mcp/*.test.ts src/internship/*.test.ts src/shared/*.test.ts src/live/*.test.ts src/mailcode/*.test.ts src/nightly/*.test.ts",
+    "test": "node --import tsx --import ./src/shared/test-isolation.ts --test src/workshop/*.test.ts src/discord/*.test.ts src/context/*.test.ts src/mcp/*.test.ts src/internship/*.test.ts src/shared/*.test.ts src/live/*.test.ts src/mailcode/*.test.ts src/nightly/*.test.ts src/workday/*.test.ts",
     "discord": "tsx src/discord/bot.ts",
     "root-context": "tsx src/context/root-context.ts",
     "internship": "tsx src/internship/watch.ts",
     "live": "tsx src/live/stream.ts"
   },
   "dependencies": {
+    "playwright-core": "^1.64.1",
     "tsx": "^4.23.13",
     "zod": "^4.4.3"
   },

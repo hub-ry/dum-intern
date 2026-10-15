@@ -7,7 +7,7 @@
 // each of them. The directory is removed when the process exits.
 
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const home = mkdtempSync(join(tmpdir(), "dum-test-home-"));
@@ -18,6 +18,10 @@ const env = process.env;
 for (const key of Object.keys(env)) {
   if (key.startsWith("DUM_")) delete env[key];
 }
+
+// The Workday worker's tests drive a real Chromium; Playwright looks for it under the home
+// directory, so keep pointing at the real one's download cache (read only).
+env.PLAYWRIGHT_BROWSERS_PATH ||= process.platform === "darwin" ? join(homedir(), "Library", "Caches", "ms-playwright") : join(env.XDG_CACHE_HOME || join(homedir(), ".cache"), "ms-playwright");
 
 env.HOME = home;
 env.XDG_CONFIG_HOME = join(home, ".config");

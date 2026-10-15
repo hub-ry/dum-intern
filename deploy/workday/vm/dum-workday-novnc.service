@@ -1,0 +1,14 @@
+# workday VM: noVNC on 0.0.0.0:6080 (http://10.77.0.10:6080/vnc.html from hub); VNC password required.
+[Unit]
+Description=Dum workday noVNC (websockify 0.0.0.0:6080 -> localhost:5901)
+After=dum-workday-vnc.service
+Wants=dum-workday-vnc.service
+
+[Service]
+User=worker
+ExecStart=/usr/bin/websockify --web /usr/share/novnc 0.0.0.0:6080 127.0.0.1:5901
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

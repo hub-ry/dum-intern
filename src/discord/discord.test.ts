@@ -408,6 +408,16 @@ test("an approval card pings Ryan, quotes the exact words, and offers yes or no"
   assert.match(decided.content!, /Nothing was recorded/);
 });
 
+test("a Workday submit card shows the masked screenshot and only says submitted when the worker did", () => {
+  const sub: DumRequest = { ...REQ, kind: "workday-submit", goalId: "", concept: "Submit: Acme intern", text: "Review\nssn {{SSN}}", requestedBy: "the Workday agent", workday: { nonce: "N".repeat(24), fingerprint: "f".repeat(64), url: "https://acme.wd1.myworkdayjobs.com/review", screenshot: `${"N".repeat(24)}.png` } };
+  const card = approvalCard(sub, "no goal", OWNER);
+  assert.equal(card.embeds[0]!.image!.url, `attachment://${"N".repeat(24)}.png`);
+  assert.deepEqual(card.components[0]!.components.map((b) => b.custom_id), [`req:${sub.id}:yes`, `req:${sub.id}:no`]);
+  assert.match(decidedCard({ ...sub, status: "approved", outcome: "Submitted." }, "no goal").content!, /Submitted/);
+  assert.doesNotMatch(decidedCard({ ...sub, status: "approved", outcome: "Not submitted: Refused: the page changed since Ryan approved it" }, "no goal").content!, /✓ Submitted/);
+  assert.match(decidedCard({ ...sub, status: "declined" }, "no goal").content!, /Not submitted/);
+});
+
 const H = (id: string, status: Handoff["status"], executor = "laptop"): Handoff => ({ id, title: `Task ${id}`, executor, requester: "omp", status, updatedAt: "2026-10-11T09:00:00Z" });
 
 test("handoff notices: silent adoption, a ping for new laptop work and blockers, quiet otherwise", () => {

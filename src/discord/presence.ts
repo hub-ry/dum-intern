@@ -25,16 +25,33 @@ function blockquote(text: string, max: number): string {
 // --- Approvals ------------------------------------------------------------------------------
 
 function approvalEmbed(req: DumRequest, goal: string): Embed {
-  const what = req.kind === "teach" ? `Teaching · ${req.concept}` : `Attempt · ${req.concept} · ${req.helped ? "needed help" : "no help"}`;
+  const what = req.kind === "teach" ? `Teaching · ${req.concept}` : req.kind === "tried" ? `Attempt · ${req.concept} · ${req.helped ? "needed help" : "no help"}` : req.concept;
   return {
     title: clip(what, 250),
+    ...(req.kind === "workday-submit" && req.workday ? { url: req.workday.url } : {}),
     description: blockquote(req.text, 3800),
     color: AMBER,
+    ...(req.kind === "workday-submit" && req.workday?.screenshot ? { image: { url: `attachment://${req.workday.screenshot}` } } : {}),
     footer: { text: `${clip(goal, 60)} · asked by ${clip(req.requestedBy, 40)} · ${req.id.slice(0, 8)}` },
   };
 }
 
 export function approvalCard(req: DumRequest, goal: string, ownerId: string): Card {
+  if (req.kind === "workday-submit") {
+    return {
+      content: `<@${ownerId}> **${quiet(clip(req.requestedBy, 40))}** prefilled this application and wants to submit it. Check the screenshot (secrets are covered); it goes in only if you press Submit.`,
+      embeds: [approvalEmbed(req, goal)],
+      components: [
+        {
+          type: 1,
+          components: [
+            { type: 2, style: 3, label: "Submit it", custom_id: `req:${req.id}:yes` },
+            { type: 2, style: 4, label: "Don't submit", custom_id: `req:${req.id}:no` },
+          ],
+        },
+      ],
+    };
+  }
   const kind = req.kind === "teach" ? "your teaching" : "your attempt report";
   return {
     content: `<@${ownerId}> **${quiet(clip(req.requestedBy, 40))}** wants to record this as ${kind}. Approve only if these are your own words.`,
@@ -51,11 +68,20 @@ export function approvalCard(req: DumRequest, goal: string, ownerId: string): Ca
   };
 }
 
+function verdictOf(req: DumRequest): string {
+  if (req.kind === "workday-submit") {
+    if (req.status === "declined") return "✕ Not submitted. You said no.";
+    if (req.status === "failed") return `⚠ Not submitted: ${req.outcome ?? "see the hub log"}`;
+    if (req.outcome === "Submitted.") return "✓ Submitted.";
+    return `⚠ You approved it, but it isn't submitted yet. ${req.outcome ?? ""}`.trim();
+  }
+  return req.status === "approved" ? "✓ Approved and recorded as yours." : req.status === "declined" ? "✕ Declined. Nothing was recorded." : `⚠ Approved, but recording failed: ${req.outcome ?? "see the hub log"}`;
+}
+
 export function decidedCard(req: DumRequest, goal: string): Card {
-  const verdict = req.status === "approved" ? "✓ Approved and recorded as yours." : req.status === "declined" ? "✕ Declined. Nothing was recorded." : `⚠ Approved, but recording failed: ${req.outcome ?? "see the hub log"}`;
   const embed = approvalEmbed(req, goal);
   return {
-    content: verdict,
+    content: verdictOf(req),
     embeds: [{ ...embed, color: req.status === "approved" ? COLOR.ready : req.status === "declined" ? COLOR.queued : COLOR.failed }],
     components: [],
   };
@@ -137,7 +163,7 @@ export function boardMessage(input: BoardInput): Message {
 
   const fields = [
     { name: "Queue", value: queued.length ? queued.map((j) => `○ ${where(j.goalId)}`).join("\n") : "empty", inline: true },
-    { name: "Waiting on you", value: input.pending.length ? input.pending.slice(0, 5).map((r) => `${r.kind === "teach" ? "teaching" : "attempt"} *${quiet(clip(r.concept, 40))}* in ${where(r.goalId)}`).join("\n") : "nothing", inline: true },
+    { name: "Waiting on you", value: input.pending.length ? input.pending.slice(0, 5).map((r) => `${r.kind === "teach" ? "teaching" : r.kind === "tried" ? "attempt" : "submit"} *${quiet(clip(r.concept, 40))}* in ${where(r.goalId)}`).join("\n") : "nothing", inline: true },
     { name: "Latest creation", value: latest?.result ? `[${clip(latest.result.title, 90)}](${jobLink(input.links, latest.id)})\n${where(latest.goalId)}${latest.finishedAt ? ` · <t:${unix(latest.finishedAt)}:R>` : ""}` : "none yet", inline: false },
     { name: "Handoffs in flight", value: unfinished.length ? unfinished.map((h) => `${STATUS_MARK[h.status]} ${quiet(clip(h.title, 60))} · *${clip(h.executor, 30)}*`).join("\n") : "none", inline: false },
     ...(scheduled.length ? [{ name: "Scheduled", value: scheduled.map((g) => `${where(g.id)} every ${g.schedule!.intervalMinutes} min · next <t:${unix(g.schedule!.nextRunAt)}:R>`).join("\n"), inline: false }] : []),

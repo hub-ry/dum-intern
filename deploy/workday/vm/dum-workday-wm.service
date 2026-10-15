@@ -1,0 +1,16 @@
+# workday VM: openbox so Chromium windows can be moved, focused and resized over noVNC.
+[Unit]
+Description=Dum workday window manager (openbox on :1)
+BindsTo=dum-workday-xvfb.service
+After=dum-workday-xvfb.service
+
+[Service]
+User=worker
+Environment=DISPLAY=:1
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do [ -e /tmp/.X11-unix/X1 ] && exit 0; sleep 0.2; done; exit 1'
+ExecStart=/usr/bin/openbox
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

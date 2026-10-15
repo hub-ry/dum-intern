@@ -26,6 +26,8 @@ import { DEFAULT_POSTS_DIR, listPosts, removePost, type FilePost } from "../shar
 import { alive, finished, launch, listTurns, queueTurn, removeTurn, saveTurn, sourceText, startable, turnAttachments, turnDir, type Turn } from "./turns.ts";
 import { DEFAULT_ATTACHMENTS_DIR, incomingAttachments, pruneAttachments, saveAttachments, type DiscordAttachment } from "./attachments.ts";
 import { DUM_BIN } from "../cli.ts";
+import { decideSubmit, DEFAULT_KEY_DIR } from "../workday/approval.ts";
+import { workerFromEnv } from "../workday/client.ts";
 
 const POLL_MS = 5_000;
 /** How often the bot checks Discord for goal channels someone deleted. */
@@ -50,6 +52,8 @@ const config = {
   requestsDir: process.env.DUM_REQUESTS_DIR?.trim() || DEFAULT_REQUESTS_DIR,
   handoffDir: process.env.DUM_HANDOFF_DIR?.trim() || DEFAULT_HANDOFF_DIR,
   postsDir: process.env.DUM_POSTS_DIR?.trim() || DEFAULT_POSTS_DIR,
+  /** Signs Workday submit approvals; only Ryan's button uses it. */
+  approvalKey: process.env.DUM_WORKDAY_APPROVAL_KEY?.trim() || join(DEFAULT_KEY_DIR, "approval.key"),
 };
 const linkHost = process.env.DUM_DISCORD_PUBLIC_HOST?.trim() || workshopUrl.hostname;
 const links: Links = {
@@ -248,13 +252,15 @@ async function deliverJobs(jobs: Awaited<ReturnType<typeof workshop.jobs>>, goal
 // --- Approvals ------------------------------------------------------------------------------
 
 async function goalTitle(goalId: string): Promise<string> {
+  if (!goalId) return "no goal";
   return (await workshop.goals()).find((g) => g.id === goalId)?.title ?? "a deleted goal";
 }
 
 /** Asks Ryan about every request that hasn't been asked yet; his exact words from chat need no asking. */
 async function askPending(pending: DumRequest[]): Promise<void> {
   for (const req of pending) {
-    if (req.verbatim) {
+    // Only teaching and attempts can be Ryan's exact words; a submit always waits for his button.
+    if (req.verbatim && req.kind !== "workday-submit") {
       const done = await decide(req.id, true);
       if (done?.status === "approved") {
         const channelId = channels.channelFor(req.goalId) ?? config.lobbyId;
@@ -266,7 +272,10 @@ async function askPending(pending: DumRequest[]): Promise<void> {
     if (req.messageId) continue;
     const channelId = channels.channelFor(req.goalId) ?? config.lobbyId;
     const card = approvalCard(req, await goalTitle(req.goalId), config.ownerId);
-    const msg = await discord("POST", `/channels/${channelId}/messages`, { ...card, nonce: `q${req.id.replace(/-/g, "").slice(0, 22)}`, enforce_nonce: true, allowed_mentions: OWNER_PING() });
+    const payload = { ...card, nonce: `q${req.id.replace(/-/g, "").slice(0, 22)}`, enforce_nonce: true, allowed_mentions: OWNER_PING() };
+    const shotName = req.kind === "workday-submit" ? (req.workday?.screenshot ?? "") : "";
+    const shot = /^[A-Za-z0-9_-]{8,80}\.png$/.test(shotName) ? join(config.requestsDir, shotName) : null;
+    const msg = shot ? await postWithImage(channelId, payload, shot) : await discord("POST", `/channels/${channelId}/messages`, payload);
     updateRequest(config.requestsDir, req.id, { channelId, messageId: msg.id });
     log(`asked about ${req.kind} ${req.id.slice(0, 8)} from ${req.requestedBy}`);
   }
@@ -288,6 +297,11 @@ async function decideOnce(id: string, approve: boolean): Promise<DumRequest | nu
   const req = readRequest(config.requestsDir, id);
   if (!req) return null;
   if (req.status !== "pending") return req;
+  if (req.kind === "workday-submit") {
+    const done = await decideSubmit(config.requestsDir, id, approve, { keyPath: config.approvalKey, worker: workerFromEnv() });
+    log(`${approve ? "approved" : "declined"} workday submit ${id.slice(0, 8)}: ${done?.outcome ?? done?.status ?? "gone"}`);
+    return done;
+  }
   const decidedAt = new Date().toISOString();
   if (!approve) return updateRequest(config.requestsDir, id, { status: "declined", decidedAt });
   try {
@@ -300,6 +314,22 @@ async function decideOnce(id: string, approve: boolean): Promise<DumRequest | nu
     log(`approved ${req.kind} ${id.slice(0, 8)} but recording failed: ${(err as Error).message}`);
     return updateRequest(config.requestsDir, id, { status: "failed", decidedAt, outcome });
   }
+}
+
+/** Posts a card with one image uploaded beside it; a missing image just leaves the card without it. */
+async function postWithImage(channelId: string, payload: Record<string, unknown>, path: string): Promise<{ id: string }> {
+  const route = `/channels/${channelId}/messages`;
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch {
+    return discord("POST", route, payload);
+  }
+  const name = path.split("/").at(-1)!;
+  const form = new FormData();
+  form.append("files[0]", new Blob([bytes], { type: "image/png" }), name);
+  form.append("payload_json", JSON.stringify({ ...payload, attachments: [{ id: 0, filename: name }] }));
+  return discord("POST", route, form);
 }
 
 // --- Shared files -----------------------------------------------------------------------------

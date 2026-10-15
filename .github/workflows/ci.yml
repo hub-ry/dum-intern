@@ -23,5 +23,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # The Workday worker's tests drive a real headless Chromium against a local fixture site.
+      - run: npx playwright-core install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
