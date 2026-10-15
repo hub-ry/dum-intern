@@ -1,0 +1,14 @@
+[Unit]
+Description=Dum: nightly check of GitHub main in its own clone (npm ci, typecheck, tests, verifier image), one line to the lobby
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Environment=TZ=America/Indiana/Indianapolis
+Type=oneshot
+WorkingDirectory=/home/ryanhubbart/code2/dum-intern
+EnvironmentFile=%h/.config/dum-discord/environment
+Environment=DUM_NIGHTLY_DIR=%h/.local/state/dum-nightly
+ExecStart=/usr/local/bin/node --import tsx src/nightly/check.ts
+TimeoutStartSec=90min
+UMask=0077

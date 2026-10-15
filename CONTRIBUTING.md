@@ -2,6 +2,8 @@
 
 [docs/workshop-plan.md](docs/workshop-plan.md) is the product direction. The earlier desktop implementation remains in Git history, not in the current runtime.
 
+Coding agents: read [CLAUDE.md](CLAUDE.md) and [docs/agent-workflow.md](docs/agent-workflow.md) first.
+
 ## Working on it
 
 Use Node 24. Read [README.md](README.md) for Claude CLI, Docker, and private-network setup.

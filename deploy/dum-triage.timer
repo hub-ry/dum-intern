@@ -1,0 +1,10 @@
+[Unit]
+Description=Dum: weekly issue triage, Sunday 4:30am Indiana time, after the nightly check
+
+[Timer]
+OnCalendar=Sun *-*-* 04:30 America/Indiana/Indianapolis
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -69,4 +69,6 @@ npm test
 - `src/context`, `src/shared`: context sync, shared approvals, and handoffs.
 - `src/live`, `src/internship`: screen streaming and internship watch.
 - `src/site`, `src/public`: public site and static hosting.
+- `src/nightly`: the nightly main check and the weekly draft-only issue triage on hub.
+- Coding agents start at [CLAUDE.md](CLAUDE.md); the process is in [docs/agent-workflow.md](docs/agent-workflow.md). `npm test` runs every test under a throwaway home.
 - [Product plan](docs/workshop-plan.md) · [Demo walkthrough](docs/demo.md) · [Notes publishing guide](.claude/skills/dum-publish/SKILL.md)
