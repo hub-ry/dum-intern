@@ -210,7 +210,7 @@ export const TOOLS: ToolDef[] = [
     inputSchema: { type: "object", properties: { internship: { type: "string", description: "Company and role, e.g. \"Target, SWE Intern\"." }, email: { type: "string", description: "The email to watch for, in plain words: who sends it and what to pull out, e.g. \"Workday verification code for Target\" or \"someone named Josh will send a number\"." } }, required: ["internship", "email"] },
     annotations: write,
   },
-  { name: "code_result", title: "Get an emailed code", description: "The code for a code_request id, once the mail side has found it (it checks every 15 s and gives up after 30 min).", inputSchema: { type: "object", properties: { id: { type: "string" }, wait_seconds: waitArg("the code", 60) }, required: ["id"] }, annotations: read },
+  { name: "code_result", title: "Get an emailed code", description: "The code for a code_request id, once the mail side has found it (it checks every 20 s and gives up after 30 min).", inputSchema: { type: "object", properties: { id: { type: "string" }, wait_seconds: waitArg("the code", 60) }, required: ["id"] }, annotations: read },
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -616,7 +616,7 @@ export function createMcp(deps: Deps) {
       for (;;) {
         const a = readAnswers(deps.codesDir).find((x) => x.id === id);
         if (a) return a.code ? `${a.code}  (${a.note})` : `No code for ${a.internship}: ${a.note}`;
-        if (now().getTime() >= deadline) return `No code for ${id} yet. Wait again; the mail side checks every 15 s.`;
+        if (now().getTime() >= deadline) return `No code for ${id} yet. Wait again; the mail side checks every 20 s.`;
         await sleep(2000);
       }
     },

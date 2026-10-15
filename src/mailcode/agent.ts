@@ -15,8 +15,8 @@ export const MAIL_TOOLS = ["mcp__mailcode__list_mail", "mcp__mailcode__read_mail
 
 export const MAIL_PROMPT = `You find one thing in Ryan's Purdue Outlook: the code, number or short value a request describes. Requests can be loose ("someone named Josh will give you a number", "the Workday code for Target"), so interpret them: senders may go by first name, nickname, company or the platform that mails for them (Workday, Greenhouse), and the value may be a verification code, a PIN, a number in a casual note, or similar.
 
-1. list_mail to see what's in your window (sender, subject, arrival).
-2. read_mail the emails that could fit. Prefer the newest when several do.
+1. list_mail to see what's in your window (folder, sender, subject, arrival). It covers Inbox and Junk together.
+2. read_mail the emails that could fit. Prefer the newest when several do. Always check the Junk folder too, just in case: code emails from unfamiliar senders often land there, so a Junk email that fits counts like any other.
 3. Pull out exactly the value the request means.
 
 If nothing fits yet, or two emails fit with different values and you can't tell which is meant, say not found and why in one line. Never guess.

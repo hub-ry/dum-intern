@@ -11,7 +11,7 @@ import { addRequest, pending, readAnswers, readRequests, REQUEST_TTL_MS, type Co
 import { EARLY_MS, sweep, type SweepDeps } from "./watch.ts";
 import { createMailcodeMcp, type MailcodeMcp } from "./mcp.ts";
 import type { Answer } from "./agent.ts";
-import type { Mailbox } from "./outlook.ts";
+import { mergeFolders, type Mailbox } from "./outlook.ts";
 
 const T0 = Date.parse("2026-10-14T17:00:00Z");
 const dir = () => mkdtempSync(join(tmpdir(), "dum-codes-"));
@@ -66,8 +66,8 @@ test("pipes and line breaks in a request can't forge extra fields or lines", () 
 });
 
 const inbox = [
-  { id: "old", from: "Josh Miller", address: "josh@example.com", subject: "lunch", receivedAt: new Date(T0 - 90 * 60_000).toISOString(), body: "Room 1204" },
-  { id: "new", from: "Josh Miller", address: "josh@example.com", subject: "here you go", receivedAt: new Date(T0 + 2 * 60_000).toISOString(), body: "58213" },
+  { id: "old", folder: "inbox" as const, from: "Josh Miller", address: "josh@example.com", subject: "lunch", receivedAt: new Date(T0 - 90 * 60_000).toISOString(), body: "Room 1204" },
+  { id: "new", folder: "junk" as const, from: "Josh Miller", address: "josh@example.com", subject: "here you go", receivedAt: new Date(T0 + 2 * 60_000).toISOString(), body: "58213" },
 ];
 const fakeBox = async (): Promise<Mailbox> => ({
   recent: async () => inbox.map(({ body: _b, ...m }) => m),
@@ -82,7 +82,7 @@ const call = async (h: MailcodeMcp, name: string, args: Record<string, unknown> 
 test("a fixed window hides earlier mail, whatever window the agent asks for", async () => {
   const h = createMailcodeMcp({ open: fakeBox, fixedSince: T0 - EARLY_MS, now: () => T0 + 3 * 60_000 });
   const list = await call(h, "list_mail", { within_minutes: 1440 });
-  assert.match(list.text, /id new/);
+  assert.match(list.text, /id new\n  folder: junk/);
   assert.doesNotMatch(list.text, /id old/);
   assert.equal((await call(h, "read_mail", { id: "new" })).text, "58213");
 });
@@ -93,4 +93,14 @@ test("read_mail opens only emails list_mail has shown", async () => {
   assert.equal(before.error, true);
   await call(h, "list_mail");
   assert.equal((await call(h, "read_mail", { id: "old" })).error, true);
+});
+
+test("Inbox and Junk come back as one list, newest first, each email marked with its folder", () => {
+  const item = (id: string, at: string) => ({ ItemId: { Id: id }, Subject: id, DateTimeReceived: at, From: { Mailbox: { Name: "Greenhouse", EmailAddress: "no-reply@greenhouse.io" } } });
+  const folder = (...items: ReturnType<typeof item>[]) => ({ ResponseClass: "Success", RootFolder: { Items: items } });
+  const inboxMsg = folder(item("i2", "2026-10-15T00:40:00Z"), item("i1", "2026-10-15T00:10:00Z"));
+  const junkMsg = folder(item("j1", "2026-10-15T00:54:14Z"), item("j0", "2026-10-14T23:00:00Z"));
+  const merged = mergeFolders([inboxMsg, junkMsg], ["inbox", "junk"], 3);
+  assert.deepEqual(merged.map((m) => [m.id, m.folder]), [["j1", "junk"], ["i2", "inbox"], ["i1", "inbox"]]);
+  assert.throws(() => mergeFolders([inboxMsg], ["inbox", "junk"], 3), /1 folders, not 2/);
 });

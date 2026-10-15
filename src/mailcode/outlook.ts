@@ -8,7 +8,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
-export type MailSummary = { id: string; from: string; address: string; subject: string; receivedAt: string };
+export type MailSummary = { id: string; folder: Folder; from: string; address: string; subject: string; receivedAt: string };
+
+/** Where list_mail looks. Junk too, always: code emails from unfamiliar senders often land there. */
+export const FOLDERS = { inbox: "inbox", junk: "junkemail" } as const;
+export type Folder = keyof typeof FOLDERS;
 
 const PKG = process.env.DUM_BRIGHTSPACE_DIR?.trim() || join(homedir(), "opt/brightspace-mcp");
 const MODULES = join(PKG, "node_modules");
@@ -52,8 +56,8 @@ const prop = (FieldURI: string) => ({ __type: "PropertyUri:#Exchange", FieldURI 
 const KEEP_HEADERS = ["authorization", "x-anchormailbox", "x-owa-hosted-ux", "x-req-source", "prefer", "x-owa-sessionid"];
 const ALLOWED_HOSTS = /(^|\.)(office\.com|office\.net|microsoft\.com|microsoftonline\.com|live\.com|msftauth\.net|msauth\.net|static\.microsoft)$/;
 
-/** One Outlook service call from inside the signed-in page; the first response message on success. */
-async function call(page: Page, headers: Record<string, string>, action: string, body: unknown): Promise<unknown> {
+/** One Outlook service call from inside the signed-in page: its response messages (one per folder or item asked about), all successful. */
+async function call(page: Page, headers: Record<string, string>, action: string, body: unknown): Promise<unknown[]> {
   const res = await page.evaluate(
     async ({ headers, action, body }) => {
       const r = await fetch(`/owa/service.svc?action=${action}&app=Mail`, { method: "POST", headers: { ...headers, action, "content-type": "application/json; charset=utf-8" }, body: JSON.stringify(body) });
@@ -65,9 +69,29 @@ async function call(page: Page, headers: Record<string, string>, action: string,
   if (res.status !== 200) throw new MailError(`Outlook answered ${res.status} to ${action}.`);
   const parsed = Envelope.safeParse(JSON.parse(res.text));
   if (!parsed.success) throw new MailError(`Outlook's answer to ${action} had an unexpected shape.`);
-  const msg = parsed.data.Body.ResponseMessages.Items[0]!;
-  if (msg.ResponseClass !== "Success") throw new MailError(`Outlook refused ${action} (${msg.ResponseCode ?? "no response code"}).`);
-  return msg;
+  const msgs = parsed.data.Body.ResponseMessages.Items;
+  const bad = msgs.find((m) => m.ResponseClass !== "Success");
+  if (bad) throw new MailError(`Outlook refused ${action} (${bad.ResponseCode ?? "no response code"}).`);
+  return msgs;
+}
+
+/**
+ * FindItem's answer for several folders as one list: one response message per folder, in the order
+ * asked, merged newest first and cut to `count`. Reading only the first message once hid Junk.
+ */
+export function mergeFolders(msgs: unknown[], folders: Folder[], count: number): MailSummary[] {
+  if (msgs.length !== folders.length) throw new MailError(`Outlook answered FindItem for ${msgs.length} folders, not ${folders.length}.`);
+  return msgs
+    .flatMap((m, i) => Found.parse(m).RootFolder.Items.map((it) => ({
+      id: it.ItemId.Id,
+      folder: folders[i]!,
+      from: it.From?.Mailbox.Name ?? "",
+      address: it.From?.Mailbox.EmailAddress ?? "",
+      subject: it.Subject ?? "",
+      receivedAt: it.DateTimeReceived ?? "",
+    })))
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+    .slice(0, count);
 }
 
 export type Mailbox = { recent(count: number): Promise<MailSummary[]>; body(id: string): Promise<string>; close(): Promise<void> };
@@ -118,28 +142,23 @@ export async function openMailbox(): Promise<Mailbox> {
 
     return {
       async recent(count) {
-        const msg = Found.parse(await call(page, h, "FindItem", {
+        const folders = Object.keys(FOLDERS) as Folder[];
+        const msgs = await call(page, h, "FindItem", {
           __type: "FindItemJsonRequest:#Exchange",
           Header: HEADER,
           Body: {
             __type: "FindItemRequest:#Exchange",
             ItemShape: { __type: "ItemResponseShape:#Exchange", BaseShape: "IdOnly", AdditionalProperties: ["Subject", "DateTimeReceived", "From"].map(prop) },
-            ParentFolderIds: [{ __type: "DistinguishedFolderId:#Exchange", Id: "inbox" }, { __type: "DistinguishedFolderId:#Exchange", Id: "junkemail" }],
+            ParentFolderIds: folders.map((f) => ({ __type: "DistinguishedFolderId:#Exchange", Id: FOLDERS[f] })),
             Traversal: "Shallow",
             Paging: { __type: "IndexedPageView:#Exchange", BasePoint: "Beginning", Offset: 0, MaxEntriesReturned: count },
             SortOrder: [{ __type: "SortResults:#Exchange", Order: "Descending", Path: prop("DateTimeReceived") }],
           },
-        }));
-        return msg.RootFolder.Items.map((it) => ({
-          id: it.ItemId.Id,
-          from: it.From?.Mailbox.Name ?? "",
-          address: it.From?.Mailbox.EmailAddress ?? "",
-          subject: it.Subject ?? "",
-          receivedAt: it.DateTimeReceived ?? "",
-        }));
+        });
+        return mergeFolders(msgs, folders, count);
       },
       async body(id) {
-        const msg = Got.parse(await call(page, h, "GetItem", {
+        const msg = Got.parse((await call(page, h, "GetItem", {
           __type: "GetItemJsonRequest:#Exchange",
           Header: HEADER,
           Body: {
@@ -147,7 +166,7 @@ export async function openMailbox(): Promise<Mailbox> {
             ItemShape: { __type: "ItemResponseShape:#Exchange", BaseShape: "IdOnly", BodyType: "Text", AdditionalProperties: [prop("Body")] },
             ItemIds: [{ __type: "ItemId:#Exchange", Id: id }],
           },
-        }));
+        }))[0]);
         return msg.Items[0]!.Body?.Value ?? "";
       },
       async close() {

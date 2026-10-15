@@ -19,7 +19,7 @@ const TOOLS = [
   {
     name: "list_mail",
     title: "Recent emails",
-    description: "Emails in Ryan's Purdue Outlook (inbox and junk) inside your window, newest first: id, sender name and address, subject, when it arrived. No bodies; open one with read_mail.",
+    description: "Emails in Ryan's Purdue Outlook, Inbox and Junk together, inside your window, newest first: id, sender name and address, subject, when it arrived. No bodies; open one with read_mail.",
     inputSchema: { type: "object", properties: { within_minutes: { type: "number", description: `How far back (default ${DEFAULT_WITHIN_MINUTES}, max ${MAX_WITHIN_MINUTES}). Ignored when the window is fixed for a request.` } } },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
@@ -36,7 +36,7 @@ const TOOLS = [
 function listing(messages: MailSummary[], now: number): string {
   if (!messages.length) return "No emails in the window yet.";
   return messages
-    .map((m) => `- id ${m.id}\n  from: ${m.from || "?"} <${m.address || "?"}>\n  subject: ${m.subject || "(none)"}\n  arrived: ${Math.max(0, Math.round((now - Date.parse(m.receivedAt)) / 60_000))} min ago`)
+    .map((m) => `- id ${m.id}\n  folder: ${m.folder}\n  from: ${m.from || "?"} <${m.address || "?"}>\n  subject: ${m.subject || "(none)"}\n  arrived: ${Math.max(0, Math.round((now - Date.parse(m.receivedAt)) / 60_000))} min ago`)
     .join("\n");
 }
 
