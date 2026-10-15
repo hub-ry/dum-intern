@@ -11,6 +11,7 @@ import { WorkshopRequestError } from "../client/workshop.ts";
 import { createRequest, readRequest, listRequests, isRequestId, isVerbatim, type DumRequest } from "../shared/requests.ts";
 import { createHandoff, listHandoffs, readHandoff, writeResult, HandoffError, type HandoffStatus } from "../shared/handoff.ts";
 import { queuePost } from "../shared/file-posts.ts";
+import { progressLines } from "../shared/progress-text.ts";
 import { UPLOAD_LIMIT } from "../discord/files.ts";
 import { scrub } from "../context/root-context.ts";
 import { MAX_GOAL_CONTEXT, MAX_SHARED_CONTEXT } from "../workshop/validate.ts";
@@ -345,6 +346,7 @@ export function createMcp(deps: Deps) {
     async dum_goal(args) {
       const goal = await goalOf(str(args, "goal"));
       const [teachings, progress] = await Promise.all([deps.workshop.teachings(goal.id), deps.workshop.progress(goal.id)]);
+      const records = progressLines(progress, teachings);
       return [
         `# ${goal.title} (${goal.id})`,
         "",
@@ -360,7 +362,7 @@ export function createMcp(deps: Deps) {
         ...teachings.map((t) => `- ${t.concept}: ${clip(t.text.replace(/\s+/g, " "), 300)}`),
         "",
         "Progress records:",
-        ...(progress.length ? progress.map((c) => `- ${c.concept}: ${Object.entries(c.counts).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}`) : ["- none"]),
+        ...(records.length ? records.map((l) => `- ${l}`) : ["- none"]),
         "",
         `Schedule: ${goal.schedule ? `every ${goal.schedule.intervalMinutes} minutes, next ${goal.schedule.nextRunAt}` : "off"}`,
         `Workshop page for this goal (progression, teaching, creations): ${goalLink(goal.id)}`,
@@ -469,11 +471,12 @@ export function createMcp(deps: Deps) {
 
     async dum_progress(args) {
       const goal = await goalOf(str(args, "goal"));
-      const progress = await deps.workshop.progress(goal.id);
+      const [progress, teachings] = await Promise.all([deps.workshop.progress(goal.id), deps.workshop.teachings(goal.id)]);
       const page = `Full progression in the workshop: ${goalLink(goal.id)}`;
-      if (!progress.length) return `No records for "${goal.title}" yet.\n${page}`;
-      return progress
-        .map((c) => `- ${c.concept}: ${Object.entries(c.counts).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}${c.latest ? ` (latest ${c.latest})` : ""}`)
+      const lines = progressLines(progress, teachings);
+      if (!lines.length) return `No records for "${goal.title}" yet.\n${page}`;
+      return lines
+        .map((l) => `- ${l}`)
         .concat("These are Ryan's records, not a mastery score.", page)
         .join("\n");
     },

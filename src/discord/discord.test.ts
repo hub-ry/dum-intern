@@ -218,7 +218,7 @@ function ctx(calls: string[] = [], over: Partial<GoalDetail> = {}): Context {
       studied: async (g, c) => void calls.push(`studied ${g} ${c}`),
       tried: async (g, c, t, h) => void calls.push(`tried ${g} ${c} ${t} ${h}`),
       revisit: async (g, c, n) => void calls.push(`revisit ${g} ${c} ${n}`),
-      progress: async () => [{ concept: "loops", counts: { introduced: 1, needsRevisiting: 0 }, latest: "introduced" }],
+      progress: async () => [{ concept: "loops", counts: { introduced: 1, needsRevisiting: 0 }, latest: "introduced", latestAt: "2026-10-12T00:00:00Z" }],
       schedule: async (g, m) => (calls.push(`schedule ${g} ${m}`), m === null ? null : { intervalMinutes: m, nextRunAt: "2026-10-12T00:00:00Z" }),
       build: async (g) => (calls.push(`build ${g}`), job("queued", { id: "22222222-2222-2222-2222-222222222222" })),
       correct: async (j, c) => (calls.push(`correct ${j} ${c}`), job("queued", { id: "33333333-3333-3333-3333-333333333333" })),
