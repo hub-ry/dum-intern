@@ -40,7 +40,9 @@ npm run typecheck && npm test
 git push -u origin issue-N && gh pr create --fill --body "Closes #N"
 ```
 
-Agents open PRs. Ryan merges. Nothing an agent does lands on `main` unattended. Commits are Ryan's identity (`hub-ry`): no AI author, no `Co-Authored-By`, no force push.
+Agents working an issue open PRs; Ryan merges. Commits are Ryan's identity (`hub-ry`): no AI author, no `Co-Authored-By`, no force push.
+
+One exception exists today: Dum's own engineer agent (Discord) ships its self-edits with `dum ship`, which commits and fast-forward pushes to `main` (`src/shared/ship.ts`). Whether that should open a PR instead is the open question on issue #2.
 
 ## Parallel work
 
