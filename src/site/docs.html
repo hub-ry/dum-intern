@@ -3,101 +3,66 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#1b1733">
-  <title>how it works — dum intern</title>
-  <meta name="description" content="How Dum works today: a private workshop where you study one idea, try it, teach it to Dum, and read back a verified creation.">
-  <link rel="stylesheet" href="/site/site.css">
+  <meta name="theme-color" content="#fffffc">
+  <title>How it works — dum intern</title>
+  <meta name="description" content="Goals, readings, unlocked blocks, and builds. How to use your Dum folder.">
+  <link rel="stylesheet" href="/site/site.css?v=paper-1">
   <link rel="icon" type="image/png" href="/site/favicon.png">
-  <link rel="apple-touch-icon" href="/site/favicon.png">
 </head>
 <body>
-
 <a class="skip-link" href="#main">Skip to content</a>
-
 <!--NAV-->
-
 <main id="main" class="page">
-  <h1>How it works</h1>
+  <header class="document-title">
+    <h1>How it works</h1>
+    <p>Goals, readings, and things you can build.</p>
+  </header>
 
-  <p class="page-lede">Dum is a small intern you teach. You learn one idea, explain it in your own words, and Dum turns your explanation into a creation you can read back. This page describes what exists today, nothing more.</p>
-
-  <ul class="toc" aria-label="On this page">
-    <li><a href="#public">What's public</a></li>
-    <li><a href="#lessons">Lessons</a></li>
-    <li><a href="#loop">The loop</a></li>
-    <li><a href="#creation">What a creation is</a></li>
-    <li><a href="#verification">Verification</a></li>
-    <li><a href="#runtime">Runtime</a></li>
-    <li><a href="#model">Model access</a></li>
-    <li><a href="#privacy">Privacy</a></li>
-    <li><a href="#schedules">Schedules</a></li>
-  </ul>
-
-  <h2 id="public">What's public and what isn't</h2>
-  <p>Dum's workshop runs on its owner's machine, a host we call the hub. That's where lessons, teaching and creations live. It isn't open to the public, and this site has no login or workshop prompts.</p>
-  <p>What you can read here is the project itself and one <a href="/demo/">verified example creation</a>. The example came from sample teaching about loops and conditions. It shows what Dum produces. It isn't a record of anyone's learning progress.</p>
-
-  <h2 id="lessons">Lessons</h2>
-  <p>The guided lessons are deliberately small, and there are only a few right now:</p>
+  <h2>1. Open your folder</h2>
   <ul>
-    <li>Visiting every item with <code>for...of</code></li>
-    <li>Choosing with <code>if</code> and <code>else</code></li>
-    <li>Loops and conditions together</li>
+    <li>Open <a href="/app">your Dum</a> and enter your GitHub username.</li>
+    <li>Put the login code, alone, in a public gist whose file is named <code>dum-login</code>. Check it to prove the account is yours, then delete the gist. If GitHub OAuth is configured, you can use that instead.</li>
+    <li>Your workspace lives on hub. Its root is <code>dum</code> unless you choose another one in the Folder tab. The hub owner can assign a directory under their home folder.</li>
   </ul>
-  <p>Materials and reasoning exercises sit together in the study zone. Predict a result, check it, and try again with another example; writing syntax is optional. You can record other teaching too, but the guided path is these three ideas.</p>
+  <pre><code>dum/
+  goal.md
+  tree.json
+  readings/     one assignment per block
+  builds/       each stack you save</code></pre>
+  <p>The starting folder is <a href="https://github.com/hub-ry/dum-intern/tree/main/template/dum"><code>template/dum</code></a>. For workspace selection and getting papers onto the server, see the <a href="https://github.com/hub-ry/dum-intern/blob/main/README.md#workspace-and-hosting">project README</a>.</p>
 
-  <h2 id="loop">The loop</h2>
-  <ol class="steps">
-    <li><strong>Study</strong> Read one short lesson on one idea.</li>
-    <li><strong>Try it</strong> Predict what happens in the study zone, inspect the feedback, and try again.</li>
-    <li><strong>Teach Dum</strong> Write down the idea in your own words. This text is what gets sent to the model.</li>
-    <li><strong>Creation</strong> Dum builds a small, self-contained interactive page from your teaching, then verifies it.</li>
-    <li><strong>Correction</strong> Explain what to change and request another build. A revised version never replaces the original; failed verification stays visible.</li>
-    <li><strong>Revisit</strong> Come back later and read the creation again. Every job has a stable deep link in the private workshop.</li>
-  </ol>
-
-  <h2 id="creation">What a creation is</h2>
-  <p>A creation is a self-contained HTML page generated from your teaching and goal context, with output constrained by a JSON schema. The host never executes its JavaScript. An isolated browser verifier exercises it and captures screenshots. The reader pairs those images with captions and matching source excerpts. In the private workshop, you can also use the demo inside a sandboxed frame on a separate origin.</p>
-  <p>The public example is exactly this: six screenshots from the corrected creation of one job, with the captions and code the backend recorded. Reading saved pages makes no model calls.</p>
-
-  <h2 id="verification">Verification</h2>
-  <p>Each creation is checked with a browser automation script inside an isolated Docker container. The container has no network, a read-only filesystem and no privileges. The script checks two initial renders agree, then performs the declared clicks and input changes and compares what it sees with what the creation claims. It uses the browser's real clocks and randomness, without replacing them. The screenshots you read were captured during that run.</p>
-  <div class="note">
-    <p>This isolation is about offline execution and keeping generated code away from the host. It's not a universal security guarantee, and the generated page should still be treated as untrusted code.</p>
-  </div>
-
-  <h2 id="runtime">Runtime</h2>
-  <p>The workshop runs on Linux with Node 24, TypeScript, tsx, zod, and util-linux <code>flock</code> for exclusive ownership of private records. Its default local setup listens on two separate origins:</p>
+  <h2>2. Lay out a goal</h2>
   <ul>
-    <li><code>127.0.0.1:8770</code> serves the workshop app and its API, with authentication whenever a token is set.</li>
-    <li><code>127.0.0.1:8771</code> serves finished artifacts, such as screenshots and the creation's own page.</li>
+    <li>Name the goal and describe what you want to be able to build.</li>
+    <li>Leave the outline empty for a five-block starter tree, or write the blocks yourself, one per line. Two spaces indent a child.</li>
+    <li>Hints shows which readings are available next and which unlocked chains you can stack now.</li>
   </ul>
-  <p>Private-network access requires a workshop token. Neither port is exposed by this public site. The public site uses a separate, dependency-free static server.</p>
 
-  <h2 id="model">Model access</h2>
-  <p>Builds use the Claude Code command line tool with an authenticated subscription. It's invoked in print mode with no tools, no hooks and no MCP servers, and asked for output matching a strict JSON schema. With that setup no API key is required. The example creation was generated by <code>claude-fable-5-1</code>. Teaching Dum doesn't retrain any model.</p>
-
-  <h2 id="privacy">Privacy</h2>
+  <h2>3. Read a block</h2>
   <ul>
-    <li>See the <a href="https://github.com/hub-ry/dum-intern#run-the-workshop" rel="noreferrer">workshop privacy and execution boundaries</a> for where private records are stored and what generation sends to the configured Claude CLI provider.</li>
-    <li>Verification runs offline in the container.</li>
-    <li>Reading saved creations, here or in the workshop, makes no model calls.</li>
-    <li>No account is needed to read this site. The jumping game keeps no score history. Cloudflare handles public delivery.</li>
+    <li>Each reading is a LaTeX article with <code>\usepackage{learn}</code>, the format used at <a href="https://learn.ryhub.dev/">learn.ryhub.dev</a>.</li>
+    <li>Open your Dum folder in Cursor. Use the repo's <code>dum-paper</code> skill to write and compile the paper on your machine, using your Cursor account.</li>
+    <li>Put the PDF in <code>readings/pdf/</code>. Until it is there, the block has nothing to read. Hub doesn't write or compile the paper.</li>
+    <li>Read the PDF inside your login. Reaching the last page unlocks the block. There is no quiz or work to submit.</li>
   </ul>
 
-  <h2 id="schedules">Schedules</h2>
-  <p>A goal can have an optional interval schedule. It queues new creations from your existing teaching while the hub is running, even when your laptop is closed. Scheduled builds use the model just like manual builds. Leave scheduling off to build only when you press Build now.</p>
+  <h2>4. Skip what you already know</h2>
+  <p>Swear a block in a sentence. It unlocks without the reading, even if its parent is still locked. The tree marks it sworn so you can distinguish it from a block you read.</p>
 
-  <p class="reader-footnote">Code and the full history of changes are in the <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source repository</a>. For the thinking behind the learn-then-teach order, see the <a href="/philosophy">philosophy</a> page.</p>
+  <h2>5. Stack a build</h2>
+  <p>Give the build a name. Select unlocked blocks and put them in the order you want. Locked blocks cannot be stacked. Saving a build records the stack; it doesn't generate a finished program.</p>
+
+  <h2>Storage and privacy</h2>
+  <ul>
+    <li>The site, account workspaces, and reader run on hub. Paper generation runs in your own Cursor session.</li>
+    <li>Your folder is not published automatically. Putting it in a public repo is your choice.</li>
+    <li>Read or sworn describes how a block was unlocked, not a measurement of mastery.</li>
+  </ul>
 </main>
-
 <footer class="site-footer">
-  <a href="/" class="footer-brand">dum intern</a>
-  <a href="/docs">how it works</a>
-  <a href="/philosophy">philosophy</a>
-  <a href="/demo/">example</a>
-  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+  <a href="/">dum intern</a>
+  <a href="/app">Your Dum</a>
+  <a href="https://github.com/hub-ry/dum-intern">Source</a>
 </footer>
-
 </body>
 </html>

@@ -1,10 +1,6 @@
 # Contributing
 
-[docs/workshop-plan.md](docs/workshop-plan.md) is the product direction. The earlier desktop implementation remains in Git history, not in the current runtime.
-
-## Working on it
-
-Use Node 24. Read [README.md](README.md) for Claude CLI, Docker, and private-network setup.
+This repo is the public skill-tree product at [dumintern.com](https://dumintern.com/). Start with [README.md](README.md) for setup, storage, and the source layout.
 
 ```sh
 npm ci
@@ -13,22 +9,11 @@ npm run typecheck
 npm test
 ```
 
-See the [source layout](README.md#development). Tests live beside the behavior they cover. The public server must never expose the workshop home, credentials, or authenticated APIs.
-
-The current guided lessons cover loops and conditions. Do not imply universal curriculum coverage. The background progress record distinguishes server-graded answers from self-reports; neither proves mastery by itself.
-
-## Invariants
-
-- Preserve the [generation, verification, and reader boundaries](README.md#how-it-works). Model generation is tool-free.
-- Preserve immutable teaching text and job snapshots. Do not invent quotes, learner activity, confusion, or successes.
-- Validate actual interactive output before marking a creation ready. Failure remains visible rather than being replaced with a fabricated result.
-- Corrections create versions; they do not overwrite original creations or saved reader positions.
-- Reading a prepared presentation works without a model call.
-- Keep private context private. Public examples and notes are explicitly selected, not automatic exports of learning history.
-- Preserve the existing glyph characters; distinguish Wizard's study assistance from Dum's creation explanation.
-
-## Verification
-
-Run the typecheck and deterministic tests after changes. Exercise the affected path in the actual program: browser interaction for UI, a real isolated generation for publisher changes, and a service restart for persisted-state changes. Do not put live model calls into CI.
-
-New permanent tests must cover meaningful behavior, boundaries, transitions, errors, or evidence labels—not source strings, wiring, or incidental copy. Do not commit private state, credentials, diagnostic scaffolds, or unlabelled generated demonstrations.
+- Keep the product self-contained. Discord, the private workshop, mail watchers, internship automation, and host desktop services don't belong here.
+- Preserve account isolation and private workspace storage. Public assets must never expose account files, session keys, or credentials.
+- Readings are written and compiled in the user's Cursor session. The server stores briefs and serves existing PDFs; it must not claim to have generated a paper.
+- A block unlocks by reading its final page or recording a swear. Preserve that distinction. Neither record proves mastery.
+- Builds contain unlocked blocks in the user's chosen order. Saving a stack does not generate a finished program.
+- Update the authoritative document when a user-facing contract changes; use pointers elsewhere instead of duplicating the contract. Keep template files and the paper skill consistent with workspace storage.
+- Tests live beside the behavior they cover. Test state transitions, boundaries, errors, and observable output, not source strings or incidental copy. Don't put live GitHub calls in CI.
+- Exercise changed UI paths in the browser. For storage or deployment changes, launch the real server against an isolated state directory and check persisted output. Never commit credentials, account data, or smoke-test scaffolds.

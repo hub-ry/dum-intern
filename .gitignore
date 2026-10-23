@@ -1,7 +1,2 @@
 node_modules/
-.dum/
-web-data/
-dist/
-release/
-build/
 *.log
