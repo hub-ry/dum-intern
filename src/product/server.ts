@@ -307,12 +307,7 @@ async function readUnder(root: string, segments: string[]): Promise<Buffer> {
   const candidate = join(root, ...segments);
   const canonical = await realpath(candidate);
   if (canonical !== root && !canonical.startsWith(root + sep)) throw new Error("outside");
-  let handle: FileHandle;
-  try {
-    handle = await open(canonical, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
-  } catch {
-    throw new Error("missing");
-  }
+  const handle: FileHandle = await open(canonical, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error("missing");
@@ -387,7 +382,15 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   try {
     if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) await handleApi(req, res, url);
-    else await serveSite(req, res, url);
+    else {
+      try {
+        await serveSite(req, res, url);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+        send(res, 404, "Not found\n");
+      }
+    }
   } catch (err) {
     const message = err instanceof ProductError ? err.message : err instanceof Error && err.message.startsWith("That") ? err.message : "Something went wrong.";
     const status = err instanceof ProductError ? 400 : 500;

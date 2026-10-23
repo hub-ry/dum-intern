@@ -6,6 +6,52 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 
+test("regression: missing static resources return HTTP 404", { timeout: 20_000 }, async (t) => {
+  const dir = await mkdtemp(join(process.cwd(), ".server-test-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const listener = createServer();
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  const address = listener.address();
+  assert.ok(address && typeof address === "object");
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => listener.close((err) => err ? reject(err) : resolve()));
+  const child = spawn(process.execPath, ["--import", "tsx", "src/product/server.ts"], {
+    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), DUM_PRODUCT_STATE: dir },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stopped = once(child, "exit");
+  let errors = "";
+  child.stderr.on("data", (chunk) => { errors += String(chunk); });
+  t.after(async () => {
+    child.kill();
+    await stopped;
+  });
+  const [output] = await Promise.race([
+    once(child.stdout, "data"),
+    stopped.then(() => { throw new Error(`Server stopped: ${errors}`); }),
+  ]);
+  const origin = String(output).match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+  assert.ok(origin);
+  const statuses: Record<string, number> = {};
+  for (const path of ["/demo/", "/philosophy.html", "/game.js", "/wizard.js", "/missing.html", "/app.js/missing.html"]) {
+    const response = await fetch(`${origin}${path}`);
+    statuses[path] = response.status;
+    await response.text();
+  }
+  assert.deepEqual(statuses, Object.fromEntries(Object.keys(statuses).map((path) => [path, 404])));
+  const head = await fetch(`${origin}/missing.html`, { method: "HEAD" });
+  assert.equal(head.status, 404);
+  assert.equal(await head.text(), "");
+  for (const path of ["/", "/docs", "/app", "/app.js", "/vendor/pdf.min.mjs"]) {
+    const response = await fetch(`${origin}${path}`);
+    assert.equal(response.status, 200, path);
+    await response.arrayBuffer();
+  }
+  assert.equal((await fetch(`${origin}/api/workspace`)).status, 400);
+  assert.equal(errors, "");
+});
+
 async function githubFetch(input: string | URL | Request): Promise<Response> {
   const url = String(input);
   if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "test-token" });
