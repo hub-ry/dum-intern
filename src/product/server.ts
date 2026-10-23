@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT ?? "8074");
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "site");
 const PDFJS = process.env.DUM_PDFJS?.trim() || dirname(fileURLToPath(import.meta.resolve("pdfjs-dist/build/pdf.min.mjs")));
 const COOKIE = "dum_session";
+const AUTH_COOKIE = "dum_auth";
 const NAV_MARKER = "<!--NAV-->";
 
 const MIME: Record<string, string> = {
@@ -37,7 +38,6 @@ const PAGES: Record<string, string> = {
   "docs.html": "docs.html",
   app: "app.html",
   "app.html": "app.html",
-  login: "app.html",
 };
 
 const CSP = [
@@ -54,9 +54,10 @@ const CSP = [
   "form-action 'self'",
 ].join("; ");
 
-type Pending = { code: string; login: string; exp: number };
+type BrowserChallenge = { proof: string; exp: number };
+type Pending = BrowserChallenge & { login: string };
 const pending = new Map<string, Pending>();
-const oauthStates = new Map<string, number>();
+const oauthStates = new Map<string, BrowserChallenge>();
 
 const store = new Store(defaultStateDir());
 const secretPromise = loadSecret(store.stateDir);
@@ -100,14 +101,14 @@ function readSession(secret: Buffer, header: string | undefined): number | null 
   }
 }
 
-function cookie(token: string, secure: boolean): string {
-  const parts = [`${COOKIE}=${encodeURIComponent(token)}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${60 * 60 * 24 * 30}`];
+function cookie(token: string, secure: boolean, name = COOKIE, maxAge = 60 * 60 * 24 * 30): string {
+  const parts = [`${name}=${encodeURIComponent(token)}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${maxAge}`];
   if (secure) parts.push("Secure");
   return parts.join("; ");
 }
 
-function clearCookie(secure: boolean): string {
-  return `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure ? "; Secure" : ""}`;
+function browserProof(req: IncomingMessage): string | undefined {
+  return req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${AUTH_COOKIE}=([^;]+)`))?.[1];
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -170,31 +171,33 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     return;
   }
   if (req.method === "POST" && path === "/api/logout") {
-    send(res, 200, { ok: true }, { "Set-Cookie": clearCookie(secureCookie(req)) });
+    send(res, 200, { ok: true }, { "Set-Cookie": cookie("", secureCookie(req), COOKIE, 0) });
     return;
   }
   if (req.method === "POST" && path === "/api/auth/start") {
     const body = await readBody(req) as { login?: string };
     const login = githubLogin(String(body.login ?? ""));
     const code = `dum-${randomBytes(12).toString("hex")}`;
-    pending.set(code, { code, login, exp: Date.now() + 15 * 60 * 1000 });
+    const proof = randomBytes(32).toString("hex");
+    pending.set(code, { login, proof, exp: Date.now() + 15 * 60 * 1000 });
     send(res, 200, {
       code,
       login,
       gist: "https://gist.github.com/",
       note: "Create a public gist. Name the file dum-login. Paste this code as the whole file. Then check it here.",
-    });
+    }, { "Set-Cookie": cookie(proof, secureCookie(req), AUTH_COOKIE, 15 * 60) });
     return;
   }
   if (req.method === "POST" && path === "/api/auth/finish") {
     const body = await readBody(req) as { login?: string; code?: string };
     const code = String(body.code ?? "");
     const row = pending.get(code);
-    if (!row || row.exp < Date.now()) throw new ProductError("That code expired. Start again.");
+    if (!row || row.exp < Date.now() || row.proof !== browserProof(req)) throw new ProductError("That code expired or belongs to another browser. Start again.");
     const login = githubLogin(String(body.login ?? row.login));
     if (login.toLowerCase() !== row.login.toLowerCase()) throw new ProductError("That code was started for a different username.");
     const user = await gistMatches(login, code);
     if (!user) throw new ProductError("No public gist named dum-login has this code yet.");
+    if (pending.get(code) !== row || row.exp < Date.now()) throw new ProductError("That code expired or was already used. Start again.");
     pending.delete(code);
     const account = await store.ensureAccount(user.id, user.login);
     const secret = await secretPromise;
@@ -207,17 +210,19 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
       return;
     }
     const state = randomBytes(16).toString("hex");
-    oauthStates.set(state, Date.now() + 10 * 60 * 1000);
+    const proof = randomBytes(32).toString("hex");
+    oauthStates.set(state, { proof, exp: Date.now() + 10 * 60 * 1000 });
     res.statusCode = 302;
+    res.setHeader("Set-Cookie", cookie(proof, secureCookie(req), AUTH_COOKIE, 10 * 60));
     res.setHeader("Location", authorizeUrl(`${publicOrigin(req)}/auth/github/callback`, state));
     res.end();
     return;
   }
   if (req.method === "GET" && path === "/auth/github/callback") {
     const state = url.searchParams.get("state") ?? "";
-    const exp = oauthStates.get(state);
+    const row = oauthStates.get(state);
+    if (!row || row.exp < Date.now() || row.proof !== browserProof(req)) throw new ProductError("That GitHub sign-in expired or belongs to another browser. Try again.");
     oauthStates.delete(state);
-    if (!exp || exp < Date.now()) throw new ProductError("That GitHub sign-in expired. Try again.");
     const user = await exchangeCode(url.searchParams.get("code") ?? "");
     const account = await store.ensureAccount(user.id, user.login);
     const secret = await secretPromise;

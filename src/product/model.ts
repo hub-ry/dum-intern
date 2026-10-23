@@ -7,6 +7,7 @@ export const MAX_TITLE = 80;
 export const MAX_AIM = 2000;
 export const MAX_SWEAR = 500;
 export const MAX_OUTLINE = 8000;
+export const MAX_STACK = 24;
 
 const Id = z.string().uuid();
 
@@ -39,7 +40,7 @@ export const Build = z.object({
   id: Id,
   goalId: Id,
   title: z.string().min(1).max(MAX_TITLE),
-  blockIds: z.array(Id).min(1).max(24),
+  blockIds: z.array(Id).min(1).max(MAX_STACK),
   createdAt: z.string().min(1).max(40),
 });
 export type Build = z.infer<typeof Build>;
@@ -68,13 +69,23 @@ export function parseTree(value: unknown): Tree {
   if (!parsed.success) throw new ProductError("tree.json is not a Dum workspace.");
   const tree = parsed.data;
   const goals = new Set(tree.goals.map((g) => g.id));
-  const skills = new Set(tree.skills.map((s) => s.id));
+  const byId = new Map(tree.skills.map((s) => [s.id, s]));
+  if (goals.size !== tree.goals.length || byId.size !== tree.skills.length || new Set(tree.builds.map((b) => b.id)).size !== tree.builds.length) {
+    throw new ProductError("tree.json has duplicate IDs.");
+  }
   for (const skill of tree.skills) {
     if (!goals.has(skill.goalId)) throw new ProductError(`block ${skill.title} points at a missing goal.`);
-    if (skill.parentId !== null && !skills.has(skill.parentId)) throw new ProductError(`block ${skill.title} points at a missing parent.`);
+    if (skill.parentId !== null && !byId.has(skill.parentId)) throw new ProductError(`block ${skill.title} points at a missing parent.`);
     if (skill.parentId !== null) {
-      const parent = tree.skills.find((s) => s.id === skill.parentId);
+      const parent = byId.get(skill.parentId);
       if (parent && parent.goalId !== skill.goalId) throw new ProductError(`block ${skill.title} sits under a different goal.`);
+    }
+    const ancestors = new Set<string>();
+    let cursor: Skill | undefined = skill;
+    while (cursor) {
+      if (ancestors.has(cursor.id)) throw new ProductError(`block ${skill.title} has cyclic ancestry.`);
+      ancestors.add(cursor.id);
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
     }
   }
   for (const build of tree.builds) {
@@ -93,8 +104,10 @@ export function parseOutline(text: string): DraftNode[] {
   const roots: DraftNode[] = [];
   const stack: { depth: number; node: DraftNode }[] = [];
   for (const line of lines) {
-    const depth = Math.floor((line.length - line.trimStart().length) / 2);
-    const title = line.trim().slice(0, MAX_TITLE);
+    const indent = line.length - line.trimStart().length;
+    if (indent % 2 !== 0) throw new ProductError("Indent each level with two spaces.");
+    const depth = indent / 2;
+    const title = line.trim();
     if (!title) throw new ProductError("An outline line is empty.");
     if (title.length > MAX_TITLE) throw new ProductError(`"${title.slice(0, 24)}" is too long for a block name.`);
     const node: DraftNode = { title, summary: title, children: [] };
@@ -187,6 +200,7 @@ export function swearSkill(tree: Tree, skillId: string, text: string, at: string
 
 export function checkStack(tree: Tree, goalId: string, blockIds: string[], requireUnlocked = true): void {
   if (blockIds.length === 0) throw new ProductError("A build needs at least one block.");
+  if (blockIds.length > MAX_STACK) throw new ProductError(`A build can have at most ${MAX_STACK} blocks.`);
   if (new Set(blockIds).size !== blockIds.length) throw new ProductError("A block can only appear once in a stack.");
   for (const id of blockIds) {
     const skill = skillById(tree, id);
@@ -227,7 +241,7 @@ export function hints(tree: Tree, goalId: string): { learn: LearnHint[]; build: 
       cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
     }
     chain.reverse();
-    if (chain.length === 0) continue;
+    if (chain.length === 0 || chain.length > MAX_STACK) continue;
     build.push({
       title: chain.map((s) => s.title).join(" → "),
       blockIds: chain.map((s) => s.id),

@@ -7,10 +7,12 @@ import {
   flattenDraft,
   hints,
   markRead,
+  MAX_STACK,
   parseOutline,
   parseTree,
   ProductError,
   swearSkill,
+  type Tree,
 } from "./model.ts";
 
 const at = "2026-10-23T04:00:00.000Z";
@@ -79,4 +81,53 @@ test("a saved tree round-trips", () => {
   assert.equal(parseTree(tree).skills.length, tree.skills.length);
   assert.equal(parseTree(emptyTree()).goals.length, 0);
   assert.throws(() => parseTree({ version: 2, goals: [], skills: [], builds: [] }), ProductError);
+});
+
+test("regression: outlines reject invalid text before constructing blocks", () => {
+  assert.equal(parseOutline("x".repeat(80))[0].title.length, 80);
+  assert.throws(() => parseOutline("x".repeat(81)), ProductError);
+  for (const outline of [" root", "root\n child", "root\n   child", "root\n  child\n     leaf"]) {
+    assert.throws(() => parseOutline(outline), ProductError);
+  }
+  assert.equal(parseOutline("root\n  child")[0].children[0].title, "child");
+});
+
+test("regression: editable trees reject duplicate identities and cyclic ancestry", () => {
+  const { tree, goal } = workspace();
+  const unlocked = swearSkill(tree, tree.skills[0].id, "I can explain this block.", at);
+  const build = {
+    id: "00000000-0000-4000-8000-000000000099",
+    goalId: goal.id,
+    title: "Build",
+    blockIds: [tree.skills[0].id],
+    createdAt: at,
+  };
+  const built = addBuild(unlocked, build);
+  for (const collection of ["goals", "skills", "builds"] as const) {
+    assert.throws(() => parseTree({ ...built, [collection]: [...built[collection], built[collection][0]] }), /duplicate/);
+  }
+  const root = tree.skills.find((s) => s.title === "The smallest piece")!;
+  const child = tree.skills.find((s) => s.parentId === root.id)!;
+  for (const parentId of [root.id, child.id]) {
+    assert.throws(() => parseTree({ ...tree, skills: tree.skills.map((s) => s.id === root.id ? { ...s, parentId } : s) }), /cyclic/);
+  }
+  assert.equal(parseTree(built).builds.length, 1);
+});
+
+test("regression: every suggested stack can be saved within the build limit", () => {
+  const { goal } = workspace();
+  let n = 100;
+  const skills = flattenDraft(goal.id, parseOutline(Array.from({ length: 40 }, (_, i) => `${"  ".repeat(i)}Block ${i}`).join("\n")), null, () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`);
+  let tree: Tree = { version: 1, goals: [goal], skills, builds: [] };
+  for (const [index, skill] of skills.entries()) {
+    tree = markRead(tree, skill.id, 1, 1, at);
+    const suggestions = hints(tree, goal.id).build;
+    if (index < MAX_STACK) assert.equal(suggestions.length, 1);
+    for (const hint of suggestions) {
+      assert.ok(hint.blockIds.length <= MAX_STACK);
+      const built = addBuild(tree, { id: "00000000-0000-4000-8000-000000000099", goalId: goal.id, title: "Suggested build", blockIds: hint.blockIds, createdAt: at });
+      assert.deepEqual(parseTree(built).builds[0].blockIds, hint.blockIds);
+    }
+  }
+  assert.throws(() => addBuild(tree, { id: "00000000-0000-4000-8000-000000000099", goalId: goal.id, title: "Too many", blockIds: skills.slice(0, MAX_STACK + 1).map((s) => s.id), createdAt: at }), /at most/);
 });

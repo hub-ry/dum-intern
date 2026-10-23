@@ -3,14 +3,13 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   addBuild,
   defaultDraft,
-  emptyTree,
   flattenDraft,
   markRead,
   parseOutline,
@@ -80,13 +79,7 @@ export class Store {
   }
 
   async tree(account: Account): Promise<Tree> {
-    const path = join(await this.workspace(account), "tree.json");
-    try {
-      return parseTree(JSON.parse(await readFile(path, "utf8")));
-    } catch (err) {
-      if (err instanceof ProductError) throw err;
-      return emptyTree();
-    }
+    return this.readTree(await this.workspace(account));
   }
 
   async createGoal(account: Account, title: string, aim: string, outline: string): Promise<Tree> {
@@ -155,12 +148,7 @@ export class Store {
   }
 
   private async readTree(workspace: string): Promise<Tree> {
-    try {
-      return parseTree(JSON.parse(await readFile(join(workspace, "tree.json"), "utf8")));
-    } catch (err) {
-      if (err instanceof ProductError) throw err;
-      return emptyTree();
-    }
+    return parseTree(JSON.parse(await readFile(join(workspace, "tree.json"), "utf8")));
   }
 
   private async persist(workspace: string, tree: Tree): Promise<void> {
@@ -169,11 +157,6 @@ export class Store {
     await writeFile(join(workspace, "goal.md"), goalsMarkdown(checked), { mode: 0o600 });
     const buildsDir = join(workspace, "builds");
     await mkdir(buildsDir, { recursive: true, mode: 0o700 });
-    const keep = new Set(checked.builds.map((b) => `${b.id}.json`));
-    const { readdir } = await import("node:fs/promises");
-    for (const name of await readdir(buildsDir).catch(() => [])) {
-      if (!keep.has(name)) await rm(join(buildsDir, name), { force: true });
-    }
     for (const build of checked.builds) {
       const skills = build.blockIds.map((id) => skillById(checked, id));
       await writeJson(join(buildsDir, `${build.id}.json`), {
@@ -220,11 +203,9 @@ export class Store {
     } catch {
       await writeFile(readingsSty, await readFile(join(TEMPLATE, "learn.sty")));
     }
-    try {
-      await readFile(join(dest, "tree.json"));
-    } catch {
-      await writeFile(join(dest, "tree.json"), await readFile(join(TEMPLATE, "tree.json")), { mode: 0o600 });
-    }
+    await writeFile(join(dest, "tree.json"), await readFile(join(TEMPLATE, "tree.json")), { mode: 0o600, flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== "EEXIST") throw err;
+    });
     try {
       await readFile(join(dest, "goal.md"));
     } catch {

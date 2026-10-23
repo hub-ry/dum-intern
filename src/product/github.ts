@@ -61,7 +61,7 @@ export async function gistMatches(login: string, code: string): Promise<GitHubUs
   const gists = await res.json() as Gist[];
   if (!Array.isArray(gists)) return null;
   for (const gist of gists) {
-    const file = gist.files?.["dum-login"] ?? gist.files?.["dum-login.txt"];
+    const file = gist.files?.["dum-login"];
     if (!file) continue;
     let text = file.content ?? "";
     if ((file.truncated || !text) && file.raw_url) {

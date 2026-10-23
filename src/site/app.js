@@ -74,12 +74,12 @@ function draw() {
     tabs(),
   );
   if (state.tab === "goals") drawGoals();
+  else if (state.tab === "folder") drawFolder();
   else if (!g) view.append(el("p", {}, "Set a goal first."));
   else if (state.tab === "tree") drawTree();
   else if (state.tab === "read") drawRead();
   else if (state.tab === "build") drawBuild();
   else if (state.tab === "hints") drawHints();
-  else drawFolder();
 }
 
 function drawLogin() {
@@ -132,7 +132,7 @@ async function finishLogin(event) {
 function drawGoals() {
   const list = el("ul", { class: "hint-list" });
   for (const g of state.tree.goals) {
-    list.append(el("li", {}, el("button", { type: "button", onclick: () => { state.goalId = g.id; state.tab = "tree"; draw(); } }, g.title), ` — ${g.aim}`));
+    list.append(el("li", {}, el("button", { type: "button", onclick: () => { selectGoal(g.id); state.tab = "tree"; draw(); } }, g.title), ` - ${g.aim}`));
   }
   view.append(
     el("h1", {}, "Goals"),
@@ -150,6 +150,12 @@ function drawGoals() {
   );
 }
 
+function selectGoal(id) {
+  state.goalId = id;
+  state.skillId = null;
+  state.stack = [];
+}
+
 async function createGoal(event) {
   event.preventDefault();
   const body = {
@@ -161,7 +167,7 @@ async function createGoal(event) {
   try {
     const data = await api("/api/goals", { method: "POST", body: JSON.stringify(body) });
     state.tree = data.tree;
-    state.goalId = data.tree.goals[0]?.id ?? null;
+    selectGoal(data.tree.goals[0]?.id ?? null);
     state.tab = "tree";
     setStatus("Tree is ready. Read a block, or swear one you already know.");
     draw();
@@ -373,10 +379,12 @@ async function saveRoot(event) {
   setStatus("Pointing Dum at that folder…");
   try {
     const data = await api("/api/root", { method: "POST", body: JSON.stringify({ root: event.target.root.value }) });
+    selectGoal(null);
     state.root = data.root;
     state.path = data.path;
     const workspace = await api("/api/workspace");
     state.tree = workspace.tree;
+    selectGoal(state.tree.goals[0]?.id ?? null);
     setStatus("That folder is your Dum now.");
     draw();
   } catch (err) {
@@ -388,11 +396,13 @@ async function logout() {
   await api("/api/logout", { method: "POST", body: "{}" });
   state.me = null;
   state.tree = null;
+  selectGoal(null);
   draw();
   setStatus("");
 }
 
 async function boot() {
+  selectGoal(null);
   const me = await api("/api/me");
   state.oauth = me.oauth;
   state.me = me.account;
@@ -401,7 +411,7 @@ async function boot() {
   const workspace = await api("/api/workspace");
   state.tree = workspace.tree;
   state.path = workspace.account.path;
-  state.goalId = state.goalId && state.tree.goals.some((g) => g.id === state.goalId) ? state.goalId : state.tree.goals[0]?.id ?? null;
+  selectGoal(state.tree.goals[0]?.id ?? null);
   draw();
 }
 
