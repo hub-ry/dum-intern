@@ -5,99 +5,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#1b1733">
   <title>how it works — dum intern</title>
-  <meta name="description" content="How Dum works today: a private workshop where you study one idea, try it, teach it to Dum, and read back a verified creation.">
+  <meta name="description" content="Set a goal, read a block to unlock it, or swear you know it, then stack unlocked blocks into a build.">
   <link rel="stylesheet" href="/site/site.css">
   <link rel="icon" type="image/png" href="/site/favicon.png">
-  <link rel="apple-touch-icon" href="/site/favicon.png">
 </head>
 <body>
-
 <a class="skip-link" href="#main">Skip to content</a>
-
 <!--NAV-->
-
 <main id="main" class="page">
   <h1>How it works</h1>
+  <p class="page-lede">Dum is a skill tree for one goal at a time. You unlock a block by reading it. You build by stacking the blocks you unlocked.</p>
 
-  <p class="page-lede">Dum is a small intern you teach. You learn one idea, explain it in your own words, and Dum turns your explanation into a creation you can read back. This page describes what exists today, nothing more.</p>
+  <h2>Sign in</h2>
+  <p>Sign in from <a href="/app">your Dum</a> with your GitHub username. Dum gives you a code. Put that code, alone, in a public gist whose file is named <code>dum-login</code>, then check it. That proves the account is yours. Delete the gist afterwards. If GitHub OAuth is configured on hub, the GitHub button is there too.</p>
 
-  <ul class="toc" aria-label="On this page">
-    <li><a href="#public">What's public</a></li>
-    <li><a href="#lessons">Lessons</a></li>
-    <li><a href="#loop">The loop</a></li>
-    <li><a href="#creation">What a creation is</a></li>
-    <li><a href="#verification">Verification</a></li>
-    <li><a href="#runtime">Runtime</a></li>
-    <li><a href="#model">Model access</a></li>
-    <li><a href="#privacy">Privacy</a></li>
-    <li><a href="#schedules">Schedules</a></li>
-  </ul>
+  <h2>The folder</h2>
+  <p>Each account has a workspace on hub. The root is a folder named <code>dum</code> unless you assign another one from the Folder tab. On hub, the owner can point Dum at any directory under their home directory.</p>
+  <pre><code>dum/
+  goal.md
+  tree.json
+  readings/     one learn-format assignment per block
+  builds/       each stack you saved</code></pre>
+  <p>The base of that folder is <code>template/dum</code> in <a href="https://github.com/hub-ry/dum-intern">hub-ry/dum-intern</a>. Fork the repo if you want your own copy in git. The site reads and writes the folder it has on hub. It does not keep a second copy of the tree.</p>
 
-  <h2 id="public">What's public and what isn't</h2>
-  <p>Dum's workshop runs on its owner's machine, a host we call the hub. That's where lessons, teaching and creations live. It isn't open to the public, and this site has no login or workshop prompts.</p>
-  <p>What you can read here is the project itself and one <a href="/demo/">verified example creation</a>. The example came from sample teaching about loops and conditions. It shows what Dum produces. It isn't a record of anyone's learning progress.</p>
+  <h2>Goals and the tree</h2>
+  <p>Name a goal and say what you want to be able to build. Leave the outline empty and Dum drafts five blocks: what this is, the smallest piece, checking it by hand, the next piece, and stacking the pieces. Or write the blocks yourself, one per line, indenting a child with two spaces.</p>
 
-  <h2 id="lessons">Lessons</h2>
-  <p>The guided lessons are deliberately small, and there are only a few right now:</p>
-  <ul>
-    <li>Visiting every item with <code>for...of</code></li>
-    <li>Choosing with <code>if</code> and <code>else</code></li>
-    <li>Loops and conditions together</li>
-  </ul>
-  <p>Materials and reasoning exercises sit together in the study zone. Predict a result, check it, and try again with another example; writing syntax is optional. You can record other teaching too, but the guided path is these three ideas.</p>
+  <h2>Readings</h2>
+  <p>Each block is a LaTeX article with <code>\usepackage{learn}</code>, the same style as <a href="https://learn.ryhub.dev/">learn.ryhub.dev</a>. You read the PDF inside your login. Reaching the last page unlocks the block. There is no quiz and nothing to submit.</p>
+  <p>Hub does not write the paper and does not compile it. Open the Dum folder in Cursor and ask it to write the paper for that block. The <code>dum-paper</code> skill in this repo does it on your machine, with your Cursor account, then you commit the PDF. Until that file is in <code>readings/pdf/</code>, the block has nothing to read.</p>
 
-  <h2 id="loop">The loop</h2>
-  <ol class="steps">
-    <li><strong>Study</strong> Read one short lesson on one idea.</li>
-    <li><strong>Try it</strong> Predict what happens in the study zone, inspect the feedback, and try again.</li>
-    <li><strong>Teach Dum</strong> Write down the idea in your own words. This text is what gets sent to the model.</li>
-    <li><strong>Creation</strong> Dum builds a small, self-contained interactive page from your teaching, then verifies it.</li>
-    <li><strong>Correction</strong> Explain what to change and request another build. A revised version never replaces the original; failed verification stays visible.</li>
-    <li><strong>Revisit</strong> Come back later and read the creation again. Every job has a stable deep link in the private workshop.</li>
-  </ol>
+  <h2>Swearing</h2>
+  <p>If you already know a block, swear it in a sentence. It unlocks without the reading, including a block whose parent is still locked. The tree marks it sworn, so a stack can tell a block you read from a block you skipped.</p>
 
-  <h2 id="creation">What a creation is</h2>
-  <p>A creation is a self-contained HTML page generated from your teaching and goal context, with output constrained by a JSON schema. The host never executes its JavaScript. An isolated browser verifier exercises it and captures screenshots. The reader pairs those images with captions and matching source excerpts. In the private workshop, you can also use the demo inside a sandboxed frame on a separate origin.</p>
-  <p>The public example is exactly this: six screenshots from the corrected creation of one job, with the captions and code the backend recorded. Reading saved pages makes no model calls.</p>
+  <h2>Builds and hints</h2>
+  <p>A build is a name plus unlocked blocks in an order you choose. A locked block cannot be stacked. Hints lists two things: readings you can open now (a locked block whose parent is unlocked, or a root), and stacks made from the unlocked chains you already have.</p>
 
-  <h2 id="verification">Verification</h2>
-  <p>Each creation is checked with a browser automation script inside an isolated Docker container. The container has no network, a read-only filesystem and no privileges. The script checks two initial renders agree, then performs the declared clicks and input changes and compares what it sees with what the creation claims. It uses the browser's real clocks and randomness, without replacing them. The screenshots you read were captured during that run.</p>
-  <div class="note">
-    <p>This isolation is about offline execution and keeping generated code away from the host. It's not a universal security guarantee, and the generated page should still be treated as untrusted code.</p>
-  </div>
-
-  <h2 id="runtime">Runtime</h2>
-  <p>The workshop runs on Linux with Node 24, TypeScript, tsx, zod, and util-linux <code>flock</code> for exclusive ownership of private records. Its default local setup listens on two separate origins:</p>
-  <ul>
-    <li><code>127.0.0.1:8770</code> serves the workshop app and its API, with authentication whenever a token is set.</li>
-    <li><code>127.0.0.1:8771</code> serves finished artifacts, such as screenshots and the creation's own page.</li>
-  </ul>
-  <p>Private-network access requires a workshop token. Neither port is exposed by this public site. The public site uses a separate, dependency-free static server.</p>
-
-  <h2 id="model">Model access</h2>
-  <p>Builds use the Claude Code command line tool with an authenticated subscription. It's invoked in print mode with no tools, no hooks and no MCP servers, and asked for output matching a strict JSON schema. With that setup no API key is required. The example creation was generated by <code>claude-fable-5-1</code>. Teaching Dum doesn't retrain any model.</p>
-
-  <h2 id="privacy">Privacy</h2>
-  <ul>
-    <li>See the <a href="https://github.com/hub-ry/dum-intern#run-the-workshop" rel="noreferrer">workshop privacy and execution boundaries</a> for where private records are stored and what generation sends to the configured Claude CLI provider.</li>
-    <li>Verification runs offline in the container.</li>
-    <li>Reading saved creations, here or in the workshop, makes no model calls.</li>
-    <li>No account is needed to read this site. The jumping game keeps no score history. Cloudflare handles public delivery.</li>
-  </ul>
-
-  <h2 id="schedules">Schedules</h2>
-  <p>A goal can have an optional interval schedule. It queues new creations from your existing teaching while the hub is running, even when your laptop is closed. Scheduled builds use the model just like manual builds. Leave scheduling off to build only when you press Build now.</p>
-
-  <p class="reader-footnote">Code and the full history of changes are in the <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source repository</a>. For the thinking behind the learn-then-teach order, see the <a href="/philosophy">philosophy</a> page.</p>
+  <h2>Where it runs</h2>
+  <p>The site and the folders live on hub. That is storage and the reader. Writing a paper spends the Cursor account of whoever has the folder open. Nothing in the folder is public unless you put the folder in a public repo yourself.</p>
 </main>
-
 <footer class="site-footer">
   <a href="/" class="footer-brand">dum intern</a>
+  <a href="/app">your dum</a>
   <a href="/docs">how it works</a>
-  <a href="/philosophy">philosophy</a>
-  <a href="/demo/">example</a>
   <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
 </footer>
-
 </body>
 </html>
