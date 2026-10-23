@@ -57,4 +57,4 @@ tectonic --outdir readings/pdf readings/<id>.tex
 
 The PDF must land at the `pdf` path from the brief. If tectonic is missing, leave the `.tex` in place and say so. Do not SSH to hub, do not call dumintern.com, and do not ask the Dum server to compile it.
 
-When the PDF exists, tell the user the path and that opening it on dumintern.com to the last page unlocks the block.
+When the PDF exists, tell the user its path and point them to the [project README's workspace instructions](../../README.md#workspace-and-hosting) for making it available to the site.

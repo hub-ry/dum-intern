@@ -17,7 +17,7 @@ npm start
 
 Open `http://127.0.0.1:8074/`, then **Your Dum**. `npm run dev` watches the product server. PDF.js is installed with the app; no sibling repository is required.
 
-Sign in with your GitHub username and a one-time public gist named `dum-login`, following the instructions in the app. Delete the gist after signing in. GitHub OAuth is optional: set both `DUM_GITHUB_CLIENT_ID` and `DUM_GITHUB_CLIENT_SECRET`, and register `/auth/github/callback` on your app's public origin as the callback URL.
+Sign in with your GitHub username and a one-time public gist named `dum-login`, following the instructions in the app. Check the gist in the same browser that requested the code, then delete it after signing in. GitHub OAuth is optional: set both `DUM_GITHUB_CLIENT_ID` and `DUM_GITHUB_CLIENT_SECRET`, and register `/auth/github/callback` on your app's public origin as the callback URL.
 
 ## Workspace and hosting
 
