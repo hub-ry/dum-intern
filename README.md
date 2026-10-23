@@ -1,61 +1,32 @@
 # dum-intern
 
-- Dum is a learning companion: study an idea, try it, and teach Dum what you understood. It builds a working HTML/JavaScript creation from your teaching, then presents screenshots, code, and a flip-through explanation.
-- Runs on hub, even when the laptop closes. Reach it through Discord, the private web reader, or the `dum` CLI and MCP tools.
-- Each goal keeps its own context, study materials, teaching, attempts, and creations. Corrections make a new version without replacing the original.
-- Teaching changes Dum's context, not the model's weights. Attempts and teaching are separate records, not proof of mastery. Agents need your approval to record your words, unless they quote your Discord teaching verbatim.
-- Discord chat routes work to a tutor, librarian, or engineer with scoped tools. Optional services watch internship boards and stream hub's browser into Discord.
-
-## How it works
-
-```mermaid
-flowchart LR
-  D[Discord] --> B[Bot and Dum chat]
-  B --> T[Tutor / librarian / engineer]
-  B --> A[Workshop API on hub]
-  T --> M[dum MCP tools]
-  C[CLI / external agents] --> M
-  M --> A
-  W[Private web reader] --> A
-  A --> S[(Private records and artifacts)]
-  A --> G[Claude Code generation]
-  G --> V[Offline Docker / Playwright verification]
-  V --> S
-  S --> A
-  A --> W
-  A --> B
-```
-
-- Builds must pass isolated interaction checks with observed output and real screenshots. Failed builds stay failed; generated JavaScript never runs in the host's Node process.
-- The workshop owns its state; Discord and MCP use its API. Finished demos run in sandboxed frames on a separate artifact origin.
-- Hub's BrowserOS screen can be watched or taken over through private noVNC. Run `dum live pause` before showing anything private and `dum live resume` afterward.
+- A skill tree for what you want to build. [dumintern.com](https://dumintern.com/) stores your goals, readings, unlocked blocks, and saved builds in a workspace folder.
+- Set a goal and outline its blocks, or start with the default five-block tree. Read a block's PDF to the last page to unlock it. If you already know it, swear that in a sentence instead.
+- A build is an ordered stack of unlocked blocks. Saving one records the stack; it doesn't generate a program. Read and sworn are unlock records, not measurements of mastery.
+- Teaching papers are written and compiled locally in Cursor with the [`dum-paper` skill](skills/dum-paper/SKILL.md). The server writes reading briefs and serves PDFs you put in the workspace. It doesn't generate or compile papers.
+- This repo contains the public web product, its workspace template, and its Cursor skill. No Discord bot, private workshop, internship automation, or CLI/MCP bridge.
 
 ## Run locally
 
-Requires Linux with `/proc`, Node 24, `flock`, Docker, and an authenticated Claude Code CLI. The service user needs Docker access; builds use CLI authentication, not a separate model API key.
+Requires Node 24 or newer and `pdfinfo` from Poppler (`sudo apt install poppler-utils` on Ubuntu). Tectonic is needed on the machine where Cursor compiles papers, not on the server.
 
 ```sh
 npm ci
-claude auth status
-docker build -f src/workshop/publisher.Dockerfile -t dum-workshop-browser:1 .
 npm start
 ```
 
-Open `http://127.0.0.1:8770/`. Artifacts use `http://127.0.0.1:8771/`. `npm run dev` watches backend source.
+Open `http://127.0.0.1:8074/`, then **Your Dum**. `npm run dev` watches the product server. PDF.js is installed with the app; no sibling repository is required.
 
-- State lives in `~/.local/state/dum-workshop` by default; override with `DUM_WORKSHOP_HOME`. Only one process may own a workshop home.
-- For private-network access, set `DUM_WORKSHOP_HOST` and a long random `DUM_WORKSHOP_TOKEN`. Non-loopback startup requires a token. Never expose the workshop or artifact ports through a public tunnel; artifact links are not authenticated.
-- Builds send goal context, teaching, and correction data to the CLI provider. Verification runs offline in Docker. Keep secrets out of context.
-- User-service definitions are in [`deploy/`](deploy/). The workshop reads `~/.config/dum-workshop/environment`; the Discord bot reads `~/.config/dum-discord/environment` and a separate token file. Keep credential files mode 600.
+Sign in with your GitHub username and a one-time public gist named `dum-login`, following the instructions in the app. Delete the gist after signing in. GitHub OAuth is optional: set both `DUM_GITHUB_CLIENT_ID` and `DUM_GITHUB_CLIENT_SECRET`, and register `/auth/github/callback` on your app's public origin as the callback URL.
 
-## Use it
+## Workspace and hosting
 
-- In Discord, start with `/dum goal` in the lobby. Each goal gets a private channel. Mention Dum to chat, or use `/dum teach`, `/dum tried`, `/dum build`, `/dum correct`, `/dum progress`, and `/dum schedule`.
-- `dum status` shows the overview. `dum mcp install` registers the tools with hub's agents; `dum mcp laptop` prints the Mac setup.
-- Ask Dum for a code or number from your email in plain words ("Josh just emailed me a number"), or run `dum code "WHAT" [MINUTES]`. The `mailcode` agent reads Purdue Outlook through two read-only tools (`list_mail`, `read_mail`) using the Brightspace Microsoft sign-in, and returns only the value and its sender.
-- Experimental code ledger for applications: the `code_request` tool appends the internship and the email to watch for to `~/internship/applications/codes/requests.md`. `dum-codes.service` (`dum codes watch`) runs the mail agent on mail arriving after each request, then writes the value to `codes.md`, which `code_result` reads. Each side writes only its own file.
-- Hub and laptop agents exchange scoped tasks through `~/handoff`. Teaching and attempt requests from agents arrive in Discord for approval.
-- [dumintern.com](https://dumintern.com/) is the public product site. [notes.ryhub.dev](https://notes.ryhub.dev/) contains explicitly published notes; private teaching, attempts, and context are never automatically exported.
+- The default state directory is `~/.local/state/dum-product`. Each GitHub account gets its own directory under `users/<github-id>/`, with an account record and a `dum/` workspace.
+- The workspace contains `goal.md`, `tree.json`, `learn.sty`, `readings/`, and `builds/`. [`template/dum`](template/dum) is the starting folder. The Folder tab selects another root; only the hub owner can select an absolute path under their home directory.
+- Cursor writes each paper from `readings/<block-id>.brief.json`, using the shared LaTeX style. Put the compiled PDF at the brief's `pdf` path in the **server's** workspace. The site does not sync a separate local copy or upload PDFs for you.
+- Workspaces aren't published automatically. Publishing your folder in a public repo is your choice. Back up the state directory, including `session.key`; the app creates that key on first startup.
+- `HOST` defaults to `127.0.0.1` and must be loopback. `PORT` defaults to `8074`. `DUM_PRODUCT_STATE` overrides the state directory; `DUM_PDFJS` optionally overrides the directory containing PDF.js's `pdf.min.mjs` and `pdf.worker.min.mjs`.
+- [`deploy/dum-product.service`](deploy/dum-product.service) is the hub systemd unit. Adjust its user and paths for another machine. Terminate HTTPS at a reverse proxy or tunnel pointing to the loopback port.
 
 ## Development
 
@@ -64,9 +35,8 @@ npm run typecheck
 npm test
 ```
 
-- `src/workshop`: state, API, reader, generation, and verification.
-- `src/discord`, `src/mcp`, `src/cli.ts`: chat, approvals, notifications, and agent access.
-- `src/context`, `src/shared`: context sync, shared approvals, and handoffs.
-- `src/live`, `src/internship`: screen streaming and internship watch.
-- `src/site`, `src/public`: public site and static hosting.
-- [Product plan](docs/workshop-plan.md) · [Demo walkthrough](docs/demo.md) · [Notes publishing guide](.claude/skills/dum-publish/SKILL.md)
+- `src/product/`: GitHub sign-in, workspace storage, skill-tree rules, and HTTP server.
+- `src/site/`: public pages and the browser workspace, including the PDF reader.
+- `template/dum/`: files copied into a new workspace.
+- `skills/dum-paper/`, `.cursor/skills/`, `.cursor-plugin/`: Cursor paper-writing skill and discovery metadata.
+- CI installs dependencies, typechecks the server, and runs the product tests. For UI changes, exercise the app in a browser too.

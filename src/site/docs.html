@@ -3,52 +3,66 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#1b1733">
-  <title>how it works — dum intern</title>
-  <meta name="description" content="Set a goal, read a block to unlock it, or swear you know it, then stack unlocked blocks into a build.">
-  <link rel="stylesheet" href="/site/site.css">
+  <meta name="theme-color" content="#fffffc">
+  <title>How it works — dum intern</title>
+  <meta name="description" content="Goals, readings, unlocked blocks, and builds. How to use your Dum folder.">
+  <link rel="stylesheet" href="/site/site.css?v=paper-1">
   <link rel="icon" type="image/png" href="/site/favicon.png">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <!--NAV-->
 <main id="main" class="page">
-  <h1>How it works</h1>
-  <p class="page-lede">Dum is a skill tree for one goal at a time. You unlock a block by reading it. You build by stacking the blocks you unlocked.</p>
+  <header class="document-title">
+    <h1>How it works</h1>
+    <p>Goals, readings, and things you can build.</p>
+  </header>
 
-  <h2>Sign in</h2>
-  <p>Sign in from <a href="/app">your Dum</a> with your GitHub username. Dum gives you a code. Put that code, alone, in a public gist whose file is named <code>dum-login</code>, then check it. That proves the account is yours. Delete the gist afterwards. If GitHub OAuth is configured on hub, the GitHub button is there too.</p>
-
-  <h2>The folder</h2>
-  <p>Each account has a workspace on hub. The root is a folder named <code>dum</code> unless you assign another one from the Folder tab. On hub, the owner can point Dum at any directory under their home directory.</p>
+  <h2>1. Open your folder</h2>
+  <ul>
+    <li>Open <a href="/app">your Dum</a> and enter your GitHub username.</li>
+    <li>Put the login code, alone, in a public gist whose file is named <code>dum-login</code>. Check it to prove the account is yours, then delete the gist. If GitHub OAuth is configured, you can use that instead.</li>
+    <li>Your workspace lives on hub. Its root is <code>dum</code> unless you choose another one in the Folder tab. The hub owner can assign a directory under their home folder.</li>
+  </ul>
   <pre><code>dum/
   goal.md
   tree.json
-  readings/     one learn-format assignment per block
-  builds/       each stack you saved</code></pre>
-  <p>The base of that folder is <code>template/dum</code> in <a href="https://github.com/hub-ry/dum-intern">hub-ry/dum-intern</a>. Fork the repo if you want your own copy in git. The site reads and writes the folder it has on hub. It does not keep a second copy of the tree.</p>
+  readings/     one assignment per block
+  builds/       each stack you save</code></pre>
+  <p>The starting folder is <a href="https://github.com/hub-ry/dum-intern/tree/main/template/dum"><code>template/dum</code></a>. Fork the repo to keep it in git. The site reads and writes the folder on hub, not a second copy of the tree.</p>
 
-  <h2>Goals and the tree</h2>
-  <p>Name a goal and say what you want to be able to build. Leave the outline empty and Dum drafts five blocks: what this is, the smallest piece, checking it by hand, the next piece, and stacking the pieces. Or write the blocks yourself, one per line, indenting a child with two spaces.</p>
+  <h2>2. Lay out a goal</h2>
+  <ul>
+    <li>Name the goal and describe what you want to be able to build.</li>
+    <li>Leave the outline empty for a five-block starter tree, or write the blocks yourself, one per line. Two spaces indent a child.</li>
+    <li>Hints shows which readings are available next and which unlocked chains you can stack now.</li>
+  </ul>
 
-  <h2>Readings</h2>
-  <p>Each block is a LaTeX article with <code>\usepackage{learn}</code>, the same style as <a href="https://learn.ryhub.dev/">learn.ryhub.dev</a>. You read the PDF inside your login. Reaching the last page unlocks the block. There is no quiz and nothing to submit.</p>
-  <p>Hub does not write the paper and does not compile it. Open the Dum folder in Cursor and ask it to write the paper for that block. The <code>dum-paper</code> skill in this repo does it on your machine, with your Cursor account, then you commit the PDF. Until that file is in <code>readings/pdf/</code>, the block has nothing to read.</p>
+  <h2>3. Read a block</h2>
+  <ul>
+    <li>Each reading is a LaTeX article with <code>\usepackage{learn}</code>, the format used at <a href="https://learn.ryhub.dev/">learn.ryhub.dev</a>.</li>
+    <li>Open your Dum folder in Cursor. Use the repo's <code>dum-paper</code> skill to write and compile the paper on your machine, using your Cursor account.</li>
+    <li>Put the PDF in <code>readings/pdf/</code>. Until it is there, the block has nothing to read. Hub doesn't write or compile the paper.</li>
+    <li>Read the PDF inside your login. Reaching the last page unlocks the block. There is no quiz or work to submit.</li>
+  </ul>
 
-  <h2>Swearing</h2>
-  <p>If you already know a block, swear it in a sentence. It unlocks without the reading, including a block whose parent is still locked. The tree marks it sworn, so a stack can tell a block you read from a block you skipped.</p>
+  <h2>4. Skip what you already know</h2>
+  <p>Swear a block in a sentence. It unlocks without the reading, even if its parent is still locked. The tree marks it sworn so you can distinguish it from a block you read.</p>
 
-  <h2>Builds and hints</h2>
-  <p>A build is a name plus unlocked blocks in an order you choose. A locked block cannot be stacked. Hints lists two things: readings you can open now (a locked block whose parent is unlocked, or a root), and stacks made from the unlocked chains you already have.</p>
+  <h2>5. Stack a build</h2>
+  <p>Give the build a name. Select unlocked blocks and put them in the order you want. Locked blocks cannot be stacked. Saving a build records the stack; it doesn't generate a finished program.</p>
 
-  <h2>Where it runs</h2>
-  <p>The site and the folders live on hub. That is storage and the reader. Writing a paper spends the Cursor account of whoever has the folder open. Nothing in the folder is public unless you put the folder in a public repo yourself.</p>
+  <h2>Storage and privacy</h2>
+  <ul>
+    <li>The site, account workspaces, and reader run on hub. Paper generation runs in your own Cursor session.</li>
+    <li>Your folder is not published automatically. Putting it in a public repo is your choice.</li>
+    <li>Read or sworn describes how a block was unlocked, not a measurement of mastery.</li>
+  </ul>
 </main>
 <footer class="site-footer">
-  <a href="/" class="footer-brand">dum intern</a>
-  <a href="/app">your dum</a>
-  <a href="/docs">how it works</a>
-  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+  <a href="/">dum intern</a>
+  <a href="/app">Your Dum</a>
+  <a href="https://github.com/hub-ry/dum-intern">Source</a>
 </footer>
 </body>
 </html>

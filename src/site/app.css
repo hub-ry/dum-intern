@@ -1,17 +1,17 @@
-.app-main { width: min(960px, 100% - 2 * var(--gutter)); margin: 0 auto; padding: 28px 0 72px; }
+.app-main { width: min(var(--measure), calc(100% - 2 * var(--gutter))); margin: 0 auto; padding: 44px 0 72px; }
 .app-status { min-height: 1.4em; color: var(--amber); }
 .app-status.error { color: var(--pink); }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; padding: 0; list-style: none; }
 .tabs button, .chip, .block-btn {
   font: inherit; color: var(--subtle); background: var(--surface); border: 1px solid var(--line);
-  border-radius: 999px; min-height: 40px; padding: 0 14px; cursor: pointer;
+  border-radius: 0; min-height: 40px; padding: 0 14px; cursor: pointer;
 }
-.tabs button[aria-selected="true"] { color: #1b1733; background: var(--amber); border-color: var(--amber); }
+.tabs button[aria-selected="true"] { color: var(--text); background: var(--surface); border-color: var(--text); font-weight: bold; }
 .who { color: var(--muted); margin: 0 0 8px; }
 label { display: block; margin: 14px 0 6px; color: var(--subtle); }
 input, textarea {
   width: min(100%, 640px); font: inherit; color: var(--text); background: var(--bg-deep);
-  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 0; padding: 10px 12px;
 }
 textarea { min-height: 110px; resize: vertical; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -25,7 +25,7 @@ textarea { min-height: 110px; resize: vertical; }
 .stack { list-style: none; padding: 0; }
 .stack li { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .reader-pages { display: flex; flex-direction: column; gap: 16px; align-items: center; }
-.reader-pages canvas { max-width: 100%; height: auto; background: white; border-radius: 4px; }
+.reader-pages canvas { max-width: 100%; height: auto; background: white; }
 .hint-list { padding-left: 1.1rem; }
 .hint-list button { font: inherit; color: var(--cyan); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
 .path { font-family: var(--mono); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }

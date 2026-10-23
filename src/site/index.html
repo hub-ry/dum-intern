@@ -3,133 +3,63 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#1b1733">
+  <meta name="theme-color" content="#fffffc">
   <title>dum intern</title>
-  <meta name="description" content="Set a goal, read a block to unlock it, or swear you know it, then stack unlocked blocks into a build.">
-  <link rel="stylesheet" href="/site/site.css">
+  <meta name="description" content="A skill tree for what you want to build. Read a block, unlock it, and stack what you know.">
+  <link rel="stylesheet" href="/site/site.css?v=paper-1">
   <link rel="icon" type="image/png" href="/site/favicon.png">
-  <link rel="apple-touch-icon" href="/site/favicon.png">
-  <script type="module" src="/site/game.js"></script>
-  <script defer src="/site/wizard.js"></script>
 </head>
-<body class="home-page">
-
+<body>
 <a class="skip-link" href="#main">Skip to content</a>
-
 <!--NAV-->
+<main id="main" class="page">
+  <header class="document-title">
+    <h1>dum intern</h1>
+    <p>A skill tree for what you want to build.</p>
+    <p class="document-links"><a href="/app">Open your Dum</a> · <a href="/docs">How it works</a> · <a href="https://github.com/hub-ry/dum-intern">Source</a></p>
+  </header>
 
-<main id="main" class="home-main">
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-copy">
-      <p class="hero-eyebrow"><img src="/site/dum.svg" alt="">a small intern you teach</p>
-      <h1 id="hero-title">A skill tree you unlock by reading.</h1>
-      <p class="hero-lede">Set a goal. Dum lays out the blocks. Read the assignment to unlock one, or swear you already know it. When you build, stack the blocks you unlocked, in the order you want.</p>
-      <div class="hero-actions">
-        <a class="button button-primary" href="/app">Sign in with GitHub</a>
-        <a class="button button-secondary" href="/docs">How it works</a>
-      </div>
-      <p class="hero-caption">Your Dum is a folder. The default name is dum. You can point it at another root.</p>
-    </div>
+  <p>Pick a goal. Break it into things to learn. Each block has a reading; finishing it unlocks the block. A build is a stack of the blocks you've unlocked.</p>
 
-    <figure class="hero-scene" aria-hidden="true">
-      <svg viewBox="0 0 640 440" width="640" height="440" focusable="false">
-        <defs>
-          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#1d1840"/>
-            <stop offset=".55" stop-color="#3b2d6b"/>
-            <stop offset=".85" stop-color="#7a4d86"/>
-            <stop offset="1" stop-color="#b8688f"/>
-          </linearGradient>
-          <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#f2a2c4" stop-opacity=".0"/>
-            <stop offset="1" stop-color="#f2a2c4" stop-opacity=".35"/>
-          </linearGradient>
-        </defs>
-        <rect width="640" height="440" fill="url(#sky)"/>
-        <rect y="220" width="640" height="140" fill="url(#glow)"/>
-
-        <g fill="#f0c266">
-          <rect x="88" y="54" width="3" height="3"/>
-          <rect x="212" y="92" width="2" height="2"/>
-          <rect x="331" y="41" width="3" height="3"/>
-          <rect x="462" y="78" width="2" height="2"/>
-          <rect x="551" y="36" width="3" height="3"/>
-          <rect x="146" y="150" width="2" height="2"/>
-          <rect x="606" y="121" width="2" height="2"/>
-        </g>
-        <g fill="#8fdcea">
-          <rect x="40" y="118" width="2" height="2"/>
-          <rect x="268" y="138" width="2" height="2"/>
-          <rect x="398" y="112" width="3" height="3"/>
-          <rect x="513" y="164" width="2" height="2"/>
-        </g>
-        <g fill="#f2a2c4">
-          <rect x="176" y="24" width="2" height="2"/>
-          <rect x="432" y="150" width="2" height="2"/>
-          <rect x="587" y="190" width="2" height="2"/>
-        </g>
-
-        <circle cx="498" cy="104" r="30" fill="#f6e3cf"/>
-        <circle cx="488" cy="96" r="30" fill="#2b2355"/>
-
-        <polygon fill="#3a2f6a" points="0,440 0,300 58,250 112,286 176,196 236,262 282,224 332,284 380,236 440,296 500,232 560,286 604,250 640,282 640,440"/>
-        <polygon fill="#4c3a78" points="0,440 0,342 48,312 106,352 150,300 198,334 262,268 300,316 356,282 412,334 466,300 522,346 578,310 640,344 640,440"/>
-        <polygon fill="#f2a2c4" opacity=".55" points="262,268 274,288 250,290"/>
-        <polygon fill="#f2a2c4" opacity=".55" points="356,282 366,298 346,298"/>
-        <polygon fill="#5f4a86" points="0,440 0,372 72,352 128,388 182,344 226,380 286,330 346,386 406,348 460,392 520,352 590,398 640,370 640,440"/>
-        <polygon fill="#6a5590" points="0,440 0,404 64,392 130,422 196,386 266,418 330,392 392,428 452,396 520,432 584,404 640,418 640,440"/>
-
-        <polyline points="150,386 182,344 226,380" fill="none" stroke="#8fdcea" stroke-opacity=".7" stroke-width="2" stroke-linejoin="round"/>
-
-        <image href="/site/dum.svg" x="154" y="298" width="42" height="48"/>
-        <rect x="140" y="346" width="70" height="4" fill="#3a2f6a" opacity=".6"/>
-      </svg>
-    </figure>
+  <section aria-labelledby="workflow">
+    <h2 id="workflow">1. The loop</h2>
+    <ul>
+      <li><strong>Set a goal.</strong> Say what you want to be able to build. Dum drafts the blocks, or you write them yourself.</li>
+      <li><strong>Read.</strong> Open a block's paper. Reaching the last page unlocks it.</li>
+      <li><strong>Already know it?</strong> Swear it in a sentence. The block unlocks and stays marked as sworn.</li>
+      <li><strong>Stack.</strong> Choose unlocked blocks and put them in order. Save that stack as a build.</li>
+    </ul>
   </section>
 
-  <section class="how" aria-labelledby="how-title">
-    <h2 id="how-title">One loop, start to finish</h2>
-    <ol class="steps">
-      <li><strong>Set a goal</strong> Say what you want to be able to build. Dum drafts a skill tree, or you write the blocks yourself.</li>
-      <li><strong>Read</strong> Each block has a paper in the same format as learn.ryhub.dev. You write it in Cursor. The last page unlocks it. Hub does not write or compile it.</li>
-      <li><strong>Swear</strong> If you already know a block, say so. It unlocks without the reading, and the tree marks it sworn.</li>
-      <li><strong>Stack</strong> A build is unlocked blocks in an order you choose. Hints list what to read next and what you can stack now.</li>
-    </ol>
-    <p>The workspace is a folder in your account on hub. Fork the base repo if you want the folder in git. <a href="/docs">Read the details</a>.</p>
+  <section aria-labelledby="readings">
+    <h2 id="readings">2. The readings</h2>
+    <ul>
+      <li>LaTeX articles in the same format as <a href="https://learn.ryhub.dev/">learn.ryhub.dev</a>.</li>
+      <li>You write and compile them in Cursor with the repo's <code>dum-paper</code> skill, then put the PDFs in your Dum folder. The server doesn't generate them.</li>
+      <li>No quiz or submission. Reading to the end unlocks the block; it isn't a claim of mastery.</li>
+    </ul>
   </section>
 
-  <section class="game-block" aria-labelledby="game-title">
-    <div class="game-head">
-      <h2 id="game-title">Dum, out for a run</h2>
-      <p>A small jumping game. Nothing here is saved or sent anywhere.</p>
-    </div>
-    <div class="game-section">
-      <div class="mountain-world" aria-hidden="true">
-        <span class="world-star world-star-one"></span>
-        <span class="world-star world-star-two"></span>
-        <span class="world-star world-star-three"></span>
-        <span class="mountain mountain-back"></span>
-        <span class="mountain mountain-mid"></span>
-        <span class="mountain mountain-front"></span>
-      </div>
-      <canvas data-wizard-portrait class="sprite-wizard" aria-hidden="true"></canvas>
-      <div id="game-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-      <canvas id="game-canvas" tabindex="0" role="application" aria-label="Dum's jumping game. Press Space or Enter to start, then Space to jump."></canvas>
-      <div class="game-controls">
-        <button id="game-jump" class="game-jump-btn" type="button">play</button>
-        <span class="motion-notice">motion reduced</span>
-      </div>
-    </div>
-    <p class="game-help">Click or tap the strip, or press <kbd>Space</kbd> while it has focus. The play button does the same thing. Keys only act on the game while it's focused.</p>
+  <section aria-labelledby="folder">
+    <h2 id="folder">3. Your Dum is a folder</h2>
+    <p>The goal, tree, readings, and saved builds live together. The default root is <code>dum</code>; you can choose another folder.</p>
+    <pre><code>dum/
+  goal.md
+  tree.json
+  readings/
+  builds/</code></pre>
+    <ul>
+      <li><a href="/app">Sign in with GitHub</a> to open your workspace.</li>
+      <li>Start from <a href="https://github.com/hub-ry/dum-intern/tree/main/template/dum">the folder template</a>. Fork the repo if you want it in git.</li>
+      <li>The site stores your workspace on hub. Nothing in it is published unless you put it in a public repo yourself.</li>
+    </ul>
   </section>
 </main>
-
 <footer class="site-footer">
-  <a href="/" class="footer-brand">dum intern</a>
-  <a href="/docs">how it works</a>
-  <a href="/app">your dum</a>
-  <a href="https://github.com/hub-ry/dum-intern" rel="noreferrer">source</a>
+  <span>dum intern</span>
+  <a href="/docs">How it works</a>
+  <a href="/app">Your Dum</a>
+  <a href="https://github.com/hub-ry/dum-intern">Source</a>
 </footer>
-
 </body>
 </html>

@@ -13,7 +13,7 @@ import { defaultStateDir, Store, type Account } from "./store.ts";
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PORT = Number(process.env.PORT ?? "8074");
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "site");
-const PDFJS = process.env.DUM_PDFJS?.trim() || join(process.env.HOME ?? "", "code/learn/node_modules/pdfjs-dist/build");
+const PDFJS = process.env.DUM_PDFJS?.trim() || dirname(fileURLToPath(import.meta.resolve("pdfjs-dist/build/pdf.min.mjs")));
 const COOKIE = "dum_session";
 const NAV_MARKER = "<!--NAV-->";
 
@@ -35,8 +35,6 @@ const PAGES: Record<string, string> = {
   "index.html": "index.html",
   docs: "docs.html",
   "docs.html": "docs.html",
-  philosophy: "philosophy.html",
-  "philosophy.html": "philosophy.html",
   app: "app.html",
   "app.html": "app.html",
   login: "app.html",

@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  workshop:
-    name: workshop
+  product:
+    name: product
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

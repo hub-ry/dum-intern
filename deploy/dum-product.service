@@ -18,7 +18,6 @@ Environment=HOME=/home/ryanhubbart
 Environment=HOST=127.0.0.1
 Environment=PORT=8074
 Environment=DUM_PRODUCT_STATE=/home/ryanhubbart/.local/state/dum-product
-Environment=DUM_PDFJS=/home/ryanhubbart/code/learn/node_modules/pdfjs-dist/build
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
