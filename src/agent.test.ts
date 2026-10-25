@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { runTask } from "./agent.ts";
 import { chatCompletionsUrl } from "./config.ts";
@@ -159,7 +160,31 @@ test("the maritime client uses the computers REST API", async () => {
   assert.match(calls[2].url, /\/files\?path=%2Fhome%2Fdesk%2Fwork%2Ftask\.py$/);
   assert.equal(JSON.parse(calls[3].body).mode, "watch");
   assert.match(visibleCommand("ls -la"), new RegExp(Buffer.from("ls -la").toString("base64")));
-  assert.match(OPEN_DESKTOP, /session\.log/);
+  const wrapped = visibleCommand("ls -la ~");
+  assert.match(wrapped, /bash -c/);
+  assert.doesNotMatch(wrapped, /bash -l/);
+  const setup = unquoteBashC(OPEN_DESKTOP);
+  assert.match(setup, /mkdir -p \/home\/desk\/work \/home\/desk\/opt\ntouch /);
+  assert.match(setup, /pgrep -x tail/);
+  assert.match(setup, /session\.log/);
+  assert.match(setup, /update\.code\.visualstudio\.com\/latest\/linux-x64\/stable/);
+  assert.match(setup, /\/home\/desk\/opt\/vscode/);
+  assert.doesNotMatch(setup, /pgrep -f/);
+  assert.doesNotMatch(OPEN_DESKTOP, /bash -l/);
+  execFileSync("bash", ["-n", "-c", setup], { encoding: "utf8" });
+  const lines = setup.split("\n");
+  const installer = lines.slice(lines.indexOf("#!/bin/bash"), lines.indexOf("END")).join("\n");
+  assert.match(installer, /tar -xzf/);
+  execFileSync("bash", ["-n", "-c", installer], { encoding: "utf8" });
   assert.throws(() => assertDeskPath("/etc/passwd"), /not allowed|under \/home\/desk/);
   assert.equal(assertDeskPath("/home/desk/work/task.py"), "/home/desk/work/task.py");
 });
+
+function unquoteBashC(command: string): string {
+  const prefix = "bash -c ";
+  assert.ok(command.startsWith(prefix));
+  const quoted = command.slice(prefix.length);
+  assert.equal(quoted.at(0), "'");
+  assert.equal(quoted.at(-1), "'");
+  return quoted.slice(1, -1).replaceAll("'\\''", "'");
+}

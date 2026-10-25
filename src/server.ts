@@ -43,7 +43,7 @@ export type Running = {
 export function startServer(config: Config = loadConfig()): Promise<Running> {
   const store = new Store(config.stateDir);
   const secrets = [config.llm.apiKey, config.maritime.apiKey];
-  const maritime = config.mock ? null : createMaritime(config.maritime);
+  const maritime = config.liveDesktop ? createMaritime(config.maritime) : null;
   const desktop = maritime
     ? maritimeComputer(maritime, async () => {
         const existing = store.computerId();
@@ -73,7 +73,11 @@ export function startServer(config: Config = loadConfig()): Promise<Running> {
     const path = decodeURIComponent(url.pathname);
     if (req.method === "GET" && FILES[path]) return sendFile(res, FILES[path]);
     if (req.method === "GET" && path === "/api/health") {
-      return sendJson(res, 200, { ok: true, mode: config.mock ? "mock" : "live" });
+      return sendJson(res, 200, {
+        ok: true,
+        mode: desktop ? "live" : "mock",
+        intern: config.mock ? "scripted" : "model",
+      });
     }
     if (req.method === "GET" && path === "/api/state") return sendJson(res, 200, state());
     if (req.method === "POST" && path === "/api/chat") return chat(req, res);
@@ -100,7 +104,8 @@ export function startServer(config: Config = loadConfig()): Promise<Running> {
 
   function state() {
     return {
-      mode: config.mock ? "mock" : "live",
+      mode: desktop ? "live" : "mock",
+      scripted: config.mock,
       missing: config.missing,
       model: config.llm.model,
       nodes: store.nodes().map(publicNode),
@@ -204,7 +209,10 @@ export function startServer(config: Config = loadConfig()): Promise<Running> {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : config.port;
       const url = `http://${config.host}:${port}`;
-      console.log(`dum-intern listening on ${url} (${config.mock ? `mock, missing ${config.missing.join(", ") || "keys"}` : "live"})`);
+      const label = desktop
+        ? (config.mock ? `live desktop, scripted intern, missing ${config.missing.join(", ")}` : "live")
+        : `mock, missing ${config.missing.join(", ") || "keys"}`;
+      console.log(`dum-intern listening on ${url} (${label})`);
       resolve({
         url,
         close: () => new Promise((done, reject) => {

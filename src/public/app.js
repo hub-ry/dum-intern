@@ -1,5 +1,6 @@
 const state = {
   mode: "mock",
+  scripted: true,
   missing: [],
   model: "",
   nodes: [],
@@ -36,6 +37,7 @@ async function load() {
   const response = await fetch("/api/state");
   const data = await response.json();
   state.mode = data.mode;
+  state.scripted = Boolean(data.scripted);
   state.missing = data.missing ?? [];
   state.model = data.model ?? "";
   state.nodes = data.nodes ?? [];
@@ -315,7 +317,11 @@ function renderChrome() {
   const unlocked = state.nodes.filter((node) => node.status === "unlocked").length;
   $("skill-count").textContent = `${unlocked}/${state.nodes.length}`;
   $("status-mode").textContent = live ? "Maritime" : "Mock";
-  $("status-model").textContent = live ? state.model : `no ${state.missing.join(" or ") || "keys"}`;
+  $("status-model").textContent = !live
+    ? `no ${state.missing.join(" or ") || "keys"}`
+    : state.scripted
+      ? "scripted intern"
+      : state.model;
   const working = state.busy || state.desktop?.status === "working";
   $("status-work").textContent = working ? (state.desktop?.label || "Working") : "Idle";
   $("status-keys").textContent = `${unlocked} unlocked`;

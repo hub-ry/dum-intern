@@ -1,5 +1,7 @@
 export type Config = {
   mock: boolean;
+  /** Maritime key present: use the real desktop even if the intern is scripted (no LLM key). */
+  liveDesktop: boolean;
   missing: string[];
   host: string;
   port: number;
@@ -27,6 +29,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const pace = Number(env.DUM_PACE_MS ?? "380");
   return {
     mock: missing.length > 0,
+    liveDesktop: Boolean(maritimeKey),
     missing,
     host: env.HOST?.trim() || "127.0.0.1",
     port: Number.isFinite(port) && port >= 0 ? port : 8074,

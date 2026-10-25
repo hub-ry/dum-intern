@@ -12,7 +12,7 @@ dum-intern is one half of the dum-stack. The other half is dum-learn, a learn-wh
 
 The window is a dark, VS Code-like layout:
 
-- **Center:** the intern's computer. In mock mode this is a fake VS Code window and terminal. With Maritime configured, it is the live desktop (a watch link, plus a command log of what the intern actually ran).
+- **Center:** the intern's computer. With no Maritime key this is a fake VS Code window and terminal. With `MARITIME_API_KEY` set, it is the live desktop (a watch link, plus a command log of what the intern actually ran), even when the intern itself is still scripted.
 - **Right:** chat. Teach a skill here, or give the intern a task. Hold the mic button, or hold Alt, to dictate with the browser Web Speech API. Text works without that.
 - **Left:** the skill tree. Nodes are locked, unlocked, or proposed. Click a locked node whose prerequisites are unlocked and a lesson starts. The intern asks one or two questions. Save, and the node unlocks.
 
@@ -20,7 +20,7 @@ The tree starts with 14 beginner and intermediate nodes: terminal basics, files 
 
 ## Run it
 
-Node 22.13 or newer.
+Requires **Node >= 22.13**. Startup uses the built-in `node:sqlite` module (`node --experimental-sqlite`). That module is not in older Node releases, and `npm start` fails there. `package.json` sets `"engines": { "node": ">=22.13" }`.
 
 ```sh
 npm ci
@@ -33,7 +33,7 @@ Open http://127.0.0.1:8074/. `npm run dev` restarts when files under `src/` chan
 
 ### Mock mode
 
-Mock mode is the default. It is on whenever `LLM_API_KEY` or `MARITIME_API_KEY` is unset. The desktop is drawn in the page, and the intern follows a script:
+Mock mode is the default when `MARITIME_API_KEY` is unset. The desktop is drawn in the page, and the intern follows a script (it also stays scripted whenever `LLM_API_KEY` is unset):
 
 1. Click **Terminal basics**, explain it, answer the question, and press **Save skill**. The node unlocks and a markdown note is written.
 2. Ask it to `create a git branch called feature`. It refuses and names **Git branching**.
@@ -41,9 +41,13 @@ Mock mode is the default. It is on whenever `LLM_API_KEY` or `MARITIME_API_KEY` 
 
 No keys, no account, no network calls.
 
+### Desktop only
+
+Set `MARITIME_API_KEY` and leave `LLM_API_KEY` empty. The page shows the live Maritime desktop, and the scripted intern runs those same commands on it. The title bar says **Live**. The status bar says **scripted intern** rather than a model name. Teaching still uses the scripted questions.
+
 ### Live mode
 
-Copy `.env.example` to `.env` and fill in both keys. The process does not read `.env` for you. Export the variables, or use something like `set -a && source .env && set +a`, then `npm start`. The title bar switches from **Mock** to **Live**.
+Copy `.env.example` to `.env` and fill in both keys. The process does not read `.env` for you. Export the variables, or use something like `set -a && source .env && set +a`, then `npm start`. The title bar switches from **Mock** to **Live**, and the status bar names the model.
 
 The intern calls an OpenAI-compatible chat completions API. DeepSeek is the default (`https://api.deepseek.com`, model `deepseek-chat`). Unlocked notes are the only skill text in the prompt. Locked and proposed nodes are listed by name so the intern can refuse them, without their instructions.
 
@@ -53,10 +57,10 @@ On a task it must call a `plan` tool before any computer tool. If the plan names
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `LLM_API_KEY` | for live mode | empty | Bearer token for the chat API. Empty forces mock mode. |
+| `LLM_API_KEY` | for a model intern | empty | Bearer token for the chat API. Empty keeps the intern scripted. |
 | `LLM_BASE_URL` | no | `https://api.deepseek.com` | OpenAI-compatible origin. `/chat/completions` is appended. |
 | `LLM_MODEL` | no | `deepseek-chat` | Model name sent in the request. |
-| `MARITIME_API_KEY` | for live mode | empty | Maritime bearer key, `mk_...`. Empty forces mock mode. |
+| `MARITIME_API_KEY` | for a real desktop | empty | Maritime bearer key, `mk_...`. Set it to use the real computer, including when the intern is scripted. Empty draws the fake desktop. |
 | `MARITIME_API_BASE` | no | `https://api.maritime.sh` | API origin from the Computers docs. |
 | `HOST` | no | `127.0.0.1` | Bind address. The Docker image sets `0.0.0.0`. |
 | `PORT` | no | `8074` | Listen port. |
@@ -65,7 +69,11 @@ On a task it must call a `plan` tool before any computer tool. If the plan names
 
 The Maritime key needs the `computers` scope, or a manage / full-access key. Dashboard browser sessions cannot call `/api/v1/computers`. Create the key from the Computers section of Maritime settings. It stays on this server. The browser only receives a short-lived watch link.
 
-One desktop is created per install, with external user id `dum-intern`, and reused after that. The integration follows the [Computers guide](https://maritime.sh/docs/computers), the [REST API](https://maritime.sh/docs/api), and the [OpenAPI spec](https://api.maritime.sh/openapi.json): get-or-create, wake, exec, file read/write, a watch viewer, and screenshots. Commands are wrapped so they also append to `/home/desk/work/session.log`, and the desktop opens a terminal tailing that file when `xfce4-terminal` is installed. Editor launches prefer `code`, then `codium`, then `mousepad`. The model is told to use the shell and files, not the mouse.
+One desktop is created per install, with external user id `dum-intern`, and reused after that. The integration follows the [Computers guide](https://maritime.sh/docs/computers), the [REST API](https://maritime.sh/docs/api), and the [OpenAPI spec](https://api.maritime.sh/openapi.json): get-or-create, wake, exec, file read/write, a watch viewer, and screenshots. Screenshot bytes from the API are a **1024×640** JPEG. That is smaller than the 1200×750 model frame described in the computers docs.
+
+Commands run under `bash -c`, not a login shell. On this image `bash -l` resets `HOME` to `/`, so `~` would list the root directory. Each command also appends to `/home/desk/work/session.log`. The desktop setup script is one `bash -c` program with its lines separated by newlines (joining them with spaces is a syntax error). It opens `xfce4-terminal` on `tail -n +1 -f` of that log only when no `tail` is already following it. The guard is `pgrep -x tail` plus a check that `/proc/<pid>/cmdline` contains `session.log`. `pgrep -f` matches the setup script's own arguments, so a second start would still open another terminal.
+
+The same setup looks for `code`, then a user-local install at `/home/desk/opt/vscode`, then `codium`. If none of those exist it starts Mousepad immediately and downloads the official VS Code linux-x64 tarball in the background (`https://update.code.visualstudio.com/latest/linux-x64/stable`) into `/home/desk/opt/vscode`. Exec calls are capped at 30 seconds, and the desktop user may not have sudo, so the download is `nohup`'d and the next successful install launches `bin/code` on `/home/desk/work`. The model is told to use the shell and files, not the mouse.
 
 ## Skills on disk
 

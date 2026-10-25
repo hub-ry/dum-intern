@@ -221,7 +221,7 @@ export class Intern {
       const steps = mockWork(text, decision.skills, this.store.nodes());
       for (let i = 0; i < steps.length; i++) {
         if (i > 0 && this.config.paceMs > 0) await sleep(this.config.paceMs);
-        await this.apply(steps[i]);
+        await this.apply(await this.onRealDesktop(steps[i]));
       }
       return;
     }
@@ -261,6 +261,25 @@ export class Intern {
       .slice(0, -1)
       .slice(-12)
       .map((message) => ({ role: message.role, text: message.text }));
+  }
+
+  /** Scripted intern + live Maritime desktop: run scripted steps for real. */
+  private async onRealDesktop(step: Step): Promise<Step> {
+    if (!this.computer) return step;
+    try {
+      if (step.type === "run") {
+        const result = await this.computer.run(step.command);
+        const output = redact([result.stdout, result.stderr].filter(Boolean).join("\n"), this.secrets());
+        return { ...step, output, error: result.exitCode !== 0 };
+      }
+      if (step.type === "edit") await this.computer.writeFile(step.path, step.content);
+    } catch (error) {
+      if (step.type === "run") {
+        const message = redact(error instanceof Error ? error.message : "command failed", this.secrets());
+        return { ...step, output: message, error: true };
+      }
+    }
+    return step;
   }
 
   private async apply(step: Step | AgentEvent): Promise<void> {

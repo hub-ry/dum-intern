@@ -7,6 +7,7 @@ import { loadConfig } from "./config.ts";
 import { Intern } from "./intern.ts";
 import { startServer, type Running } from "./server.ts";
 import { Store } from "./store.ts";
+import type { Computer } from "./types.ts";
 
 const EXPLAIN = "A terminal is a text window where I type commands. I use it to see files and move around the computer before I open an editor.";
 const ANSWER = "I type pwd and it prints the folder I am in, like /home/desk.";
@@ -92,6 +93,58 @@ test("a taught python task proposes a new node and will not use it", async () =>
     assert.match(second.text, /The missing node is Virtual environments \(proposed\)/);
     assert.equal(second.commands.some((command) => /venv/.test(command)), false);
   } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a maritime key without an LLM key runs the scripted intern on that desktop", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dum-intern-mixed-"));
+  const store = new Store(dir);
+  const running = await startServer(loadConfig({
+    DUM_STATE: `${dir}/http`,
+    DUM_PACE_MS: "0",
+    PORT: "0",
+    HOST: "127.0.0.1",
+    MARITIME_API_KEY: "mk_test_key_value",
+  }));
+  try {
+    const config = loadConfig({
+      DUM_STATE: dir,
+      DUM_PACE_MS: "0",
+      MARITIME_API_KEY: "mk_test_key_value",
+    });
+    assert.equal(config.mock, true);
+    assert.equal(config.liveDesktop, true);
+    assert.deepEqual(config.missing, ["LLM_API_KEY"]);
+
+    const state = await (await fetch(`${running.url}/api/state`)).json();
+    assert.equal(state.mode, "live");
+    assert.equal(state.scripted, true);
+    const health = await (await fetch(`${running.url}/api/health`)).json();
+    assert.equal(health.mode, "live");
+    assert.equal(health.intern, "scripted");
+
+    store.unlock("terminal-basics", "# Terminal basics\n\nI type commands and read what comes back, including pwd and ls.");
+    const ran: string[] = [];
+    const computer: Computer = {
+      async run(command) {
+        ran.push(command);
+        return { exitCode: 0, stdout: "REAL_LISTING\n", stderr: "" };
+      },
+      async writeFile() {},
+      async readFile() { return ""; },
+      async listDir() { return []; },
+    };
+    const intern = new Intern(store, config, null, computer);
+    const result = await collect(intern, "list the files in the home directory");
+    assert.ok(ran.includes("ls -la ~"));
+    assert.ok(result.commands.includes("ls -la ~"));
+    const shown = store.desktop().terminal.filter((line) => line.stream === "out").map((line) => line.text).join("\n");
+    assert.match(shown, /REAL_LISTING/);
+    assert.doesNotMatch(shown, /Downloads/);
+  } finally {
+    await running.close();
     store.close();
     await rm(dir, { recursive: true, force: true });
   }

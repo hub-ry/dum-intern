@@ -137,6 +137,7 @@ export function createMaritime(options: {
       return { url: body.url, expiresAt: body.expiresAt, mode: body.mode === "control" ? "control" : "watch" };
     },
     async screenshot(id) {
+      // Live frames come back 1024×640. The computers docs describe a 1200×750 model frame.
       const response = await call(`/api/v1/computers/${encodeURIComponent(id)}/screenshot?format=jpeg&quality=70`);
       if (!response.ok) throw await asError(response);
       return {
@@ -156,27 +157,75 @@ export function assertDeskPath(path: string): string {
   return path;
 }
 
+// Not a login shell: on Maritime, bash -l resets HOME to /, so ~ would point at the root.
 /** Run a command so a tail -f of session.log shows it on the desktop the person is watching. */
 export function visibleCommand(command: string): string {
   const b64 = Buffer.from(command, "utf8").toString("base64");
   return [
-    "bash -lc",
-    quote(`set -o pipefail; mkdir -p /home/desk/work; cd /home/desk/work || exit 1; cmd=$(printf %s ${b64} | base64 -d); printf '$ %s\\n' "$cmd" | tee -a /home/desk/work/session.log; bash -lc "$cmd" 2>&1 | tee -a /home/desk/work/session.log`),
+    "bash -c",
+    quote(`set -o pipefail; mkdir -p /home/desk/work; cd /home/desk/work || exit 1; cmd=$(printf %s ${b64} | base64 -d); printf '$ %s\\n' "$cmd" | tee -a /home/desk/work/session.log; bash -c "$cmd" 2>&1 | tee -a /home/desk/work/session.log`),
   ].join(" ");
 }
 
-export const OPEN_DESKTOP = [
-  "bash -lc",
-  quote([
-    "mkdir -p /home/desk/work",
-    "touch /home/desk/work/session.log /home/desk/notes.txt",
-    "if command -v xfce4-terminal >/dev/null 2>&1; then nohup xfce4-terminal --title=dum-intern -e 'tail -n +1 -f /home/desk/work/session.log' >/tmp/dum-term.log 2>&1 & disown || true; fi",
-    "if command -v code >/dev/null 2>&1; then nohup code /home/desk/work >/tmp/dum-code.log 2>&1 & disown || true;",
-    "elif command -v codium >/dev/null 2>&1; then nohup codium /home/desk/work >/tmp/dum-code.log 2>&1 & disown || true;",
-    "elif command -v mousepad >/dev/null 2>&1; then nohup mousepad /home/desk/notes.txt >/tmp/dum-code.log 2>&1 & disown || true; fi",
-    "echo ready",
-  ].join(" ")),
-].join(" ");
+// Lines stay newline-separated. Joining them with spaces breaks the if/elif chain.
+// The tail guard matches process name plus cmdline. pgrep -f would match this script's own argv,
+// and a pattern containing + (as in tail -n +1) does too.
+const DESKTOP_SETUP = [
+  "mkdir -p /home/desk/work /home/desk/opt",
+  "touch /home/desk/work/session.log /home/desk/notes.txt",
+  "term=0",
+  "for p in $(pgrep -x tail 2>/dev/null); do if grep -q session.log /proc/$p/cmdline 2>/dev/null; then term=1; break; fi; done",
+  "if [ \"$term\" -eq 0 ] && command -v xfce4-terminal >/dev/null 2>&1; then nohup xfce4-terminal --title=dum-intern -e 'tail -n +1 -f /home/desk/work/session.log' >/tmp/dum-term.log 2>&1 & disown || true; fi",
+  "codebin=",
+  "if command -v code >/dev/null 2>&1; then codebin=$(command -v code)",
+  "elif [ -x /home/desk/opt/vscode/bin/code ]; then codebin=/home/desk/opt/vscode/bin/code",
+  "elif [ -x /home/desk/opt/vscode/code ]; then codebin=/home/desk/opt/vscode/code",
+  "fi",
+  "if [ -n \"$codebin\" ]; then",
+  "  if ! pgrep -x code >/dev/null 2>&1; then nohup \"$codebin\" /home/desk/work >/tmp/dum-code.log 2>&1 & disown || true; fi",
+  "elif command -v codium >/dev/null 2>&1; then",
+  "  if ! pgrep -x codium >/dev/null 2>&1; then nohup codium /home/desk/work >/tmp/dum-code.log 2>&1 & disown || true; fi",
+  "else",
+  "  if [ ! -s /tmp/dum-vscode.pid ] || ! kill -0 \"$(cat /tmp/dum-vscode.pid)\" 2>/dev/null; then",
+  "    cat > /home/desk/opt/install-vscode.sh << 'END'",
+  "#!/bin/bash",
+  "set -eu",
+  "dest=/home/desk/opt/vscode",
+  "tmp=/tmp/vscode-linux-x64.tar.gz",
+  "url=https://update.code.visualstudio.com/latest/linux-x64/stable",
+  "mkdir -p /home/desk/opt",
+  "if command -v curl >/dev/null 2>&1; then",
+  "  curl -fL --retry 3 -o \"$tmp\" \"$url\"",
+  "elif command -v wget >/dev/null 2>&1; then",
+  "  wget -O \"$tmp\" \"$url\"",
+  "else",
+  "  echo \"no curl or wget\" >&2",
+  "  exit 1",
+  "fi",
+  "rm -rf \"$dest\"",
+  "mkdir -p \"$dest\"",
+  "tar -xzf \"$tmp\" -C \"$dest\" --strip-components=1",
+  "rm -f \"$tmp\"",
+  "if [ -x \"$dest/bin/code\" ]; then bin=\"$dest/bin/code\"",
+  "elif [ -x \"$dest/code\" ]; then bin=\"$dest/code\"",
+  "else",
+  "  echo \"code binary missing\" >&2",
+  "  exit 1",
+  "fi",
+  "pkill -x mousepad >/dev/null 2>&1 || true",
+  "if ! pgrep -x code >/dev/null 2>&1; then nohup \"$bin\" /home/desk/work >/tmp/dum-code.log 2>&1 & disown || true; fi",
+  "END",
+  "    chmod +x /home/desk/opt/install-vscode.sh",
+  "    nohup bash /home/desk/opt/install-vscode.sh >/tmp/dum-vscode-install.log 2>&1 &",
+  "    echo $! >/tmp/dum-vscode.pid",
+  "    disown || true",
+  "  fi",
+  "  if command -v mousepad >/dev/null 2>&1 && ! pgrep -x mousepad >/dev/null 2>&1; then nohup mousepad /home/desk/notes.txt >/tmp/dum-code.log 2>&1 & disown || true; fi",
+  "fi",
+  "echo ready",
+];
+
+export const OPEN_DESKTOP = ["bash -c", quote(DESKTOP_SETUP.join("\n"))].join(" ");
 
 export function maritimeComputer(client: MaritimeClient, computerId: () => Promise<string>): Computer & {
   open(): Promise<ViewerLink>;
