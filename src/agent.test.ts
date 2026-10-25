@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { runTask } from "./agent.ts";
 import { chatCompletionsUrl } from "./config.ts";
+import { taskSystem } from "./prompt.ts";
 import { createLlm, type Llm, type LlmTurn } from "./llm.ts";
 import { assertDeskPath, createMaritime, OPEN_DESKTOP, visibleCommand } from "./maritime.ts";
 import { seedNodes } from "./seed.ts";
@@ -48,14 +49,18 @@ test("a plan that needs a locked skill never touches the computer", async () => 
       content: null,
       toolCalls: [
         { id: "run", name: "run_shell", arguments: { command: "git switch -c feature" } },
-        { id: "plan", name: "plan", arguments: { steps: ["make a branch"], skillIds: ["git-branching"], missing: ["git-branching"] } },
+        { id: "plan", name: "plan", arguments: { steps: ["make a branch", "switch to it"], skillIds: ["git-branching"], missing: ["git-branching"] } },
       ],
     }]),
     computer,
     onEvent: (event) => { if (event.type === "say") said.push(event.text); },
   });
   assert.deepEqual(computer.runs, []);
-  assert.match(said.join("\n"), /The missing node is Git branching/);
+  const text = said.join("\n");
+  assert.match(text, /1\. make a branch/);
+  assert.match(text, /2\. switch to it/);
+  assert.match(text, /The missing node is Git branching/);
+  assert.doesNotMatch(text, /make a branch switch to it/);
 });
 
 test("the intern plans, then runs only an unlocked command", async () => {
@@ -68,7 +73,7 @@ test("the intern plans, then runs only an unlocked command", async () => {
     allowedIds: ["terminal-basics"],
     llm: scripted([
       { content: null, toolCalls: [{ id: "a", name: "run_shell", arguments: { command: "ls" } }] },
-      { content: null, toolCalls: [{ id: "b", name: "plan", arguments: { steps: ["list the directory"], skillIds: ["terminal-basics"], missing: [] } }] },
+      { content: null, toolCalls: [{ id: "b", name: "plan", arguments: { steps: ["list the directory", "stop there"], skillIds: ["terminal-basics"], missing: [] } }] },
       { content: null, toolCalls: [{ id: "c", name: "run_shell", arguments: { command: "ls -la" } }] },
       { content: "Done.", toolCalls: [] },
     ]),
@@ -76,7 +81,9 @@ test("the intern plans, then runs only an unlocked command", async () => {
     onEvent: (event) => { if (event.type === "say") said.push(event.text); },
   });
   assert.deepEqual(computer.runs, ["ls -la"]);
-  assert.match(said.join("\n"), /Plan:/);
+  const text = said.join("\n");
+  assert.match(text, /1\. list the directory\n2\. stop there/);
+  assert.match(text, /Using Terminal basics/);
 });
 
 test("docker is refused even after a harmless plan", async () => {
@@ -99,6 +106,14 @@ test("docker is refused even after a harmless plan", async () => {
   });
   assert.deepEqual(computer.runs, []);
   assert.match(said.join("\n"), /Docker basics/);
+});
+
+test("the task prompt asks for an occasional proposal", () => {
+  const prompt = taskSystem(unlock(["terminal-basics"]), ["terminal-basics"]);
+  assert.match(prompt, /propose_skill once before you finish/);
+  assert.match(prompt, /natural next skill/);
+  assert.match(prompt, /not on every task/);
+  assert.match(prompt, /already locked or proposed/);
 });
 
 test("the chat client posts to an OpenAI-compatible completions URL", async () => {
@@ -169,6 +184,11 @@ test("the maritime client uses the computers REST API", async () => {
   assert.match(setup, /session\.log/);
   assert.match(setup, /update\.code\.visualstudio\.com\/latest\/linux-x64\/stable/);
   assert.match(setup, /\/home\/desk\/opt\/vscode/);
+  assert.match(setup, /workbench\.startupEditor/);
+  assert.match(setup, /chat\.disableAIFeatures/);
+  assert.match(setup, /telemetry\.telemetryLevel/);
+  assert.match(setup, /"update\.mode": "none"/);
+  assert.ok(setup.indexOf("<< 'SETTINGS'") < setup.indexOf("nohup \"$codebin\""));
   assert.doesNotMatch(setup, /pgrep -f/);
   assert.doesNotMatch(OPEN_DESKTOP, /bash -l/);
   execFileSync("bash", ["-n", "-c", setup], { encoding: "utf8" });

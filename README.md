@@ -47,11 +47,13 @@ Set `MARITIME_API_KEY` and leave `LLM_API_KEY` empty. The page shows the live Ma
 
 ### Live mode
 
-Copy `.env.example` to `.env` and fill in both keys. The process does not read `.env` for you. Export the variables, or use something like `set -a && source .env && set +a`, then `npm start`. The title bar switches from **Mock** to **Live**, and the status bar names the model.
+Copy `.env.example` to `.env` and fill in both keys. `npm start` and `npm run dev` load `.env` when that file is present (`node --env-file-if-exists=.env`). A variable already set in the environment wins. Tests do not load `.env`. The title bar switches from **Mock** to **Live**, and the status bar names the model.
 
 The intern calls an OpenAI-compatible chat completions API. DeepSeek is the default (`https://api.deepseek.com`, model `deepseek-chat`). Unlocked notes are the only skill text in the prompt. Locked and proposed nodes are listed by name so the intern can refuse them, without their instructions.
 
-On a task it must call a `plan` tool before any computer tool. If the plan names a locked skill, the server stops the turn. Shell commands are checked again before they run: `docker`, `git`, `pytest`, `python`, and `curl` are refused unless that skill is unlocked.
+On a task it must call a `plan` tool before any computer tool. Plan steps are shown as a numbered list. If the plan names a locked skill, the server stops the turn and shows every step, then names that node. Shell commands are checked again before they run: `docker`, `git`, `pytest`, `python`, and `curl` are refused unless that skill is unlocked.
+
+When a task shows a better approach or a natural next skill that is not already on the tree, the prompt tells the intern to propose that node once and keep using only the taught method. A proposal stays unused until you teach it.
 
 ## Environment
 
@@ -73,7 +75,7 @@ One desktop is created per install, with external user id `dum-intern`, and reus
 
 Commands run under `bash -c`, not a login shell. On this image `bash -l` resets `HOME` to `/`, so `~` would list the root directory. Each command also appends to `/home/desk/work/session.log`. The desktop setup script is one `bash -c` program with its lines separated by newlines (joining them with spaces is a syntax error). It opens `xfce4-terminal` on `tail -n +1 -f` of that log only when no `tail` is already following it. The guard is `pgrep -x tail` plus a check that `/proc/<pid>/cmdline` contains `session.log`. `pgrep -f` matches the setup script's own arguments, so a second start would still open another terminal.
 
-The same setup looks for `code`, then a user-local install at `/home/desk/opt/vscode`, then `codium`. If none of those exist it starts Mousepad immediately and downloads the official VS Code linux-x64 tarball in the background (`https://update.code.visualstudio.com/latest/linux-x64/stable`) into `/home/desk/opt/vscode`. Exec calls are capped at 30 seconds, and the desktop user may not have sudo, so the download is `nohup`'d and the next successful install launches `bin/code` on `/home/desk/work`. The model is told to use the shell and files, not the mouse.
+Before the editor opens, setup writes `/home/desk/.config/Code/User/settings.json` if that file is missing. The settings turn off the welcome page, Copilot and chat, telemetry, and updates, so VS Code 1.143 does not cover the terminal with a sign-in window. The same setup looks for `code`, then a user-local install at `/home/desk/opt/vscode`, then `codium`. If none of those exist it starts Mousepad immediately and downloads the official VS Code linux-x64 tarball in the background (`https://update.code.visualstudio.com/latest/linux-x64/stable`) into `/home/desk/opt/vscode`. Exec calls are capped at 30 seconds, and the desktop user may not have sudo, so the download is `nohup`'d and the next successful install launches `bin/code` on `/home/desk/work`. The model is told to use the shell and files, not the mouse.
 
 ## Skills on disk
 

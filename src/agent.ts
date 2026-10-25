@@ -67,7 +67,7 @@ const LIST: LlmTool = {
 
 const PROPOSE: LlmTool = {
   name: "propose_skill",
-  description: "Propose a skill you were not taught. It stays unused until the teacher explains it.",
+  description: "Propose one skill that is not already on the tree: a better approach or a natural next skill you noticed while working. It stays unused until the teacher explains it. Do not call this for a skill that is already locked or proposed.",
   parameters: {
     type: "object",
     properties: {
@@ -248,7 +248,10 @@ async function plan(args: Record<string, unknown>, ctx: { nodes: SkillNode[]; on
     const token = unique[0];
     const node = resolve(token, ctx.nodes);
     const title = node?.title ?? token;
-    await ctx.onEvent({ type: "say", text: `Plan: ${steps[0] ?? "I looked at the task."} This needs ${title}. I'm stopping before I touch the computer.` });
+    await ctx.onEvent({
+      type: "say",
+      text: `Plan:\n${formatPlan(steps, "I looked at the task.")}\nThis needs ${title}. I'm stopping before I touch the computer.`,
+    });
     await ctx.onEvent({
       type: "say",
       text: node
@@ -260,7 +263,7 @@ async function plan(args: Record<string, unknown>, ctx: { nodes: SkillNode[]; on
   const titles = skillIds.map((id) => resolve(id, ctx.nodes)?.title ?? id);
   await ctx.onEvent({
     type: "say",
-    text: `Plan: ${steps.join(" ") || "I'll follow the skills you've taught me."} Using ${titles.join(", ") || "what you've taught me"}.`,
+    text: `Plan:\n${formatPlan(steps, "I'll follow the skills you've taught me.")}\nUsing ${titles.join(", ") || "what you've taught me"}.`,
   });
   return { stop: false, body: { ok: true, skills: skillIds } };
 }
@@ -374,6 +377,11 @@ async function propose(
     text: `I added ${title} as a proposed node. ${reason} I won't use it unless you teach it.`,
   });
   return { stop: false, body: { status: "proposed", title } };
+}
+
+function formatPlan(steps: string[], empty: string): string {
+  if (steps.length === 0) return empty;
+  return steps.map((step, index) => `${index + 1}. ${step}`).join("\n");
 }
 
 function resolve(token: string, nodes: SkillNode[]): SkillNode | undefined {

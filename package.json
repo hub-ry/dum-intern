@@ -8,8 +8,8 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --experimental-sqlite --import tsx src/server.ts",
-    "dev": "node --experimental-sqlite --watch-path=src --import tsx src/server.ts",
+    "start": "node --env-file-if-exists=.env --experimental-sqlite --import tsx src/server.ts",
+    "dev": "node --env-file-if-exists=.env --experimental-sqlite --watch-path=src --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-sqlite --import tsx --test \"src/**/*.test.ts\""
   },

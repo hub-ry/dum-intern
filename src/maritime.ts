@@ -167,12 +167,32 @@ export function visibleCommand(command: string): string {
   ].join(" ");
 }
 
+const VSCODE_SETTINGS = {
+  "workbench.startupEditor": "none",
+  "workbench.welcomePage.walkthroughs.openOnInstall": false,
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "workbench.tips.enabled": false,
+  "chat.disableAIFeatures": true,
+  "chat.commandCenter.enabled": false,
+  "telemetry.telemetryLevel": "off",
+  "update.mode": "none",
+  "extensions.ignoreRecommendations": true,
+  "security.workspace.trust.enabled": false,
+};
+
 // Lines stay newline-separated. Joining them with spaces breaks the if/elif chain.
 // The tail guard matches process name plus cmdline. pgrep -f would match this script's own argv,
 // and a pattern containing + (as in tail -n +1) does too.
 const DESKTOP_SETUP = [
   "mkdir -p /home/desk/work /home/desk/opt",
   "touch /home/desk/work/session.log /home/desk/notes.txt",
+  // Without settings, VS Code 1.143 opens a full-screen Copilot sign-in modal that hides the desktop.
+  "if [ ! -s /home/desk/.config/Code/User/settings.json ]; then",
+  "  mkdir -p /home/desk/.config/Code/User",
+  "  cat > /home/desk/.config/Code/User/settings.json << 'SETTINGS'",
+  ...JSON.stringify(VSCODE_SETTINGS, null, 2).split("\n"),
+  "SETTINGS",
+  "fi",
   "term=0",
   "for p in $(pgrep -x tail 2>/dev/null); do if grep -q session.log /proc/$p/cmdline 2>/dev/null; then term=1; break; fi; done",
   "if [ \"$term\" -eq 0 ] && command -v xfce4-terminal >/dev/null 2>&1; then nohup xfce4-terminal --title=dum-intern -e 'tail -n +1 -f /home/desk/work/session.log' >/tmp/dum-term.log 2>&1 & disown || true; fi",

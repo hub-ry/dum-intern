@@ -15,7 +15,7 @@ export function taskSystem(nodes: SkillNode[], allowedIds: string[]): string {
     "On every task, call plan before run_shell, write_file, read_file, or list_dir.",
     "Prefer the terminal and writing files. Do not click the desktop.",
     "Work in /home/desk/work. Narrate in short sentences.",
-    "If you notice a better way you were not taught, call propose_skill and keep using only the taught way.",
+    "When the task shows a better approach, or a natural next skill, that is not already listed below, call propose_skill once before you finish. Give a short title, what it is, and why this task needed it. Do that when the gap is real, not on every task, and not for a skill that is already locked or proposed. Finish the work with unlocked skills only. A proposal stays unused until the teacher explains it.",
     allowedIds.length > 0 ? `For this task, stay within these skill ids: ${allowedIds.join(", ")}.` : "",
     "",
     "Unlocked skills:",
