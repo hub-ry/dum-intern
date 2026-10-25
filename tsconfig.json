@@ -1,15 +1,17 @@
 {
   "compilerOptions": {
-    "target": "es2023",
-    "lib": ["es2023"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
     "types": ["node"],
-    "skipLibCheck": true
+    "rootDir": "src",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src"]
 }

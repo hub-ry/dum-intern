@@ -1,2 +1,10 @@
 node_modules/
 *.log
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+dist/

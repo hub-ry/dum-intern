@@ -1,25 +1,24 @@
 {
   "name": "dum-intern",
-  "version": "0.0.1",
-  "description": "A skill-tree workspace: set goals, read teaching papers, unlock blocks, and save builds.",
+  "version": "0.1.0",
+  "description": "Teach a programming intern. It can only do the skills you explained, on a desktop you can watch.",
+  "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": ">=22.13"
   },
   "scripts": {
-    "start": "tsx src/product/server.ts",
-    "dev": "tsx watch src/product/server.ts",
+    "start": "node --experimental-sqlite --import tsx src/server.ts",
+    "dev": "node --experimental-sqlite --watch-path=src --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --experimental-sqlite --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "pdfjs-dist": "^6.4.299",
-    "tsx": "^4.23.13",
-    "zod": "^4.4.3"
+    "tsx": "^4.20.6"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.7.3"
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
   },
   "license": "MIT"
 }
