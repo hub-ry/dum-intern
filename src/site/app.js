@@ -17,6 +17,7 @@ const state = {
   code: "",
   pairDraft: "",
   topicDraft: "",
+  topicSaving: false,
 };
 
 function setStatus(text, error = false) {
@@ -100,6 +101,7 @@ function draw() {
     return;
   }
   if (!state.me) { drawLogin(); return; }
+  if (!state.tree) { view.append(el("p", {}, "Loading your workspace…")); return; }
   if (state.tab === "folder") { drawFolder(); return; }
   if (state.tab === "tree") drawTree();
   else if (state.tab === "goals") drawGoals();
@@ -206,13 +208,16 @@ async function createGoal(event) {
 
 async function addTopic(event) {
   event.preventDefault();
+  if (state.topicSaving) return;
   const form = event.currentTarget;
   const input = form.elements.namedItem("topic");
-  const topic = input.value.trim();
+  const draft = input.value;
+  const topic = draft.trim();
   if (!topic) { setStatus("Name something you want to learn.", true); input.focus(); return; }
   const submit = form.querySelector('button[type="submit"]');
   const account = state.me;
   const root = state.root;
+  state.topicSaving = true;
   submit.disabled = true;
   setStatus("Adding to your tree…");
   try {
@@ -222,15 +227,17 @@ async function addTopic(event) {
     });
     if (state.me !== account || state.root !== root) return;
     state.tree = data.tree;
-    state.topicDraft = "";
+    if (state.topicDraft === draft) state.topicDraft = "";
     selectGoal(data.tree.goals[0]?.id ?? null);
-    draw();
     setStatus(`${topic} added to your skill tree.`);
-    document.getElementById("topic")?.focus();
   } catch (err) {
     setStatus(err.message, true);
   } finally {
-    submit.disabled = false;
+    state.topicSaving = false;
+    if (state.tab === "tree") {
+      draw();
+      document.getElementById("topic")?.focus();
+    }
   }
 }
 
@@ -242,7 +249,7 @@ function drawTree() {
       el("div", { class: "topic-row" },
         el("input", { id: "topic", name: "topic", required: "true", maxlength: "80", autocomplete: "off",
           value: state.topicDraft, oninput: (event) => { state.topicDraft = event.target.value; } }),
-        el("button", { class: "button", type: "submit" }, "Add to tree"))),
+        el("button", { class: "button", type: "submit", disabled: state.topicSaving ? "" : null }, "Add to tree"))),
   );
   if (!state.tree.goals.length) {
     view.append(el("p", { class: "empty-tree" }, "Your tree starts with something you're curious about."));
