@@ -25,10 +25,11 @@ function setStatus(text, error = false) {
   status.classList.toggle("error", error);
 }
 
-let apiQueue = Promise.resolve();
+let workspaceQueue = Promise.resolve();
+const workspacePaths = new Set(["/api/workspace", "/api/root", "/api/goals", "/api/swear", "/api/read", "/api/builds"]);
 
 function api(path, options = {}) {
-  const request = apiQueue.then(async () => {
+  const send = async () => {
     const res = await fetch(path, {
       ...options,
       headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
@@ -36,8 +37,11 @@ function api(path, options = {}) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
     return data;
-  });
-  apiQueue = request.catch(() => {});
+  };
+  // Order workspace snapshots without blocking sign-out, sign-in, or hints.
+  if (!workspacePaths.has(path)) return send();
+  const request = workspaceQueue.then(send);
+  workspaceQueue = request.catch(() => {});
   return request;
 }
 
