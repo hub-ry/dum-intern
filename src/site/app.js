@@ -25,14 +25,20 @@ function setStatus(text, error = false) {
   status.classList.toggle("error", error);
 }
 
-async function api(path, options = {}) {
-  const res = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+let apiQueue = Promise.resolve();
+
+function api(path, options = {}) {
+  const request = apiQueue.then(async () => {
+    const res = await fetch(path, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+  apiQueue = request.catch(() => {});
+  return request;
 }
 
 function goal() {
@@ -181,7 +187,9 @@ function drawGoals() {
 }
 
 function selectGoal(id) {
+  const unchanged = id !== null && goal()?.id === id;
   state.goalId = id;
+  if (unchanged) return;
   state.skillId = null;
   state.stack = [];
 }
