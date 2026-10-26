@@ -1,43 +1,96 @@
 # dum-intern
 
-[dumintern.com](https://dumintern.com/) is Dum's public-facing site. It introduces the project in the original paper-like layout, with serif body text, monospace navigation, and a light/dark toggle. The theme follows the system until you choose one; that choice is saved in the browser.
+A chess player stuck at 1800 spent two years there, then reached 2000 in four months by teaching his girlfriend chess. dum-intern does that for programming.
 
-Dum's intended product is a local pair-programming companion: a terminal command opens a localhost app with screen sharing, a conversation beside the screen, and a learning-topic skill tree. The launcher and screen-sharing runtime aren't implemented in this repo yet. The website is an introduction, not that runtime.
+You have an AI intern on a real computer. It can only do what you have taught it. Each skill is a node on a tree. A node stays locked until you explain it in your own words. That explanation is saved as a markdown note, and it becomes the instruction the intern follows. Explaining it is how you learn.
 
-The [public explanation](https://dumintern.com/docs) describes this direction. This repo also retains the existing hosted workspace, its template, and its Cursor paper-writing skill. No Discord bot, private workshop, internship automation, or CLI/MCP bridge.
+If a task needs a locked skill, the intern stops and names that node. It does not improvise. It can research and suggest a better way, but the suggestion shows up as a **proposed** node. You have to learn it and teach it. The intern never uses a proposal on its own.
 
-## Run locally
+dum-intern is one half of the dum-stack. The other half is dum-learn, a learn-when-stuck site. This repo is the intern.
 
-Requires Node 24 or newer. The existing workspace's PDF reader also needs `pdfinfo` from Poppler (`sudo apt install poppler-utils` on Ubuntu). Tectonic is needed on the machine where Cursor compiles papers, not on the server.
+## What you see
+
+The window is a dark, VS Code-like layout:
+
+- **Center:** the intern's computer. With no Maritime key this is a fake VS Code window and terminal. With `MARITIME_API_KEY` set, it is the live desktop (a watch link, plus a command log of what the intern actually ran), even when the intern itself is still scripted.
+- **Right:** chat. Teach a skill here, or give the intern a task. Hold the mic button, or hold Alt, to dictate with the browser Web Speech API. Text works without that.
+- **Left:** the skill tree. Nodes are locked, unlocked, or proposed. Click a locked node whose prerequisites are unlocked and a lesson starts. The intern asks one or two questions. Save, and the node unlocks.
+
+The tree starts with 14 beginner and intermediate nodes: terminal basics, files and paths, reading errors, reading docs, git basics, git branching, environment and config, Python scripts, functions and modules, HTTP requests, writing tests, shell scripts, Docker basics, and debugging.
+
+## Run it
+
+Requires **Node >= 22.13**. Startup uses the built-in `node:sqlite` module (`node --experimental-sqlite`). That module is not in older Node releases, and `npm start` fails there. `package.json` sets `"engines": { "node": ">=22.13" }`.
 
 ```sh
 npm ci
 npm start
 ```
 
-Open `http://127.0.0.1:8074/` for the public landing page. This starts the website server, not the planned local Dum launcher. `npm run dev` watches the server.
+Open http://127.0.0.1:8074/. `npm run dev` restarts when files under `src/` change.
 
-## Existing workspace
+`HOST` defaults to `127.0.0.1` and `PORT` defaults to `8074`. Point cloudflared, or any other tunnel, at that loopback port. Anyone who can open the URL can teach the intern and, in live mode, drive the desktop. The tunnel is the lock on the door.
 
-`/app` retains the earlier hosted workspace and its saved data. It isn't the public homepage or the planned local pairing runtime, and public navigation doesn't link to it.
+### Mock mode
 
-- In **Skill tree**, enter a topic and choose **Add to tree** to save one locked root block. **Workspace tools** holds goal outlines, builds, and hints. An outline has one block per line, with two spaces indenting a child; leaving it empty creates the five-block starter tree. The goal selector chooses which goal builds and hints use.
-- Read a block's PDF to the last page to unlock it, or swear that you already know it in a sentence, even if its parent is locked. There is no quiz or work to submit. Read and sworn are unlock records, not measurements of mastery.
-- A build is an ordered stack of unlocked blocks. Saving it records the stack, not a generated program.
-- Teaching papers are written and compiled locally in Cursor with the [`dum-paper` skill](skills/dum-paper/SKILL.md). The server writes briefs and serves PDFs you put in the workspace; it doesn't generate or compile papers. PDF.js loads only when opening a reading.
-- The retained Pair tab is an offline interface with Send disabled. It doesn't connect to a desktop, stream a screen, or simulate activity. Drafts survive tab switches and clear on reload; sign-out behavior is described below.
+Mock mode is the default when `MARITIME_API_KEY` is unset. The desktop is drawn in the page, and the intern follows a script (it also stays scripted whenever `LLM_API_KEY` is unset):
 
-Sign in with your GitHub username and a one-time public gist named `dum-login`, following the instructions in the app. Check the gist in the same browser that requested the code, then delete it after signing in. GitHub OAuth is optional: set both `DUM_GITHUB_CLIENT_ID` and `DUM_GITHUB_CLIENT_SECRET`, and register `/auth/github/callback` on your app's public origin as the callback URL.
+1. Click **Terminal basics**, explain it, answer the question, and press **Save skill**. The node unlocks and a markdown note is written.
+2. Ask it to `create a git branch called feature`. It refuses and names **Git branching**.
+3. Ask it to `list the files in the home directory`. It plans, then the terminal shows `ls`.
 
-## Workspace and hosting
+No keys, no account, no network calls.
 
-- The default state directory is `~/.local/state/dum-product`. Each GitHub account gets its own directory under `users/<github-id>/`, with an account record and a `dum/` workspace.
-- The workspace contains `goal.md`, `tree.json`, `learn.sty`, `readings/`, and `builds/`. [`template/dum`](template/dum) is the starting folder. Choose your username in the navigation to select another root; only the hub owner can select an absolute path under their home directory.
-- Cursor writes each paper from `readings/<block-id>.brief.json`, using the shared LaTeX style. Put the compiled PDF at the brief's `pdf` path in the **server's** workspace. The site does not sync a separate local copy or upload PDFs for you.
-- Workspaces aren't published automatically. Publishing your folder in a public repo is your choice. Back up the state directory, including `session.key`; the app creates that key on first startup.
-- Signing out clears the local account and drafts immediately and invalidates old workspace work. Sign-in stays unavailable until the sign-out response settles. Pair remains usable, and new guest drafts survive that response. If the server can't complete sign-out, the page tells you to reload and retry; it doesn't claim that your session ended.
-- `HOST` defaults to `127.0.0.1` and must be loopback. `PORT` defaults to `8074`. `DUM_PRODUCT_STATE` overrides the state directory; `DUM_PDFJS` optionally overrides the directory containing PDF.js's `pdf.min.mjs` and `pdf.worker.min.mjs`.
-- [`deploy/dum-product.service`](deploy/dum-product.service) is the hub systemd unit. Adjust its user and paths for another machine. Terminate HTTPS at a reverse proxy or tunnel pointing to the loopback port.
+### Desktop only
+
+Set `MARITIME_API_KEY` and leave `LLM_API_KEY` empty. The page shows the live Maritime desktop, and the scripted intern runs those same commands on it. The title bar says **Live**. The status bar says **scripted intern** rather than a model name. Teaching still uses the scripted questions.
+
+### Live mode
+
+Copy `.env.example` to `.env` and fill in both keys. `npm start` and `npm run dev` load `.env` when that file is present (`node --env-file-if-exists=.env`). A variable already set in the environment wins. Tests do not load `.env`. The title bar switches from **Mock** to **Live**, and the status bar names the model.
+
+The intern calls an OpenAI-compatible chat completions API. DeepSeek is the default (`https://api.deepseek.com`, model `deepseek-chat`). Unlocked notes are the only skill text in the prompt. Locked and proposed nodes are listed by name so the intern can refuse them, without their instructions.
+
+On a task it must call a `plan` tool before any computer tool. Plan steps are shown as a numbered list. If the plan names a locked skill, the server stops the turn and shows every step, then names that node. Shell commands are checked again before they run: `docker`, `git`, `pytest`, `python`, and `curl` are refused unless that skill is unlocked.
+
+When a task shows a better approach or a natural next skill that is not already on the tree, the prompt tells the intern to propose that node once and keep using only the taught method. A proposal stays unused until you teach it.
+
+## Environment
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `LLM_API_KEY` | for a model intern | empty | Bearer token for the chat API. Empty keeps the intern scripted. |
+| `LLM_BASE_URL` | no | `https://api.deepseek.com` | OpenAI-compatible origin. `/chat/completions` is appended. |
+| `LLM_MODEL` | no | `deepseek-chat` | Model name sent in the request. |
+| `MARITIME_API_KEY` | for a real desktop | empty | Maritime bearer key, `mk_...`. Set it to use the real computer, including when the intern is scripted. Empty draws the fake desktop. |
+| `MARITIME_API_BASE` | no | `https://api.maritime.sh` | API origin from the Computers docs. |
+| `HOST` | no | `127.0.0.1` | Bind address. The Docker image sets `0.0.0.0`. |
+| `PORT` | no | `8074` | Listen port. |
+| `DUM_STATE` | no | `./data` | SQLite database, chat, and exported notes. |
+| `DUM_PACE_MS` | no | `380` | Pause between mock desktop steps. Tests use `0`. |
+
+The Maritime key needs the `computers` scope, or a manage / full-access key. Dashboard browser sessions cannot call `/api/v1/computers`. Create the key from the Computers section of Maritime settings. It stays on this server. The browser only receives a short-lived watch link.
+
+One desktop is created per install, with external user id `dum-intern`, and reused after that. The integration follows the [Computers guide](https://maritime.sh/docs/computers), the [REST API](https://maritime.sh/docs/api), and the [OpenAPI spec](https://api.maritime.sh/openapi.json): get-or-create, wake, exec, file read/write, a watch viewer, and screenshots. Screenshot bytes from the API are a **1024×640** JPEG. That is smaller than the 1200×750 model frame described in the computers docs.
+
+Commands run under `bash -c`, not a login shell. On this image `bash -l` resets `HOME` to `/`, so `~` would list the root directory. Each command also appends to `/home/desk/work/session.log`. The desktop setup script is one `bash -c` program with its lines separated by newlines (joining them with spaces is a syntax error). It opens `xfce4-terminal` on `tail -n +1 -f` of that log only when no `tail` is already following it. The guard is `pgrep -x tail` plus a check that `/proc/<pid>/cmdline` contains `session.log`. `pgrep -f` matches the setup script's own arguments, so a second start would still open another terminal.
+
+Before the editor opens, setup writes `/home/desk/.config/Code/User/settings.json` if that file is missing. The settings turn off the welcome page, Copilot and chat, telemetry, and updates, so VS Code 1.143 does not cover the terminal with a sign-in window. The same setup looks for `code`, then a user-local install at `/home/desk/opt/vscode`, then `codium`. If none of those exist it starts Mousepad immediately and downloads the official VS Code linux-x64 tarball in the background (`https://update.code.visualstudio.com/latest/linux-x64/stable`) into `/home/desk/opt/vscode`. Exec calls are capped at 30 seconds, and the desktop user may not have sudo, so the download is `nohup`'d and the next successful install launches `bin/code` on `/home/desk/work`. The model is told to use the shell and files, not the mouse.
+
+## Skills on disk
+
+SQLite (`data/dum.sqlite`) is the source of truth. Saving a lesson also writes `data/skills/<id>.md`. **Export markdown** downloads those notes as a zip. An individual note is at `/api/skills/<id>.md`.
+
+Reset, in the skill pane, locks the seed tree again, deletes proposed nodes, and clears the chat. The Maritime computer id is forgotten locally; the same external user id gets the same desktop back.
+
+## Docker
+
+```sh
+docker build -t dum-intern .
+docker run --rm -p 8074:8074 -e HOST=0.0.0.0 dum-intern
+```
+
+Pass `LLM_API_KEY` and `MARITIME_API_KEY` the same way when you want live mode. Mount a volume on `/app/data` if the notes should outlive the container.
 
 ## Development
 
@@ -46,8 +99,6 @@ npm run typecheck
 npm test
 ```
 
-- `src/product/`: GitHub sign-in, workspace storage, skill-tree rules, and HTTP server.
-- `src/site/`: public landing page and explanation, shared light/dark theme, and the retained browser workspace and PDF reader.
-- `template/dum/`: files copied into a new workspace.
-- `skills/dum-paper/`, `.cursor/skills/`, `.cursor-plugin/`: Cursor paper-writing skill and discovery metadata.
-- CI installs dependencies, typechecks the server, and runs the product tests. For UI changes, exercise the app in a browser too.
+Keyboard: Enter sends, Shift+Enter inserts a newline, hold Alt or the mic button to dictate, Ctrl+Shift+E focuses the tree, Ctrl+Shift+M focuses chat, J/K move in the tree, Ctrl+S saves a lesson that is ready to save. `?` opens the list in the app.
+
+Voice uses the browser's Web Speech API (`SpeechRecognition`). Chromium sends audio to its speech service. Firefox often has no implementation, and the button disables itself there.
