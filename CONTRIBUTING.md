@@ -1,6 +1,6 @@
 # Contributing
 
-This repo contains Dum's public introduction at [dumintern.com](https://dumintern.com/) and the retained hosted workspace. Start with [README.md](README.md) for the product direction, setup, storage, and source layout.
+Start with [README.md](README.md) for the product introduction, setup, storage, and source layout.
 
 ```sh
 npm ci
@@ -11,7 +11,7 @@ npm test
 
 - Keep the product self-contained. Discord, the private workshop, mail watchers, internship automation, and host desktop services don't belong here.
 - Preserve account isolation and private workspace storage. Public assets must never expose account files, session keys, or credentials.
-- Public pages keep the original serif/monospace document layout and shared light/dark theme. They introduce the planned local product; don't turn the homepage into the hosted app or advertise an install command that doesn't exist.
+- Preserve the public pages' serif/monospace document layout and shared light/dark theme. Follow the [README's product introduction](README.md#dum-intern) for the website's scope and planned local runtime.
 - Follow the [existing workspace contract](README.md#existing-workspace) when changing `/app`. Keep it separate from the public landing page.
 - Readings are written and compiled in the user's Cursor session. The server stores briefs and serves existing PDFs; it must not claim to have generated a paper.
 - A block unlocks by reading its final page or recording a swear. Preserve that distinction. Neither record proves mastery.

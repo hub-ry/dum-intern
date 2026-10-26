@@ -1,6 +1,6 @@
 # dum-intern
 
-[dumintern.com](https://dumintern.com/) is Dum's public-facing site. It introduces the project in the original paper-like layout, with serif body text, monospace navigation, and a light/dark toggle. Theme choice is saved in the browser.
+[dumintern.com](https://dumintern.com/) is Dum's public-facing site. It introduces the project in the original paper-like layout, with serif body text, monospace navigation, and a light/dark toggle. The theme follows the system until you choose one; that choice is saved in the browser.
 
 Dum's intended product is a local pair-programming companion: a terminal command opens a localhost app with screen sharing, a conversation beside the screen, and a learning-topic skill tree. The launcher and screen-sharing runtime aren't implemented in this repo yet. The website is an introduction, not that runtime.
 
@@ -21,8 +21,8 @@ Open `http://127.0.0.1:8074/` for the public landing page. This starts the websi
 
 `/app` retains the earlier hosted workspace and its saved data. It isn't the public homepage or the planned local pairing runtime, and public navigation doesn't link to it.
 
-- In **Skill tree**, enter a topic and choose **Add to tree** to save one locked root block. **Workspace tools** holds goal outlines, builds, and hints. An outline has one block per line, with two spaces indenting a child; leaving it empty creates the five-block starter tree.
-- Read a block's PDF to the last page to unlock it, or swear that you already know it in a sentence. Read and sworn are unlock records, not measurements of mastery.
+- In **Skill tree**, enter a topic and choose **Add to tree** to save one locked root block. **Workspace tools** holds goal outlines, builds, and hints. An outline has one block per line, with two spaces indenting a child; leaving it empty creates the five-block starter tree. The goal selector chooses which goal builds and hints use.
+- Read a block's PDF to the last page to unlock it, or swear that you already know it in a sentence, even if its parent is locked. There is no quiz or work to submit. Read and sworn are unlock records, not measurements of mastery.
 - A build is an ordered stack of unlocked blocks. Saving it records the stack, not a generated program.
 - Teaching papers are written and compiled locally in Cursor with the [`dum-paper` skill](skills/dum-paper/SKILL.md). The server writes briefs and serves PDFs you put in the workspace; it doesn't generate or compile papers. PDF.js loads only when opening a reading.
 - The retained Pair tab is an offline interface with Send disabled. It doesn't connect to a desktop, stream a screen, or simulate activity. Drafts survive tab switches and clear on reload; sign-out behavior is described below.
