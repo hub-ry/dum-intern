@@ -19,6 +19,40 @@
   --measure: 700px;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #242320;
+  --bg-deep: #1e1d1b;
+  --surface: #302e2a;
+  --line: #777268;
+  --line-soft: #565249;
+  --text: #f0ece2;
+  --subtle: #d5cfc2;
+  --muted: #b4ad9f;
+  --amber: #e8bd77;
+  --pink: #f2a6a0;
+  --cyan: #a9c9ef;
+  --focus: #a9c9ef;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg: #242320;
+    --bg-deep: #1e1d1b;
+    --surface: #302e2a;
+    --line: #777268;
+    --line-soft: #565249;
+    --text: #f0ece2;
+    --subtle: #d5cfc2;
+    --muted: #b4ad9f;
+    --amber: #e8bd77;
+    --pink: #f2a6a0;
+    --cyan: #a9c9ef;
+    --focus: #a9c9ef;
+  }
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 html { background: var(--bg); color: var(--text); font: 18px/1.6 var(--serif); }
 body { margin: 0; overflow-wrap: break-word; }
@@ -38,6 +72,8 @@ a:hover { color: var(--text); }
 .nav-logo { color: var(--text); text-decoration: none; }
 .nav-links { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 0; margin: 0; list-style: none; }
 .nav-links li { margin: 0; }
+[data-theme-toggle] { appearance: none; border: 0; border-radius: 0; background: transparent; color: var(--cyan); font: inherit; line-height: inherit; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .15em; }
+[data-theme-toggle]:hover { color: var(--text); }
 .page { padding-block: 44px 40px; }
 .document-title { text-align: center; margin-bottom: 36px; }
 .document-title h1 { margin-bottom: 6px; font-size: 2rem; font-weight: 400; }
@@ -77,7 +113,21 @@ kbd { border: 1px solid var(--line); padding: 2px 5px; }
 }
 
 @media print {
-  :root { --bg: white; --bg-deep: white; --text: black; --cyan: black; }
+  :root, :root[data-theme] {
+    color-scheme: light;
+    --bg: white;
+    --bg-deep: white;
+    --surface: white;
+    --line: #bdbdb5;
+    --line-soft: #deded6;
+    --text: black;
+    --subtle: #42423b;
+    --muted: #62625a;
+    --amber: black;
+    --pink: black;
+    --cyan: black;
+    --focus: black;
+  }
   html { font-size: 11pt; }
   .site-header, .site-footer, .skip-link { display: none; }
   .page { width: auto; padding: 0; margin: 0; }

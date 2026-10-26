@@ -1,9 +1,8 @@
-import * as pdfjs from "/vendor/pdf.min.mjs";
-
-pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
+import { createPairView } from "/pair.js";
 
 const view = document.getElementById("view");
 const status = document.getElementById("status");
+const navigation = document.getElementById("app-navigation");
 
 const state = {
   me: null,
@@ -12,10 +11,12 @@ const state = {
   path: "",
   root: "dum",
   goalId: null,
-  tab: "goals",
+  tab: ["tree", "folder"].includes(new URLSearchParams(location.search).get("tab")) ? new URLSearchParams(location.search).get("tab") : "pair",
   skillId: null,
   stack: [],
   code: "",
+  pairDraft: "",
+  topicDraft: "",
 };
 
 function setStatus(text, error = false) {
@@ -56,36 +57,63 @@ function el(tag, attrs = {}, ...kids) {
   return node;
 }
 
+function changeTab(tab) {
+  state.tab = tab;
+  setStatus("");
+  const url = new URL(location.href);
+  if (tab === "pair") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", tab === "folder" ? "folder" : "tree");
+  history.replaceState(null, "", url);
+  draw();
+}
+
 function tabs() {
-  const names = [["goals", "Goals"], ["tree", "Tree"], ["read", "Read"], ["build", "Build"], ["hints", "Hints"], ["folder", "Folder"]];
-  return el("ul", { class: "tabs" }, names.map(([id, label]) => el("li", {}, el("button", {
+  const names = [["pair", "Pair"], ["tree", "Skill tree"], ["folder", state.me ? state.me.login : "Sign in"]];
+  return el("ul", { class: "nav-links" }, names.map(([id, label]) => el("li", {}, el("button", {
     type: "button",
-    "aria-selected": String(state.tab === id),
-    onclick: () => { state.tab = id; draw(); },
+    class: "nav-tab",
+    "aria-current": (id === "tree" ? !["pair", "folder"].includes(state.tab) : state.tab === id) ? "page" : null,
+    onclick: () => changeTab(id),
   }, label))));
 }
 
+function workspaceTools() {
+  const details = el("details", { class: "workspace-tools" }, el("summary", {}, "Workspace tools"));
+  const links = [["goals", "Outline a goal"], ["build", "Saved builds"], ["hints", "Hints"]];
+  details.append(el("div", { class: "workspace-links" }, links.map(([id, label]) =>
+    el("button", { type: "button", class: "text-button", onclick: () => changeTab(id) }, label))));
+  if (state.tree.goals.length) {
+    const select = el("select", { id: "active-goal", onchange: (event) => { selectGoal(event.target.value); draw(); } },
+      state.tree.goals.map((g) => el("option", { value: g.id }, g.title)));
+    select.value = goal()?.id ?? "";
+    details.append(el("label", { for: "active-goal" }, "Goal for builds and hints"), select);
+  }
+  return details;
+}
+
 function draw() {
+  navigation.replaceChildren(tabs());
   view.replaceChildren();
+  view.classList.toggle("workspace-view", state.tab !== "pair");
+  if (state.tab === "pair") {
+    view.append(createPairView({ draft: state.pairDraft, onDraft: (draft) => { state.pairDraft = draft; } }));
+    return;
+  }
   if (!state.me) { drawLogin(); return; }
-  const g = goal();
-  view.append(
-    el("p", { class: "who" }, `${state.me.login} · root ${state.root}`),
-    tabs(),
-  );
-  if (state.tab === "goals") drawGoals();
-  else if (state.tab === "folder") drawFolder();
-  else if (!g) view.append(el("p", {}, "Set a goal first."));
-  else if (state.tab === "tree") drawTree();
+  if (state.tab === "folder") { drawFolder(); return; }
+  if (state.tab === "tree") drawTree();
+  else if (state.tab === "goals") drawGoals();
+  else if (!goal()) view.append(el("p", {}, "Add something to your skill tree first."));
   else if (state.tab === "read") drawRead();
   else if (state.tab === "build") drawBuild();
   else if (state.tab === "hints") drawHints();
+  view.append(workspaceTools());
 }
 
 function drawLogin() {
   const form = el("form", { onsubmit: startLogin },
     el("h1", {}, "Sign in with GitHub"),
-    el("p", {}, "Your Dum is a folder. Signing in opens the one stored for your GitHub account on hub."),
+    el("p", {}, "Sign in to keep your skill tree. Pair is available to look around without an account."),
     el("label", { for: "login" }, "GitHub username"),
     el("input", { id: "login", name: "login", autocomplete: "username", required: "true" }),
     el("div", { class: "row" }, el("button", { class: "button button-primary", type: "submit" }, "Get a code")),
@@ -176,14 +204,64 @@ async function createGoal(event) {
   }
 }
 
-function drawTree() {
-  const g = goal();
-  view.append(el("h1", {}, g.title), el("p", {}, g.aim), renderNodes(null));
+async function addTopic(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const input = form.elements.namedItem("topic");
+  const topic = input.value.trim();
+  if (!topic) { setStatus("Name something you want to learn.", true); input.focus(); return; }
+  const submit = form.querySelector('button[type="submit"]');
+  const account = state.me;
+  const root = state.root;
+  submit.disabled = true;
+  setStatus("Adding to your tree…");
+  try {
+    const data = await api("/api/goals", {
+      method: "POST",
+      body: JSON.stringify({ title: topic, aim: `Learn ${topic}.`, outline: topic }),
+    });
+    if (state.me !== account || state.root !== root) return;
+    state.tree = data.tree;
+    state.topicDraft = "";
+    selectGoal(data.tree.goals[0]?.id ?? null);
+    draw();
+    setStatus(`${topic} added to your skill tree.`);
+    document.getElementById("topic")?.focus();
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    submit.disabled = false;
+  }
 }
 
-function renderNodes(parentId) {
+function drawTree() {
+  view.append(
+    el("h1", {}, "Skill tree"),
+    el("form", { class: "topic-form", onsubmit: addTopic },
+      el("label", { for: "topic" }, "What do you want to learn?"),
+      el("div", { class: "topic-row" },
+        el("input", { id: "topic", name: "topic", required: "true", maxlength: "80", autocomplete: "off",
+          value: state.topicDraft, oninput: (event) => { state.topicDraft = event.target.value; } }),
+        el("button", { class: "button", type: "submit" }, "Add to tree"))),
+  );
+  if (!state.tree.goals.length) {
+    view.append(el("p", { class: "empty-tree" }, "Your tree starts with something you're curious about."));
+    return;
+  }
+  const forest = el("div", { class: "skill-forest" });
+  for (const g of state.tree.goals) {
+    const nodes = state.tree.skills.filter((s) => s.goalId === g.id);
+    const branch = el("section", { class: "tree-branch", "aria-label": g.title });
+    if (nodes.length !== 1 || nodes[0].title !== g.title) branch.append(el("h2", {}, g.title));
+    branch.append(renderNodes(null, g.id));
+    forest.append(branch);
+  }
+  view.append(forest);
+}
+
+function renderNodes(parentId, goalId = goal()?.id) {
   const ul = el("ul", { class: parentId ? "" : "tree" });
-  for (const skill of skills().filter((s) => s.parentId === parentId)) {
+  for (const skill of state.tree.skills.filter((s) => s.goalId === goalId && s.parentId === parentId)) {
     const kind = skill.unlock?.kind ?? "locked";
     ul.append(el("li", {},
       el("div", { class: "skill" },
@@ -192,13 +270,15 @@ function renderNodes(parentId) {
         el("button", { class: "chip", type: "button", onclick: () => openSkill(skill.id) }, "Read"),
         kind === "locked" ? el("button", { class: "chip", type: "button", onclick: () => swear(skill) }, "Swear") : null,
       ),
-      renderNodes(skill.id),
+      renderNodes(skill.id, goalId),
     ));
   }
   return ul;
 }
 
 function openSkill(id) {
+  const skill = state.tree.skills.find((s) => s.id === id);
+  if (skill) selectGoal(skill.goalId);
   state.skillId = id;
   state.tab = "read";
   draw();
@@ -207,6 +287,7 @@ function openSkill(id) {
 async function swear(skill) {
   const text = window.prompt(`Swear what you know about “${skill.title}”. A sentence is enough.`);
   if (!text) return;
+  selectGoal(skill.goalId);
   setStatus("Saving the swear…");
   try {
     const data = await api("/api/swear", { method: "POST", body: JSON.stringify({ skillId: skill.id, text }) });
@@ -240,6 +321,8 @@ async function loadPdf(skill) {
     }
     const pages = Number(res.headers.get("X-Dum-Pages") || "1");
     const data = new Uint8Array(await res.arrayBuffer());
+    const pdfjs = await import("/vendor/pdf.min.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
     const doc = await pdfjs.getDocument({ data }).promise;
     box.replaceChildren();
     let marked = false;
@@ -397,6 +480,9 @@ async function logout() {
   state.me = null;
   state.tree = null;
   selectGoal(null);
+  state.pairDraft = "";
+  state.topicDraft = "";
+  state.code = "";
   draw();
   setStatus("");
 }
@@ -415,4 +501,5 @@ async function boot() {
   draw();
 }
 
+draw();
 boot().catch((err) => setStatus(err.message, true));
