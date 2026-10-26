@@ -32,8 +32,8 @@ const MIME: Record<string, string> = {
 };
 
 const PAGES: Record<string, string> = {
-  "": "index.html",
-  "index.html": "index.html",
+  "": "app.html",
+  "index.html": "app.html",
   docs: "docs.html",
   "docs.html": "docs.html",
   app: "app.html",

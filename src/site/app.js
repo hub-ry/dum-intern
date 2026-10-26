@@ -1,9 +1,8 @@
-import * as pdfjs from "/vendor/pdf.min.mjs";
-
-pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
+import { createPairView } from "/pair.js";
 
 const view = document.getElementById("view");
 const status = document.getElementById("status");
+const navigation = document.getElementById("app-navigation");
 
 const state = {
   me: null,
@@ -12,25 +11,53 @@ const state = {
   path: "",
   root: "dum",
   goalId: null,
-  tab: "goals",
+  tab: ["tree", "folder"].includes(new URLSearchParams(location.search).get("tab")) ? new URLSearchParams(location.search).get("tab") : "pair",
   skillId: null,
   stack: [],
   code: "",
+  pairDraft: "",
+  topicDraft: "",
+  topicSaving: false,
+  signingOut: false,
 };
 
 function setStatus(text, error = false) {
-  status.textContent = text;
+  if (text instanceof StaleSessionError) return;
+  status.textContent = text instanceof Error ? text.message : text;
   status.classList.toggle("error", error);
 }
 
-async function api(path, options = {}) {
-  const res = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+class StaleSessionError extends Error {}
+
+let workspaceQueue = Promise.resolve();
+let workspaceSession = { active: true };
+const workspacePaths = new Set(["/api/workspace", "/api/root", "/api/goals", "/api/swear", "/api/read", "/api/builds"]);
+
+function api(path, options = {}) {
+  const session = workspaceSession;
+  const workspace = workspacePaths.has(path);
+  const checkSession = () => {
+    if (session !== workspaceSession || (workspace && !session.active)) throw new StaleSessionError();
+  };
+  const send = async () => {
+    checkSession();
+    const res = await fetch(path, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+    }).catch((err) => {
+      checkSession();
+      throw err;
+    });
+    const data = await res.json().catch(() => ({}));
+    checkSession();
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  };
+  // Order workspace snapshots without blocking sign-out, sign-in, or hints.
+  if (!workspace) return send();
+  const request = workspaceQueue.then(send);
+  workspaceQueue = request.catch(() => {});
+  return request;
 }
 
 function goal() {
@@ -56,36 +83,65 @@ function el(tag, attrs = {}, ...kids) {
   return node;
 }
 
+function changeTab(tab) {
+  state.tab = tab;
+  setStatus("");
+  const url = new URL(location.href);
+  if (tab === "pair") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", tab === "folder" ? "folder" : "tree");
+  history.replaceState(null, "", url);
+  draw();
+}
+
 function tabs() {
-  const names = [["goals", "Goals"], ["tree", "Tree"], ["read", "Read"], ["build", "Build"], ["hints", "Hints"], ["folder", "Folder"]];
-  return el("ul", { class: "tabs" }, names.map(([id, label]) => el("li", {}, el("button", {
+  const names = [["pair", "Pair"], ["tree", "Skill tree"], ["folder", state.me ? state.me.login : "Sign in"]];
+  return el("ul", { class: "nav-links" }, names.map(([id, label]) => el("li", {}, el("button", {
     type: "button",
-    "aria-selected": String(state.tab === id),
-    onclick: () => { state.tab = id; draw(); },
+    class: "nav-tab",
+    "aria-current": (id === "tree" ? !["pair", "folder"].includes(state.tab) : state.tab === id) ? "page" : null,
+    onclick: () => changeTab(id),
   }, label))));
 }
 
+function workspaceTools() {
+  const details = el("details", { class: "workspace-tools" }, el("summary", {}, "Workspace tools"));
+  const links = [["goals", "Outline a goal"], ["build", "Saved builds"], ["hints", "Hints"]];
+  details.append(el("div", { class: "workspace-links" }, links.map(([id, label]) =>
+    el("button", { type: "button", class: "text-button", onclick: () => changeTab(id) }, label))));
+  if (state.tree.goals.length) {
+    const select = el("select", { id: "active-goal", onchange: (event) => { selectGoal(event.target.value); draw(); } },
+      state.tree.goals.map((g) => el("option", { value: g.id }, g.title)));
+    select.value = goal()?.id ?? "";
+    details.append(el("label", { for: "active-goal" }, "Goal for builds and hints"), select);
+  }
+  return details;
+}
+
 function draw() {
+  navigation.replaceChildren(tabs());
   view.replaceChildren();
+  view.classList.toggle("workspace-view", state.tab !== "pair");
+  if (state.tab === "pair") {
+    view.append(createPairView({ draft: state.pairDraft, onDraft: (draft) => { state.pairDraft = draft; } }));
+    return;
+  }
+  if (state.signingOut) { view.append(el("p", {}, "Signing out…")); return; }
   if (!state.me) { drawLogin(); return; }
-  const g = goal();
-  view.append(
-    el("p", { class: "who" }, `${state.me.login} · root ${state.root}`),
-    tabs(),
-  );
-  if (state.tab === "goals") drawGoals();
-  else if (state.tab === "folder") drawFolder();
-  else if (!g) view.append(el("p", {}, "Set a goal first."));
-  else if (state.tab === "tree") drawTree();
+  if (!state.tree) { view.append(el("p", {}, "Loading your workspace…")); return; }
+  if (state.tab === "folder") { drawFolder(); return; }
+  if (state.tab === "tree") drawTree();
+  else if (state.tab === "goals") drawGoals();
+  else if (!goal()) view.append(el("p", {}, "Add something to your skill tree first."));
   else if (state.tab === "read") drawRead();
   else if (state.tab === "build") drawBuild();
   else if (state.tab === "hints") drawHints();
+  view.append(workspaceTools());
 }
 
 function drawLogin() {
   const form = el("form", { onsubmit: startLogin },
     el("h1", {}, "Sign in with GitHub"),
-    el("p", {}, "Your Dum is a folder. Signing in opens the one stored for your GitHub account on hub."),
+    el("p", {}, "Sign in to keep your skill tree. Pair is available to look around without an account."),
     el("label", { for: "login" }, "GitHub username"),
     el("input", { id: "login", name: "login", autocomplete: "username", required: "true" }),
     el("div", { class: "row" }, el("button", { class: "button button-primary", type: "submit" }, "Get a code")),
@@ -113,7 +169,7 @@ async function startLogin(event) {
     setStatus("Put that code in a public gist named dum-login, then check it.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -125,7 +181,7 @@ async function finishLogin(event) {
     state.code = "";
     await boot();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -151,7 +207,9 @@ function drawGoals() {
 }
 
 function selectGoal(id) {
+  const unchanged = id !== null && goal()?.id === id;
   state.goalId = id;
+  if (unchanged) return;
   state.skillId = null;
   state.stack = [];
 }
@@ -172,18 +230,74 @@ async function createGoal(event) {
     setStatus("Tree is ready. Read a block, or swear one you already know.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
+  }
+}
+
+async function addTopic(event) {
+  event.preventDefault();
+  if (state.topicSaving) return;
+  const form = event.currentTarget;
+  const input = form.elements.namedItem("topic");
+  const draft = input.value;
+  const topic = draft.trim();
+  if (!topic) { setStatus("Name something you want to learn.", true); input.focus(); return; }
+  const submit = form.querySelector('button[type="submit"]');
+  const session = workspaceSession;
+  const root = state.root;
+  state.topicSaving = true;
+  submit.disabled = true;
+  setStatus("Adding to your tree…");
+  try {
+    const data = await api("/api/goals", {
+      method: "POST",
+      body: JSON.stringify({ title: topic, aim: `Learn ${topic}.`, outline: topic }),
+    });
+    if (state.root !== root) return;
+    state.tree = data.tree;
+    if (state.topicDraft === draft) state.topicDraft = "";
+    setStatus(`${topic} added to your skill tree.`);
+  } catch (err) {
+    setStatus(err, true);
+  } finally {
+    if (session === workspaceSession) {
+      state.topicSaving = false;
+      if (state.tab === "tree") {
+        draw();
+        document.getElementById("topic")?.focus();
+      }
+    }
   }
 }
 
 function drawTree() {
-  const g = goal();
-  view.append(el("h1", {}, g.title), el("p", {}, g.aim), renderNodes(null));
+  view.append(
+    el("h1", {}, "Skill tree"),
+    el("form", { class: "topic-form", onsubmit: addTopic },
+      el("label", { for: "topic" }, "What do you want to learn?"),
+      el("div", { class: "topic-row" },
+        el("input", { id: "topic", name: "topic", required: "true", maxlength: "80", autocomplete: "off",
+          value: state.topicDraft, oninput: (event) => { state.topicDraft = event.target.value; } }),
+        el("button", { class: "button", type: "submit", disabled: state.topicSaving ? "" : null }, "Add to tree"))),
+  );
+  if (!state.tree.goals.length) {
+    view.append(el("p", { class: "empty-tree" }, "Your tree starts with something you're curious about."));
+    return;
+  }
+  const forest = el("div", { class: "skill-forest" });
+  for (const g of state.tree.goals) {
+    const nodes = state.tree.skills.filter((s) => s.goalId === g.id);
+    const branch = el("section", { class: "tree-branch", "aria-label": g.title });
+    if (nodes.length !== 1 || nodes[0].title !== g.title) branch.append(el("h2", {}, g.title));
+    branch.append(renderNodes(null, g.id));
+    forest.append(branch);
+  }
+  view.append(forest);
 }
 
-function renderNodes(parentId) {
+function renderNodes(parentId, goalId = goal()?.id) {
   const ul = el("ul", { class: parentId ? "" : "tree" });
-  for (const skill of skills().filter((s) => s.parentId === parentId)) {
+  for (const skill of state.tree.skills.filter((s) => s.goalId === goalId && s.parentId === parentId)) {
     const kind = skill.unlock?.kind ?? "locked";
     ul.append(el("li", {},
       el("div", { class: "skill" },
@@ -192,13 +306,15 @@ function renderNodes(parentId) {
         el("button", { class: "chip", type: "button", onclick: () => openSkill(skill.id) }, "Read"),
         kind === "locked" ? el("button", { class: "chip", type: "button", onclick: () => swear(skill) }, "Swear") : null,
       ),
-      renderNodes(skill.id),
+      renderNodes(skill.id, goalId),
     ));
   }
   return ul;
 }
 
 function openSkill(id) {
+  const skill = state.tree.skills.find((s) => s.id === id);
+  if (skill) selectGoal(skill.goalId);
   state.skillId = id;
   state.tab = "read";
   draw();
@@ -207,6 +323,7 @@ function openSkill(id) {
 async function swear(skill) {
   const text = window.prompt(`Swear what you know about “${skill.title}”. A sentence is enough.`);
   if (!text) return;
+  selectGoal(skill.goalId);
   setStatus("Saving the swear…");
   try {
     const data = await api("/api/swear", { method: "POST", body: JSON.stringify({ skillId: skill.id, text }) });
@@ -214,7 +331,7 @@ async function swear(skill) {
     setStatus(`${skill.title} is unlocked. It is marked sworn, not read.`);
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -231,6 +348,7 @@ function drawRead() {
 }
 
 async function loadPdf(skill) {
+  const session = workspaceSession;
   const box = document.getElementById("pages");
   try {
     const res = await fetch(`/api/readings/${skill.id}/pdf`);
@@ -240,6 +358,8 @@ async function loadPdf(skill) {
     }
     const pages = Number(res.headers.get("X-Dum-Pages") || "1");
     const data = new Uint8Array(await res.arrayBuffer());
+    const pdfjs = await import("/vendor/pdf.min.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
     const doc = await pdfjs.getDocument({ data }).promise;
     box.replaceChildren();
     let marked = false;
@@ -253,7 +373,7 @@ async function loadPdf(skill) {
       box.append(canvas);
       if (n === doc.numPages) {
         const watch = new IntersectionObserver(async (entries) => {
-          if (!entries.some((entry) => entry.isIntersecting) || marked || skill.unlock) return;
+          if (session !== workspaceSession || !entries.some((entry) => entry.isIntersecting) || marked || skill.unlock) return;
           marked = true;
           try {
             const data = await api("/api/read", { method: "POST", body: JSON.stringify({ skillId: skill.id, page: pages, pages }) });
@@ -261,7 +381,7 @@ async function loadPdf(skill) {
             setStatus(`${skill.title} is unlocked.`);
           } catch (err) {
             marked = false;
-            setStatus(err.message, true);
+            setStatus(err, true);
           }
         }, { threshold: 0.15 });
         watch.observe(canvas);
@@ -332,7 +452,7 @@ async function saveBuild(event) {
     setStatus("Saved. The stack is in builds/ in your Dum folder.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -354,7 +474,7 @@ async function drawHints() {
     box.append(el("h2", {}, "Things to learn"), learn.childNodes.length ? learn : el("p", {}, "Nothing is waiting. Swear a later block, or set another goal."));
     box.append(el("h2", {}, "Things to build"), build.childNodes.length ? build : el("p", {}, "Unlock a block and a stack will show up here."));
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -388,20 +508,41 @@ async function saveRoot(event) {
     setStatus("That folder is your Dum now.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
 async function logout() {
-  await api("/api/logout", { method: "POST", body: "{}" });
+  const session = workspaceSession = { active: false };
+  workspaceQueue = Promise.resolve();
+  state.signingOut = true;
   state.me = null;
   state.tree = null;
   selectGoal(null);
-  draw();
+  state.pairDraft = "";
+  state.topicDraft = "";
+  state.topicSaving = false;
+  state.code = "";
   setStatus("");
+  draw();
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+    if (session === workspaceSession) setStatus("");
+  } catch (err) {
+    if (session !== workspaceSession || err instanceof StaleSessionError) return;
+    setStatus("This page is cleared, but sign-out failed. Reload and try again.", true);
+  } finally {
+    if (session === workspaceSession) {
+      state.signingOut = false;
+      if (state.tab !== "pair") draw();
+    }
+  }
 }
 
 async function boot() {
+  workspaceSession = { active: true };
+  workspaceQueue = Promise.resolve();
+  state.signingOut = false;
   selectGoal(null);
   const me = await api("/api/me");
   state.oauth = me.oauth;
@@ -415,4 +556,5 @@ async function boot() {
   draw();
 }
 
-boot().catch((err) => setStatus(err.message, true));
+draw();
+boot().catch((err) => setStatus(err, true));

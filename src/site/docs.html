@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#fffffc">
   <title>How it works — dum intern</title>
-  <meta name="description" content="Goals, readings, unlocked blocks, and builds. How to use your Dum folder.">
-  <link rel="stylesheet" href="/site/site.css?v=paper-1">
+  <meta name="description" content="Pair with Dum, keep a skill tree, and choose a light or dark theme.">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/site/site.css?v=pair-1">
   <link rel="icon" type="image/png" href="/site/favicon.png">
 </head>
 <body>
@@ -15,14 +16,16 @@
 <main id="main" class="page">
   <header class="document-title">
     <h1>How it works</h1>
-    <p>Goals, readings, and things you can build.</p>
+    <p>Pair, and keep track of what you want to learn.</p>
   </header>
+
+  <h2>Pair</h2>
+  <p>Open <a href="/app">Pair</a>. The <a href="https://github.com/hub-ry/dum-intern/blob/main/README.md#dum-intern">project README</a> covers its offline behavior, message drafts, and theme settings.</p>
 
   <h2>1. Open your folder</h2>
   <ul>
-    <li>Open <a href="/app">your Dum</a> and enter your GitHub username.</li>
+    <li>Open <a href="/app?tab=tree">Skill tree</a> and sign in with your GitHub username to save topics.</li>
     <li>Put the login code, alone, in a public gist whose file is named <code>dum-login</code>. Check it to prove the account is yours, then delete the gist. If GitHub OAuth is configured, you can use that instead.</li>
-    <li>Your workspace lives on hub. Its root is <code>dum</code> unless you choose another one in the Folder tab. The hub owner can assign a directory under their home folder.</li>
   </ul>
   <pre><code>dum/
   goal.md
@@ -31,11 +34,11 @@
   builds/       each stack you save</code></pre>
   <p>The starting folder is <a href="https://github.com/hub-ry/dum-intern/tree/main/template/dum"><code>template/dum</code></a>. For workspace selection and getting papers onto the server, see the <a href="https://github.com/hub-ry/dum-intern/blob/main/README.md#workspace-and-hosting">project README</a>.</p>
 
-  <h2>2. Lay out a goal</h2>
+  <h2>2. Grow your skill tree</h2>
   <ul>
-    <li>Name the goal and describe what you want to be able to build.</li>
-    <li>Leave the outline empty for a five-block starter tree, or write the blocks yourself, one per line. Two spaces indent a child.</li>
-    <li>Hints shows which readings are available next and which unlocked chains you can stack now.</li>
+    <li>For adding individual learning topics, see the <a href="https://github.com/hub-ry/dum-intern/blob/main/README.md#dum-intern">project README</a>.</li>
+    <li>For a larger outline, open <strong>Workspace tools → Outline a goal</strong>. Leave the outline empty for a five-block starter tree, or write the blocks yourself, one per line. Two spaces indent a child.</li>
+    <li>Workspace tools also holds saved builds and hints. Its goal selector chooses which goal those tools use.</li>
   </ul>
 
   <h2>3. Read a block</h2>
@@ -61,7 +64,7 @@
 </main>
 <footer class="site-footer">
   <a href="/">dum intern</a>
-  <a href="/app">Your Dum</a>
+  <a href="/app">Pair</a>
   <a href="https://github.com/hub-ry/dum-intern">Source</a>
 </footer>
 </body>

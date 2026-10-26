@@ -4,26 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#fffffc">
-  <title>Your Dum</title>
-  <link rel="stylesheet" href="/site.css?v=paper-1">
-  <link rel="stylesheet" href="/app.css?v=paper-1">
+  <title>dum intern</title>
+  <meta name="description" content="A quiet place to pair with Dum and grow your skill tree.">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/site.css?v=pair-1">
+  <link rel="stylesheet" href="/app.css?v=pair-1">
+  <link rel="stylesheet" href="/pair.css?v=pair-1">
   <link rel="icon" type="image/png" href="/favicon.png">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
-<header class="site-header">
+<header class="site-header app-header">
   <nav class="site-nav" aria-label="Main">
     <a href="/" class="nav-logo">dum intern</a>
-    <ul class="nav-links">
-      <li><a href="/docs">how it works</a></li>
-      <li><a href="/app">your dum</a></li>
-    </ul>
+    <div class="app-nav-actions">
+      <div id="app-navigation"></div>
+      <button type="button" data-theme-toggle hidden>Dark</button>
+    </div>
   </nav>
 </header>
 <main id="main" class="app-main">
   <p id="status" class="app-status" role="status"></p>
   <section id="view"></section>
 </main>
-<script type="module" src="/app.js"></script>
+<noscript><p class="page">Turn on JavaScript to use Pair and your skill tree.</p></noscript>
+<script type="module" src="/app.js?v=pair-4"></script>
 </body>
 </html>

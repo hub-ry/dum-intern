@@ -1,7 +1,7 @@
 {
   "name": "dum-intern",
   "version": "0.0.1",
-  "description": "A skill-tree workspace: set goals, read teaching papers, unlock blocks, and save builds.",
+  "description": "A minimal pairing interface and persistent skill tree for Dum.",
   "type": "module",
   "engines": {
     "node": ">=24"
