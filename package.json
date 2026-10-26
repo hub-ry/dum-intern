@@ -1,7 +1,7 @@
 {
   "name": "dum-intern",
   "version": "0.0.1",
-  "description": "A minimal pairing interface and persistent skill tree for Dum.",
+  "description": "Dum's public-facing site and existing skill-tree workspace.",
   "type": "module",
   "engines": {
     "node": ">=24"

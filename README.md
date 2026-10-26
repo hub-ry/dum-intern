@@ -1,26 +1,31 @@
 # dum-intern
 
-- A minimal pairing interface with a skill tree alongside it. [dumintern.com](https://dumintern.com/) opens on **Pair**: Dum's screen area, the original intern logo below it, and a message draft on the side.
-- Pair is currently interface-only. The screen and progress area say offline, and Send is disabled. It doesn't simulate activity or send messages. Drafts survive tab switches; reloading clears them. For sign-out behavior, see [Workspace and hosting](#workspace-and-hosting). No agent, screen capture, or private desktop is connected.
-- In **Skill tree**, enter something you want to learn and choose **Add to tree**. Each topic becomes one saved, locked root block. Existing goals remain in the tree; **Workspace tools** keeps the outline editor, builds, and hints out of the main navigation.
-- Light/dark mode follows the system until you choose a theme. The choice is saved in this browser. The serif type and paper-like layout stay the same in both modes.
-- Read a block's PDF to the last page to unlock it. If you already know it, swear that in a sentence instead.
-- A build is an ordered stack of unlocked blocks. Saving one records the stack; it doesn't generate a program. Read and sworn are unlock records, not measurements of mastery.
-- Teaching papers are written and compiled locally in Cursor with the [`dum-paper` skill](skills/dum-paper/SKILL.md). The server writes reading briefs and serves PDFs you put in the workspace. It doesn't generate or compile papers.
-- This repo contains the public web product, its workspace template, and its Cursor skill. No Discord bot, private workshop, internship automation, or CLI/MCP bridge.
+[dumintern.com](https://dumintern.com/) is Dum's public-facing site. It introduces the project in the original paper-like layout, with serif body text, monospace navigation, and a light/dark toggle. Theme choice is saved in the browser.
 
-See [How it works](https://dumintern.com/docs) for goal outlines, readings, builds, and hints.
+Dum's intended product is a local pair-programming companion: a terminal command opens a localhost app with screen sharing, a conversation beside the screen, and a learning-topic skill tree. The launcher and screen-sharing runtime aren't implemented in this repo yet. The website is an introduction, not that runtime.
+
+The [public explanation](https://dumintern.com/docs) describes this direction. This repo also retains the existing hosted workspace, its template, and its Cursor paper-writing skill. No Discord bot, private workshop, internship automation, or CLI/MCP bridge.
 
 ## Run locally
 
-Requires Node 24 or newer and `pdfinfo` from Poppler (`sudo apt install poppler-utils` on Ubuntu). Tectonic is needed on the machine where Cursor compiles papers, not on the server.
+Requires Node 24 or newer. The existing workspace's PDF reader also needs `pdfinfo` from Poppler (`sudo apt install poppler-utils` on Ubuntu). Tectonic is needed on the machine where Cursor compiles papers, not on the server.
 
 ```sh
 npm ci
 npm start
 ```
 
-Open `http://127.0.0.1:8074/`. Pair opens without an account; choose **Skill tree** and sign in to save topics. `npm run dev` watches the product server. PDF.js loads only when opening a reading; no sibling repository is required.
+Open `http://127.0.0.1:8074/` for the public landing page. This starts the website server, not the planned local Dum launcher. `npm run dev` watches the server.
+
+## Existing workspace
+
+`/app` retains the earlier hosted workspace and its saved data. It isn't the public homepage or the planned local pairing runtime, and public navigation doesn't link to it.
+
+- In **Skill tree**, enter a topic and choose **Add to tree** to save one locked root block. **Workspace tools** holds goal outlines, builds, and hints. An outline has one block per line, with two spaces indenting a child; leaving it empty creates the five-block starter tree.
+- Read a block's PDF to the last page to unlock it, or swear that you already know it in a sentence. Read and sworn are unlock records, not measurements of mastery.
+- A build is an ordered stack of unlocked blocks. Saving it records the stack, not a generated program.
+- Teaching papers are written and compiled locally in Cursor with the [`dum-paper` skill](skills/dum-paper/SKILL.md). The server writes briefs and serves PDFs you put in the workspace; it doesn't generate or compile papers. PDF.js loads only when opening a reading.
+- The retained Pair tab is an offline interface with Send disabled. It doesn't connect to a desktop, stream a screen, or simulate activity. Drafts survive tab switches and clear on reload; sign-out behavior is described below.
 
 Sign in with your GitHub username and a one-time public gist named `dum-login`, following the instructions in the app. Check the gist in the same browser that requested the code, then delete it after signing in. GitHub OAuth is optional: set both `DUM_GITHUB_CLIENT_ID` and `DUM_GITHUB_CLIENT_SECRET`, and register `/auth/github/callback` on your app's public origin as the callback URL.
 
@@ -42,7 +47,7 @@ npm test
 ```
 
 - `src/product/`: GitHub sign-in, workspace storage, skill-tree rules, and HTTP server.
-- `src/site/`: pairing surface, skill-tree UI, shared light/dark theme, and PDF reader.
+- `src/site/`: public landing page and explanation, shared light/dark theme, and the retained browser workspace and PDF reader.
 - `template/dum/`: files copied into a new workspace.
 - `skills/dum-paper/`, `.cursor/skills/`, `.cursor-plugin/`: Cursor paper-writing skill and discovery metadata.
 - CI installs dependencies, typechecks the server, and runs the product tests. For UI changes, exercise the app in a browser too.
