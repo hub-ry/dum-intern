@@ -21,25 +21,39 @@ const state = {
 };
 
 function setStatus(text, error = false) {
-  status.textContent = text;
+  if (text instanceof StaleSessionError) return;
+  status.textContent = text instanceof Error ? text.message : text;
   status.classList.toggle("error", error);
 }
 
+class StaleSessionError extends Error {}
+
 let workspaceQueue = Promise.resolve();
+let workspaceSession = { active: true };
 const workspacePaths = new Set(["/api/workspace", "/api/root", "/api/goals", "/api/swear", "/api/read", "/api/builds"]);
 
 function api(path, options = {}) {
+  const session = workspaceSession;
+  const workspace = workspacePaths.has(path);
+  const checkSession = () => {
+    if (session !== workspaceSession || (workspace && !session.active)) throw new StaleSessionError();
+  };
   const send = async () => {
+    checkSession();
     const res = await fetch(path, {
       ...options,
       headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+    }).catch((err) => {
+      checkSession();
+      throw err;
     });
     const data = await res.json().catch(() => ({}));
+    checkSession();
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
     return data;
   };
   // Order workspace snapshots without blocking sign-out, sign-in, or hints.
-  if (!workspacePaths.has(path)) return send();
+  if (!workspace) return send();
   const request = workspaceQueue.then(send);
   workspaceQueue = request.catch(() => {});
   return request;
@@ -153,7 +167,7 @@ async function startLogin(event) {
     setStatus("Put that code in a public gist named dum-login, then check it.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -165,7 +179,7 @@ async function finishLogin(event) {
     state.code = "";
     await boot();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -214,7 +228,7 @@ async function createGoal(event) {
     setStatus("Tree is ready. Read a block, or swear one you already know.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -227,7 +241,7 @@ async function addTopic(event) {
   const topic = draft.trim();
   if (!topic) { setStatus("Name something you want to learn.", true); input.focus(); return; }
   const submit = form.querySelector('button[type="submit"]');
-  const account = state.me;
+  const session = workspaceSession;
   const root = state.root;
   state.topicSaving = true;
   submit.disabled = true;
@@ -237,17 +251,19 @@ async function addTopic(event) {
       method: "POST",
       body: JSON.stringify({ title: topic, aim: `Learn ${topic}.`, outline: topic }),
     });
-    if (state.me !== account || state.root !== root) return;
+    if (state.root !== root) return;
     state.tree = data.tree;
     if (state.topicDraft === draft) state.topicDraft = "";
     setStatus(`${topic} added to your skill tree.`);
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   } finally {
-    state.topicSaving = false;
-    if (state.tab === "tree") {
-      draw();
-      document.getElementById("topic")?.focus();
+    if (session === workspaceSession) {
+      state.topicSaving = false;
+      if (state.tab === "tree") {
+        draw();
+        document.getElementById("topic")?.focus();
+      }
     }
   }
 }
@@ -313,7 +329,7 @@ async function swear(skill) {
     setStatus(`${skill.title} is unlocked. It is marked sworn, not read.`);
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -330,6 +346,7 @@ function drawRead() {
 }
 
 async function loadPdf(skill) {
+  const session = workspaceSession;
   const box = document.getElementById("pages");
   try {
     const res = await fetch(`/api/readings/${skill.id}/pdf`);
@@ -354,7 +371,7 @@ async function loadPdf(skill) {
       box.append(canvas);
       if (n === doc.numPages) {
         const watch = new IntersectionObserver(async (entries) => {
-          if (!entries.some((entry) => entry.isIntersecting) || marked || skill.unlock) return;
+          if (session !== workspaceSession || !entries.some((entry) => entry.isIntersecting) || marked || skill.unlock) return;
           marked = true;
           try {
             const data = await api("/api/read", { method: "POST", body: JSON.stringify({ skillId: skill.id, page: pages, pages }) });
@@ -362,7 +379,7 @@ async function loadPdf(skill) {
             setStatus(`${skill.title} is unlocked.`);
           } catch (err) {
             marked = false;
-            setStatus(err.message, true);
+            setStatus(err, true);
           }
         }, { threshold: 0.15 });
         watch.observe(canvas);
@@ -433,7 +450,7 @@ async function saveBuild(event) {
     setStatus("Saved. The stack is in builds/ in your Dum folder.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -455,7 +472,7 @@ async function drawHints() {
     box.append(el("h2", {}, "Things to learn"), learn.childNodes.length ? learn : el("p", {}, "Nothing is waiting. Swear a later block, or set another goal."));
     box.append(el("h2", {}, "Things to build"), build.childNodes.length ? build : el("p", {}, "Unlock a block and a stack will show up here."));
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
@@ -489,23 +506,28 @@ async function saveRoot(event) {
     setStatus("That folder is your Dum now.");
     draw();
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err, true);
   }
 }
 
 async function logout() {
+  workspaceSession = { active: false };
+  workspaceQueue = Promise.resolve();
   await api("/api/logout", { method: "POST", body: "{}" });
   state.me = null;
   state.tree = null;
   selectGoal(null);
   state.pairDraft = "";
   state.topicDraft = "";
+  state.topicSaving = false;
   state.code = "";
   draw();
   setStatus("");
 }
 
 async function boot() {
+  workspaceSession = { active: true };
+  workspaceQueue = Promise.resolve();
   selectGoal(null);
   const me = await api("/api/me");
   state.oauth = me.oauth;
@@ -520,4 +542,4 @@ async function boot() {
 }
 
 draw();
-boot().catch((err) => setStatus(err.message, true));
+boot().catch((err) => setStatus(err, true));
