@@ -1,7 +1,7 @@
 # dum-intern
 
 - A minimal pairing interface with a skill tree alongside it. [dumintern.com](https://dumintern.com/) opens on **Pair**: Dum's screen area, the original intern logo below it, and a message draft on the side.
-- Pair is currently interface-only. The screen and progress area say offline, and Send is disabled. It doesn't simulate activity or send messages. Drafts survive tab switches, but signing out or reloading clears them. No agent, screen capture, or private desktop is connected.
+- Pair is currently interface-only. The screen and progress area say offline, and Send is disabled. It doesn't simulate activity or send messages. Drafts survive tab switches; reloading clears them. For sign-out behavior, see [Workspace and hosting](#workspace-and-hosting). No agent, screen capture, or private desktop is connected.
 - In **Skill tree**, enter something you want to learn and choose **Add to tree**. Each topic becomes one saved, locked root block. Existing goals remain in the tree; **Workspace tools** keeps the outline editor, builds, and hints out of the main navigation.
 - Light/dark mode follows the system until you choose a theme. The choice is saved in this browser. The serif type and paper-like layout stay the same in both modes.
 - Read a block's PDF to the last page to unlock it. If you already know it, swear that in a sentence instead.
@@ -30,7 +30,7 @@ Sign in with your GitHub username and a one-time public gist named `dum-login`, 
 - The workspace contains `goal.md`, `tree.json`, `learn.sty`, `readings/`, and `builds/`. [`template/dum`](template/dum) is the starting folder. Choose your username in the navigation to select another root; only the hub owner can select an absolute path under their home directory.
 - Cursor writes each paper from `readings/<block-id>.brief.json`, using the shared LaTeX style. Put the compiled PDF at the brief's `pdf` path in the **server's** workspace. The site does not sync a separate local copy or upload PDFs for you.
 - Workspaces aren't published automatically. Publishing your folder in a public repo is your choice. Back up the state directory, including `session.key`; the app creates that key on first startup.
-- Signing out clears local drafts immediately. If the server can't complete sign-out, the page tells you to reload and retry; it doesn't claim that your session ended.
+- Signing out clears the local account and drafts immediately and invalidates old workspace work. Sign-in stays unavailable until the sign-out response settles. Pair remains usable, and new guest drafts survive that response. If the server can't complete sign-out, the page tells you to reload and retry; it doesn't claim that your session ended.
 - `HOST` defaults to `127.0.0.1` and must be loopback. `PORT` defaults to `8074`. `DUM_PRODUCT_STATE` overrides the state directory; `DUM_PDFJS` optionally overrides the directory containing PDF.js's `pdf.min.mjs` and `pdf.worker.min.mjs`.
 - [`deploy/dum-product.service`](deploy/dum-product.service) is the hub systemd unit. Adjust its user and paths for another machine. Terminate HTTPS at a reverse proxy or tunnel pointing to the loopback port.
 
