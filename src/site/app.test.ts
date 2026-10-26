@@ -91,6 +91,7 @@ test("workspace work stays in its session while authentication and hints remain 
     return trees.get(login)!;
   };
   let login: string | null = "alice";
+  let failLogout = false;
   const held = new Map<string, { promise: Promise<void>; release: () => void }>();
   const hold = (key: string) => {
     let release!: () => void;
@@ -112,7 +113,12 @@ test("workspace work stays in its session while authentication and hints remain 
       const body = JSON.parse(options.body ?? "{}");
       const account = login;
       requests.push({ path, login: account, body });
-      if (path === "/api/logout") { login = null; return Response.json({ ok: true }); }
+      if (path === "/api/logout") {
+        if (failLogout) throw new TypeError("Failed to fetch");
+        await held.get("logout")?.promise;
+        login = null;
+        return Response.json({ ok: true });
+      }
       if (path === "/api/auth/start") return Response.json({ code: "gist-code", login: body.login });
       if (path === "/api/auth/finish") { login = body.login; return Response.json({}); }
       if (path === "/api/me") return Response.json({ account: login ? { login, root: "dum" } : null, oauth: false });
@@ -212,4 +218,30 @@ test("workspace work stays in its session while authentication and hints remain 
   releaseHints();
   await setImmediate();
   assert.equal(root.textContent, signedOut);
+  await submit("Get a code", { login: "dave" });
+  await submit("Check the gist");
+  await button("Skill tree").fire("click");
+  const privateDraft = find((node) => node.attributes.get("id") === "topic");
+  privateDraft.value = "Dave's unsaved topic";
+  await privateDraft.fire("input");
+  await button("dave").fire("click");
+  failLogout = true;
+  await button("Sign out").fire("click");
+  assert.ok(root.find((node) => node.attributes.get("id") === "login"), "Failed sign-out must still clear the local account view");
+  assert.equal(root.find((node) => node.attributes.get("id") === "topic"), undefined);
+  await submit("Get a code", { login: "erin" });
+  await submit("Check the gist");
+  await button("Skill tree").fire("click");
+  assert.equal(find((node) => node.attributes.get("id") === "topic").value, "", "Failed sign-out must discard private topic drafts");
+  await submit("Add to tree", { topic: "Erin topic" });
+  assert.deepEqual(tree("erin").goals.map((goal) => goal.title), ["Erin topic"], "A fresh session must remain usable after failed sign-out");
+  failLogout = false;
+  await button("erin").fire("click");
+  const releaseLogout = hold("logout");
+  const pendingLogout = button("Sign out").fire("click");
+  await until(() => requests.some((request) => request.path === "/api/logout" && request.login === "erin"));
+  assert.equal(root.find((node) => node.attributes.get("id") === "login"), undefined, "A new sign-in must wait until the old sign-out response settles");
+  releaseLogout();
+  await pendingLogout;
+  assert.ok(root.find((node) => node.attributes.get("id") === "login"));
 });

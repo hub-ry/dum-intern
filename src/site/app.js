@@ -18,6 +18,7 @@ const state = {
   pairDraft: "",
   topicDraft: "",
   topicSaving: false,
+  signingOut: false,
 };
 
 function setStatus(text, error = false) {
@@ -124,6 +125,7 @@ function draw() {
     view.append(createPairView({ draft: state.pairDraft, onDraft: (draft) => { state.pairDraft = draft; } }));
     return;
   }
+  if (state.signingOut) { view.append(el("p", {}, "Signing out…")); return; }
   if (!state.me) { drawLogin(); return; }
   if (!state.tree) { view.append(el("p", {}, "Loading your workspace…")); return; }
   if (state.tab === "folder") { drawFolder(); return; }
@@ -511,9 +513,9 @@ async function saveRoot(event) {
 }
 
 async function logout() {
-  workspaceSession = { active: false };
+  const session = workspaceSession = { active: false };
   workspaceQueue = Promise.resolve();
-  await api("/api/logout", { method: "POST", body: "{}" });
+  state.signingOut = true;
   state.me = null;
   state.tree = null;
   selectGoal(null);
@@ -521,13 +523,26 @@ async function logout() {
   state.topicDraft = "";
   state.topicSaving = false;
   state.code = "";
-  draw();
   setStatus("");
+  draw();
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+    if (session === workspaceSession) setStatus("");
+  } catch (err) {
+    if (session !== workspaceSession || err instanceof StaleSessionError) return;
+    setStatus("This page is cleared, but sign-out failed. Reload and try again.", true);
+  } finally {
+    if (session === workspaceSession) {
+      state.signingOut = false;
+      if (state.tab !== "pair") draw();
+    }
+  }
 }
 
 async function boot() {
   workspaceSession = { active: true };
   workspaceQueue = Promise.resolve();
+  state.signingOut = false;
   selectGoal(null);
   const me = await api("/api/me");
   state.oauth = me.oauth;
