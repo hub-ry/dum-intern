@@ -11,7 +11,7 @@ npm test
 
 - Keep the product self-contained. Discord, the private workshop, mail watchers, internship automation, and host desktop services don't belong here.
 - Preserve account isolation and private workspace storage. Public assets must never expose account files, session keys, or credentials.
-- Pair is interface-only until a dedicated runtime is connected. Keep offline states honest; don't fabricate a stream, progress narration, or sent messages. Keep the serif typography and minimal light/dark layout.
+- Follow the [README's Pair contract](README.md#dum-intern) when changing the interface.
 - Readings are written and compiled in the user's Cursor session. The server stores briefs and serves existing PDFs; it must not claim to have generated a paper.
 - A block unlocks by reading its final page or recording a swear. Preserve that distinction. Neither record proves mastery.
 - Builds contain unlocked blocks in the user's chosen order. Saving a stack does not generate a finished program.
