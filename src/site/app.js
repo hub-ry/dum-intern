@@ -228,7 +228,6 @@ async function addTopic(event) {
     if (state.me !== account || state.root !== root) return;
     state.tree = data.tree;
     if (state.topicDraft === draft) state.topicDraft = "";
-    selectGoal(data.tree.goals[0]?.id ?? null);
     setStatus(`${topic} added to your skill tree.`);
   } catch (err) {
     setStatus(err.message, true);
