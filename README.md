@@ -12,7 +12,7 @@ dum-intern is one half of the dum-stack. The other half is dum-learn, a learn-wh
 
 The window is a dark, VS Code-like layout:
 
-- **Center:** the intern's computer. With no Maritime key this is a fake VS Code window and terminal. With `MARITIME_API_KEY` set, it is the live desktop (a watch link, plus a command log of what the intern actually ran), even when the intern itself is still scripted.
+- **Center:** practice, then the intern's computer. Practice is a scripted listings task you do yourself (plan, draft, hints, a canned example run, a reflection, a lesson, a variation). Desktop, in the left rail, is the intern's computer. With no Maritime key that computer is a fake VS Code window and terminal. With `MARITIME_API_KEY` set, it is the live desktop (a watch link, plus a command log of what the intern actually ran), even when the intern itself is still scripted.
 - **Right:** chat. Teach a skill here, or give the intern a task. Hold the mic button, or hold Alt, to dictate with the browser Web Speech API. Text works without that.
 - **Left:** the skill tree. Nodes are locked, unlocked, or proposed. Click a locked node whose prerequisites are unlocked and a lesson starts. The intern asks one or two questions. Save, and the node unlocks.
 
@@ -40,6 +40,16 @@ Mock mode is the default when `MARITIME_API_KEY` is unset. The desktop is drawn 
 3. Ask it to `list the files in the home directory`. It plans, then the terminal shows `ls`.
 
 No keys, no account, no network calls.
+
+### Practice demo
+
+The center opens on **Practice**. One task: read a clothing `listings.csv` and print the rows with an empty price. You write the plan, write your own draft, and ask for a hint only when you want one. Hints come in order: a nudge, a direction, then a short fragment. Each one is labeled scripted. The example run is sample output written ahead of time. It does not run your draft and it is not a score.
+
+Then you write what failed, why, and the fix, and teach the intern in your own words. The lesson is markdown in this browser (`localStorage`, key `dum-intern.practice.v1`). Saving it does not unlock the skill tree. Python scripts on the tree still waits on Terminal basics, then Files and paths. Buttons on the brief and on the lesson open those real nodes, and the chat box can take the explanation when you want the scripted lesson there. On a narrow window the skill tree starts closed, and under 720px the chat does too, so the task stays on screen. Open either from the left rail.
+
+The last step is a variation, `returns.csv`, where a blank price and the text `n/a` both count. Hints start over. Clear practice wipes the local note. Reset in the skill pane does not.
+
+Keyboard: Ctrl+Shift+L practice, Ctrl+Shift+D the desktop. Tab in a draft inserts two spaces.
 
 ### Desktop only
 

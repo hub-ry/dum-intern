@@ -1,3 +1,5 @@
+import { mountPractice } from "./practice.js";
+
 const state = {
   mode: "mock",
   scripted: true,
@@ -10,6 +12,7 @@ const state = {
   busy: false,
   selected: null,
   live: "stream",
+  center: "practice",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -29,6 +32,36 @@ let recognition = null;
 let holding = false;
 let speechBase = "";
 
+if (window.matchMedia("(max-width: 980px)").matches) {
+  bench.classList.add("no-tree");
+  $("act-tree").classList.remove("on");
+  $("act-tree").setAttribute("aria-pressed", "false");
+}
+if (window.matchMedia("(max-width: 720px)").matches) {
+  bench.classList.add("no-chat");
+  $("act-chat").classList.remove("on");
+  $("act-chat").setAttribute("aria-pressed", "false");
+}
+mountPractice($("practice"), {
+  onOpenNode(id) {
+    const node = state.nodes.find((item) => item.id === id);
+    if (!node) {
+      pushSystem("That skill isn't loaded yet.");
+      return;
+    }
+    bench.classList.remove("no-chat");
+    $("act-chat").classList.add("on");
+    $("act-chat").setAttribute("aria-pressed", "true");
+    openNode(node);
+  },
+  onPrefill(text) {
+    input.value = text;
+    bench.classList.remove("no-chat");
+    $("act-chat").classList.add("on");
+    $("act-chat").setAttribute("aria-pressed", "true");
+    input.focus();
+  },
+});
 await load();
 wire();
 if (state.mode === "live") wakeDesktop();
@@ -49,6 +82,15 @@ async function load() {
 }
 
 function wire() {
+  $("act-practice").addEventListener("click", () => {
+    state.center = "practice";
+    render();
+  });
+  $("act-desk").addEventListener("click", () => {
+    state.center = "desk";
+    $("notes").hidden = true;
+    render();
+  });
   $("act-tree").addEventListener("click", () => toggle("tree"));
   $("act-chat").addEventListener("click", () => toggle("chat"));
   $("act-help").addEventListener("click", () => help.showModal());
@@ -183,6 +225,7 @@ async function dismiss(id) {
 }
 
 async function showNotes(node) {
+  state.center = "desk";
   const response = await fetch(`/api/skills/${node.id}.md`);
   const text = response.ok ? await response.text() : "This skill has no note yet.";
   $("notes-title").textContent = node.title;
@@ -323,7 +366,7 @@ function renderChrome() {
       ? "scripted intern"
       : state.model;
   const working = state.busy || state.desktop?.status === "working";
-  $("status-work").textContent = working ? (state.desktop?.label || "Working") : "Idle";
+  $("status-work").textContent = working ? (state.desktop?.label || "Working") : state.center === "practice" ? "Practice" : "Idle";
   $("status-keys").textContent = `${unlocked} unlocked`;
   $("refresh-desktop").hidden = !live;
   $("live-toggle").hidden = !live;
@@ -364,7 +407,7 @@ function renderDetail() {
   const node = state.nodes.find((item) => item.id === state.selected) ?? null;
   detail.replaceChildren();
   if (!node) {
-    detail.textContent = "Click a locked skill and explain it. That explanation is the only instruction the intern gets.";
+    detail.textContent = "Click a locked skill and explain it. That explanation is the only instruction the intern gets. The center practice is a scripted listings task you do yourself.";
     return;
   }
   const title = document.createElement("strong");
@@ -428,7 +471,7 @@ function renderDesktop() {
   if (!desktop) return;
   const working = desktop.status === "working" || state.busy;
   const label = $("desk-label");
-  label.textContent = working ? (desktop.label || "Working") : "idle";
+  label.textContent = working ? (desktop.label || "Working") : state.center === "practice" ? "scripted" : "idle";
   label.classList.toggle("working", working);
   renderFiles(desktop);
   renderCode(desktop.editorContent || "");
@@ -444,7 +487,28 @@ function renderDesktop() {
 }
 
 function layoutDesktop() {
-  if (!$("notes").hidden) return;
+  const practicing = state.center === "practice";
+  $("practice").hidden = !practicing;
+  $("act-practice").classList.toggle("on", practicing);
+  $("act-practice").setAttribute("aria-pressed", String(practicing));
+  $("act-desk").classList.toggle("on", !practicing);
+  $("act-desk").setAttribute("aria-pressed", String(!practicing));
+  $("desk-actions").hidden = practicing;
+  if (practicing) {
+    $("mock").hidden = true;
+    $("live").hidden = true;
+    $("notes").hidden = true;
+    $("desk-title").textContent = "Practice — missing prices";
+    input.placeholder = "Chat still teaches the tree. Practice is in the center.";
+    return;
+  }
+  $("desk-title").textContent = "intern@linux — desktop";
+  input.placeholder = "Teach a skill, or give the intern a task";
+  if (!$("notes").hidden) {
+    $("mock").hidden = true;
+    $("live").hidden = true;
+    return;
+  }
   const live = state.mode === "live";
   $("mock").hidden = live;
   $("live").hidden = !live;
@@ -605,16 +669,19 @@ function onTreeKey(event) {
 }
 
 function onGlobalKey(event) {
-  const typing = document.activeElement === input;
+  const field = document.activeElement;
+  const typing = field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement;
+  const inPractice = Boolean(field && field.closest && field.closest("#practice"));
   if (event.key === "Escape") {
     if (help.open) help.close();
+    else if (inPractice) field.blur();
     else closeNotes();
   }
   if (event.key === "?" && !typing && !event.ctrlKey && !event.metaKey && !event.altKey) {
     event.preventDefault();
     help.showModal();
   }
-  if (event.altKey && event.key === "Alt" && !event.repeat && !event.ctrlKey && !event.metaKey && SpeechApi) {
+  if (event.altKey && event.key === "Alt" && !event.repeat && !event.ctrlKey && !event.metaKey && SpeechApi && !inPractice) {
     event.preventDefault();
     startTalk();
   }
@@ -628,7 +695,19 @@ function onGlobalKey(event) {
     event.preventDefault();
     bench.classList.remove("no-chat");
     $("act-chat").classList.add("on");
+    $("act-chat").setAttribute("aria-pressed", "true");
     input.focus();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "l") {
+    event.preventDefault();
+    state.center = "practice";
+    render();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "d") {
+    event.preventDefault();
+    state.center = "desk";
+    $("notes").hidden = true;
+    render();
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && state.teaching?.phase === "ready") {
     event.preventDefault();
