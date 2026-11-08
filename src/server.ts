@@ -17,6 +17,7 @@ const FILES: Record<string, string> = {
   "/app.js": "app.js",
   "/app.css": "app.css",
   "/favicon.svg": "favicon.svg",
+  "/practice.js": "practice.js",
 };
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",

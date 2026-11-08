@@ -17,6 +17,12 @@
 
   <div id="bench" class="bench">
     <nav class="activity" aria-label="Views">
+      <button type="button" id="act-practice" class="act on" title="Practice (Ctrl+Shift+L)" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3zm8 1.2V8h3.8L14 4.2zM8 11h8v1.5H8V11zm0 3.2h8v1.5H8v-1.5zM8 17.4h5.2V19H8v-1.6z"/></svg>
+      </button>
+      <button type="button" id="act-desk" class="act" title="Desktop (Ctrl+Shift+D)" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm5 14h8v1.6H8V19z"/></svg>
+      </button>
       <button type="button" id="act-tree" class="act on" title="Skill tree (Ctrl+Shift+E)" aria-pressed="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6v4H4V6zm0 8h6v4H4v-4zm8-8h8v4h-8V6zm0 8h8v4h-8v-4z"/></svg>
       </button>
@@ -45,14 +51,19 @@
       <div class="desk-bar">
         <span id="desk-title">intern@linux — desktop</span>
         <span id="desk-label" class="desk-label">idle</span>
-        <span class="desk-actions">
+        <span class="desk-actions" id="desk-actions">
           <button type="button" id="live-toggle" hidden>Live view</button>
           <button type="button" id="frame-toggle" hidden>Latest frame</button>
           <button type="button" id="refresh-desktop" hidden>Refresh</button>
           <a id="open-tab" hidden target="_blank" rel="noreferrer">Open</a>
         </span>
       </div>
-      <div id="mock" class="vscode">
+      <section id="practice" class="practice" aria-labelledby="practice-heading">
+        <p class="scripted-flag">Scripted demo. Example files and canned hints. Not a live model. Not a grade.</p>
+        <h1 id="practice-heading">Check clothing listings for missing prices</h1>
+        <p>Loading practice…</p>
+      </section>
+      <div id="mock" class="vscode" hidden>
         <div class="vs-title"><span class="dots" aria-hidden="true"></span> Visual Studio Code</div>
         <div class="vs-menu" aria-hidden="true"><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Terminal</span></div>
         <div class="vs-body">
@@ -111,7 +122,7 @@
     <span id="status-work">Idle</span>
     <span class="status-spacer"></span>
     <span id="status-keys"></span>
-    <span class="status-hint">Ctrl+Shift+E tree · Ctrl+Shift+M chat · ? shortcuts</span>
+    <span class="status-hint">Ctrl+Shift+L practice · Ctrl+Shift+D desktop · ? shortcuts</span>
   </footer>
 
   <dialog id="help">
@@ -120,6 +131,7 @@
       <ul>
         <li><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline</li>
         <li>Hold <kbd>Alt</kbd> or the mic button to talk</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> practice · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> desktop</li>
         <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> skill tree</li>
         <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> chat</li>
         <li><kbd>J</kbd> <kbd>K</kbd> or arrows move in the tree · <kbd>Enter</kbd> opens the node</li>
