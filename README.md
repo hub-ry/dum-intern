@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> Remove this line to confirm you've reviewed this PR before submitting.
-
 # Dum
 
 Dum is a Zed fork for visible pair programming with dum-intern.
