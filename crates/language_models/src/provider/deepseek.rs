@@ -52,18 +52,25 @@ pub struct DeepSeekLanguageModelProvider {
 }
 
 pub struct State {
+    api_url_override: Option<SharedString>,
     api_key_state: ApiKeyState,
     credentials_provider: Arc<dyn CredentialsProvider>,
 }
 
 impl State {
+    fn api_url(&self, cx: &App) -> SharedString {
+        self.api_url_override
+            .clone()
+            .unwrap_or_else(|| DeepSeekLanguageModelProvider::api_url(cx))
+    }
+
     fn is_authenticated(&self) -> bool {
         self.api_key_state.has_key()
     }
 
     fn set_api_key(&mut self, api_key: Option<String>, cx: &mut Context<Self>) -> Task<Result<()>> {
         let credentials_provider = self.credentials_provider.clone();
-        let api_url = DeepSeekLanguageModelProvider::api_url(cx);
+        let api_url = self.api_url(cx);
         self.api_key_state.store(
             api_url,
             api_key,
@@ -75,7 +82,7 @@ impl State {
 
     fn authenticate(&mut self, cx: &mut Context<Self>) -> Task<Result<(), AuthenticateError>> {
         let credentials_provider = self.credentials_provider.clone();
-        let api_url = DeepSeekLanguageModelProvider::api_url(cx);
+        let api_url = self.api_url(cx);
         self.api_key_state.load_if_needed(
             api_url,
             |this| &mut this.api_key_state,
@@ -105,11 +112,36 @@ impl DeepSeekLanguageModelProvider {
             })
             .detach();
             State {
+                api_url_override: None,
                 api_key_state: ApiKeyState::new(Self::api_url(cx), (*API_KEY_ENV_VAR).clone()),
                 credentials_provider,
             }
         });
 
+        Self {
+            http_client,
+            state,
+            request_limiters: ModelRateLimiters::default(),
+        }
+    }
+
+    pub fn for_intern(
+        http_client: Arc<dyn HttpClient>,
+        credentials_provider: Arc<dyn CredentialsProvider>,
+        api_url: SharedString,
+        cx: &mut App,
+    ) -> Self {
+        let state = cx.new(|_| State {
+            api_url_override: Some(api_url.clone()),
+            api_key_state: ApiKeyState::new(
+                api_url,
+                EnvVar {
+                    name: "DUM_INTERN_API_KEY".into(),
+                    value: None,
+                },
+            ),
+            credentials_provider,
+        });
         Self {
             http_client,
             state,
@@ -271,7 +303,7 @@ impl DeepSeekLanguageModelProvider {
         let http_client = self.http_client.clone();
 
         let (api_key, api_url, extra_headers) = self.state.read_with(cx, |state, cx| {
-            let api_url = DeepSeekLanguageModelProvider::api_url(cx);
+            let api_url = state.api_url(cx);
             let extra_headers = DeepSeekLanguageModelProvider::settings(cx)
                 .custom_headers
                 .clone();
@@ -756,5 +788,87 @@ mod tests {
             assert_eq!(serde_json::to_value(request)?["max_tokens"], expected);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod intern_tests {
+    use super::*;
+    use credentials_provider::test_support::FakeCredentialsProvider;
+    use gpui::TestAppContext;
+    use http_client::{AsyncBody, FakeHttpClient, http::Response};
+
+    #[gpui::test]
+    async fn scoped_interns_stream_with_independent_keys(cx: &mut TestAppContext) {
+        let requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        let client = FakeHttpClient::create(move |request| {
+            recorded.lock().push((
+                request.uri().to_string(),
+                request
+                    .headers()
+                    .get("Authorization")
+                    .expect("authorization")
+                    .to_str()
+                    .expect("header text")
+                    .to_owned(),
+            ));
+            async move {
+                let event = serde_json::json!({"id":"test", "object":"chat.completion.chunk", "created":0, "model":"deepseek-flash", "choices":[{"index":0,"delta":{"content":"connected"},"finish_reason":null}]});
+                Ok(Response::builder()
+                    .status(200)
+                    .body(AsyncBody::from(format!(
+                        "data: {event}\n\ndata: [DONE]\n\n"
+                    )))?)
+            }
+        });
+        cx.update(|cx| {
+            let store = SettingsStore::test(cx);
+            cx.set_global(store);
+            crate::AllLanguageModelSettings::register(cx);
+        });
+        for key in ["test-key-a", "test-key-b"] {
+            let credentials = Arc::new(FakeCredentialsProvider::default());
+            credentials
+                .state
+                .lock()
+                .keys
+                .insert("https://intern.example".into(), key.as_bytes().to_vec());
+            let (provider, model, authentication) = cx.update(|cx| {
+                let provider = DeepSeekLanguageModelProvider::for_intern(
+                    client.clone(),
+                    credentials,
+                    "https://intern.example".into(),
+                    cx,
+                );
+                let model = provider.default_model(cx).expect("DeepSeek model");
+                let authentication = provider.authenticate(cx);
+                (provider, model, authentication)
+            });
+            authentication.await.expect("scoped authentication");
+            let mut stream = provider
+                .stream_completion_text(&model, LanguageModelRequest::default(), &cx.to_async())
+                .await
+                .expect("DeepSeek stream")
+                .stream;
+            let mut text = String::new();
+            while let Some(chunk) = stream.next().await {
+                text.push_str(&chunk.expect("stream text"));
+            }
+            assert_eq!(text, "connected");
+        }
+        assert_eq!(
+            *requests.lock(),
+            vec![
+                (
+                    "https://intern.example/chat/completions".into(),
+                    "Bearer test-key-a".into()
+                ),
+                (
+                    "https://intern.example/chat/completions".into(),
+                    "Bearer test-key-b".into()
+                ),
+            ]
+        );
     }
 }

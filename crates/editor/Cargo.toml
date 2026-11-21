@@ -59,6 +59,7 @@ indoc = { workspace = true, optional = true }
 edit_prediction_types.workspace = true
 itertools.workspace = true
 language.workspace = true
+language_model.workspace = true
 language_detection.workspace = true
 linkify.workspace = true
 log.workspace = true
@@ -68,6 +69,7 @@ menu.workspace = true
 multi_buffer.workspace = true
 ordered-float.workspace = true
 parking_lot.workspace = true
+paths.workspace = true
 pretty_assertions = { workspace = true, optional = true }
 project.workspace = true
 proptest = { workspace = true, optional = true }
@@ -106,6 +108,7 @@ workspace.workspace = true
 zed_actions.workspace = true
 
 [dev-dependencies]
+language_model = { workspace = true, features = ["test-support"] }
 assets.workspace = true
 ctor.workspace = true
 gpui = { workspace = true, features = ["test-support"] }

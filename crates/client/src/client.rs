@@ -1487,50 +1487,14 @@ impl Client {
 
                     open_url_tx.send(url).log_err();
 
-                    #[derive(Deserialize)]
-                    struct CallbackParams {
-                        pub user_id: String,
-                        pub access_token: String,
-                    }
-
-                    // Receive the HTTP request from the user's browser. Retrieve the user id and encrypted
-                    // access token from the query params.
-                    //
-                    // TODO - Avoid ever starting more than one HTTP server. Maybe switch to using a
-                    // custom URL scheme instead of this local HTTP server.
+                    let post_auth_url = http.build_url("/native_app_signin_succeeded");
                     let (user_id, access_token) = background
                         .spawn(async move {
-                            for _ in 0..100 {
-                                if let Some(req) = server.recv_timeout(Duration::from_secs(1))? {
-                                    let path = req.url();
-                                    let url = Url::parse(&format!("http://example.com{}", path))
-                                        .context("failed to parse login notification url")?;
-                                    let callback_params: CallbackParams =
-                                        serde_urlencoded::from_str(url.query().unwrap_or_default())
-                                            .context(
-                                                "failed to parse sign-in callback query parameters",
-                                            )?;
-
-                                    let post_auth_url =
-                                        http.build_url("/native_app_signin_succeeded");
-                                    req.respond(
-                                        tiny_http::Response::empty(302).with_header(
-                                            tiny_http::Header::from_bytes(
-                                                &b"Location"[..],
-                                                post_auth_url.as_bytes(),
-                                            )
-                                            .unwrap(),
-                                        ),
-                                    )
-                                    .context("failed to respond to login http request")?;
-                                    return Ok((
-                                        callback_params.user_id,
-                                        callback_params.access_token,
-                                    ));
-                                }
-                            }
-
-                            anyhow::bail!("didn't receive login redirect");
+                            receive_sign_in_callback(
+                                &server,
+                                &post_auth_url,
+                                Duration::from_secs(300),
+                            )
                         })
                         .await?;
 
@@ -1979,6 +1943,51 @@ pub fn parse_zed_link(link: &str, cx: &App) -> Option<ZedLink> {
     None
 }
 
+fn receive_sign_in_callback(
+    server: &tiny_http::Server,
+    post_auth_url: &str,
+    timeout: Duration,
+) -> Result<(String, String)> {
+    #[derive(Deserialize)]
+    struct CallbackParams {
+        user_id: String,
+        access_token: String,
+    }
+
+    let deadline = Instant::now() + timeout;
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        let Some(request) = server.recv_timeout(remaining.min(Duration::from_secs(1)))? else {
+            continue;
+        };
+        let callback = Url::parse(&format!("http://localhost{}", request.url()))
+            .ok()
+            .and_then(|url| {
+                serde_urlencoded::from_str::<CallbackParams>(url.query().unwrap_or_default()).ok()
+            })
+            .filter(|params| {
+                request.method() == &tiny_http::Method::Get
+                    && params.user_id.parse::<u64>().is_ok()
+                    && !params.access_token.is_empty()
+            });
+
+        // Browsers may request a favicon before delivering the actual callback.
+        let Some(callback) = callback else {
+            request.respond(tiny_http::Response::empty(400)).log_err();
+            continue;
+        };
+        let location = tiny_http::Header::from_bytes(b"Location", post_auth_url.as_bytes())
+            .map_err(|_| anyhow!("invalid sign-in success URL"))?;
+        request
+            .respond(tiny_http::Response::empty(302).with_header(location))
+            .context("failed to respond to sign-in callback")?;
+        return Ok((callback.user_id, callback.access_token));
+    }
+
+    anyhow::bail!(
+        "Sign-in timed out waiting for the browser. Click Sign In again and finish signing in to GitHub in the browser window that opens."
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1991,6 +2000,68 @@ mod tests {
     use proto::TypedEnvelope;
     use settings::SettingsStore;
     use std::future;
+
+    fn send_sign_in_request(address: std::net::SocketAddr, path: &str) -> Result<String> {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(address)?;
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        )?;
+        let mut response = String::new();
+        stream.read_to_string(&mut response)?;
+        Ok(response)
+    }
+
+    #[test]
+    fn test_sign_in_callback_ignores_unrelated_requests() -> Result<()> {
+        let server = tiny_http::Server::http("127.0.0.1:0").map_err(|error| anyhow!(error))?;
+        let address = server
+            .server_addr()
+            .to_ip()
+            .context("missing callback address")?;
+        let browser = std::thread::spawn(move || -> Result<()> {
+            for path in [
+                "/favicon.ico",
+                "/?user_id=bad&access_token=token",
+                "/?user_id=42&access_token=",
+            ] {
+                assert!(send_sign_in_request(address, path)?.starts_with("HTTP/1.1 400"));
+            }
+            let response =
+                send_sign_in_request(address, "/?user_id=42&access_token=encrypted%2Btoken")?;
+            assert!(response.starts_with("HTTP/1.1 302"));
+            assert!(response.contains("Location: https://zed.dev/native_app_signin_succeeded"));
+            Ok(())
+        });
+        let credentials = receive_sign_in_callback(
+            &server,
+            "https://zed.dev/native_app_signin_succeeded",
+            Duration::from_secs(5),
+        )?;
+        assert_eq!(
+            credentials,
+            ("42".to_string(), "encrypted+token".to_string())
+        );
+        browser
+            .join()
+            .map_err(|_| anyhow!("browser thread panicked"))??;
+        Ok(())
+    }
+
+    #[test]
+    fn test_sign_in_callback_timeout() -> Result<()> {
+        let server = tiny_http::Server::http("127.0.0.1:0").map_err(|error| anyhow!(error))?;
+        let error = receive_sign_in_callback(
+            &server,
+            "https://zed.dev/native_app_signin_succeeded",
+            Duration::ZERO,
+        )
+        .expect_err("callback should time out without a browser response");
+        assert!(error.to_string().contains("Click Sign In again"));
+        Ok(())
+    }
 
     #[test]
     fn test_proxy_settings_trims_and_ignores_empty_proxy() {

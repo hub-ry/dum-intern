@@ -397,6 +397,7 @@ impl EditorElement {
         }
 
         register_action(editor, window, Editor::open_context_menu);
+        register_action(editor, window, Editor::run_dum_intern);
         register_action(editor, window, Editor::move_left);
         register_action(editor, window, Editor::move_right);
         register_action(editor, window, Editor::move_down);
@@ -1039,8 +1040,13 @@ impl EditorElement {
                         selection_id: selection.selection.id,
                     };
 
-                    let is_shown =
-                        editor.show_cursor_names || editor.hovered_cursors.contains_key(&key);
+                    let is_shown = editor.show_cursor_names
+                        || editor.hovered_cursors.contains_key(&key)
+                        || (editor
+                            .dum_intern
+                            .as_ref()
+                            .is_some_and(crate::dum_intern::Playback::is_typing)
+                            && selection.replica_id == clock::ReplicaId::AGENT);
 
                     remote_selections
                         .entry(selection.replica_id)

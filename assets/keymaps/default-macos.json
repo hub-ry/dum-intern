@@ -1825,4 +1825,22 @@
       "escape": "tabular_data::ClearSelection",
     },
   },
+  {
+    "context": "Editor && DumInternAssignment && !menu && !renaming",
+    "bindings": {
+      "cmd-enter": "dum_intern::Run"
+    }
+  },
+  {
+    "context": "InternDescription > Editor && mode == auto_height",
+    "bindings": {
+      "cmd-enter": "editor::Newline",
+      "enter": "editor::Newline",
+      "shift-enter": "editor::Newline"
+    }
+  },
+  {
+    "context": "Workspace",
+    "bindings": { "cmd-alt-shift-i": "dum_intern::Manage" }
+  },
 ]

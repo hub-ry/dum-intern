@@ -5,7 +5,7 @@ use super::*;
 
 pub struct InlineInputState {
     pub editor: Entity<Editor>,
-    block_id: CustomBlockId,
+    pub(crate) block_id: CustomBlockId,
     position: Anchor,
     confirm_task: Option<Task<()>>,
     preview_task: Option<Task<()>>,

@@ -6,7 +6,7 @@ version = "1.31.0"
 publish.workspace = true
 license = "GPL-3.0-or-later"
 authors = ["Zed Team <hi@zed.dev>"]
-default-run = "zed"
+default-run = "dum"
 
 [lints]
 workspace = true
@@ -55,7 +55,7 @@ visual-tests = [
 ]
 
 [[bin]]
-name = "zed"
+name = "dum"
 path = "src/main.rs"
 
 [[bin]]
@@ -141,6 +141,7 @@ tempfile = { workspace = true, optional = true }
 edit_prediction.workspace = true
 edit_prediction_ui.workspace = true
 http_client.workspace = true
+credentials_provider.workspace = true
 image_viewer.workspace = true
 input_latency_ui.workspace = true
 inspector_ui.workspace = true

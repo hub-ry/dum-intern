@@ -197,7 +197,12 @@ impl Render for InputField {
                         this.gap_1()
                             .child(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
                     })
-                    .child(self.editor.render(window, cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.editor.render(window, cx)),
+                    )
                     .when_some(self.masked, |this, is_masked| {
                         this.child(
                             IconButton::new(

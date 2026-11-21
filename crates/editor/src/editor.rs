@@ -22,6 +22,7 @@ pub mod display_map;
 mod document_colors;
 mod document_links;
 mod document_symbols;
+pub mod dum_intern;
 mod editor_settings;
 mod element;
 mod emmet_ext;
@@ -34,6 +35,8 @@ pub mod hover_popover;
 mod indent_guides;
 mod inlays;
 mod inline_input;
+pub mod intern_model;
+pub mod interns;
 pub mod items;
 mod jsx_tag_auto_close;
 mod linked_editing_ranges;
@@ -359,6 +362,7 @@ impl Navigated {
 }
 
 pub fn init(cx: &mut App) {
+    interns::init(cx);
     cx.set_global(GlobalBlameRenderer(Arc::new(())));
     cx.set_global(breadcrumbs::RenderBreadcrumbText(render_breadcrumb_text));
 
@@ -975,6 +979,7 @@ struct SettledScrollRange {
 /// See the [module level documentation](self) for more information.
 pub struct Editor {
     focus_handle: FocusHandle,
+    dum_intern: Option<dum_intern::Playback>,
     last_focused_descendant: Option<WeakFocusHandle>,
     /// The text buffer being edited
     buffer: Entity<MultiBuffer>,
@@ -1263,6 +1268,8 @@ impl NextScrollCursorCenterTopBottom {
 #[derive(Clone)]
 pub struct EditorSnapshot {
     pub mode: EditorMode,
+    dum_intern_active: bool,
+    dum_intern_name: Option<SharedString>,
     show_gutter: bool,
     offset_content: bool,
     sticky_line_number_digits: usize,
@@ -2373,6 +2380,7 @@ impl Editor {
 
         let mut editor = Self {
             focus_handle,
+            dum_intern: None,
             show_cursor_when_unfocused: false,
             last_focused_descendant: None,
             buffer: multi_buffer.clone(),
@@ -2795,6 +2803,9 @@ impl Editor {
     ) -> KeyContext {
         let mut key_context = KeyContext::new_with_defaults(cx.platform_info().os);
         key_context.add("Editor");
+        if self.dum_intern_assignment(cx).is_some() || self.can_compose_intern_assignment(cx) {
+            key_context.add("DumInternAssignment");
+        }
         let mode = match self.mode {
             EditorMode::SingleLine => "single_line",
             EditorMode::AutoHeight { .. } => "auto_height",
@@ -3157,6 +3168,14 @@ impl Editor {
 
         EditorSnapshot {
             mode: self.mode.clone(),
+            dum_intern_active: self
+                .dum_intern
+                .as_ref()
+                .is_some_and(dum_intern::Playback::is_typing),
+            dum_intern_name: self
+                .dum_intern
+                .as_ref()
+                .map(|playback| playback.name.clone().into()),
             show_gutter: self.show_gutter,
             offset_content: self.offset_content,
             sticky_line_number_digits: self
@@ -10098,6 +10117,9 @@ impl Editor {
                 edited_buffer,
                 source,
             } => {
+                if *source != language::BufferEditSource::Agent {
+                    self.check_dum_intern_target(cx);
+                }
                 self.scrollbar_marker_state.dirty = true;
                 self.active_indent_guides_state.dirty = true;
                 self.fit_gutter_line_number_width(false, cx);
@@ -12314,7 +12336,13 @@ impl EditorSnapshot {
                         cursor_shape,
                         line_mode,
                         collaborator_id: CollaboratorId::Agent,
-                        user_name: Some("Agent".into()),
+                        user_name: Some(if self.dum_intern_active {
+                            self.dum_intern_name
+                                .clone()
+                                .unwrap_or_else(|| "intern".into())
+                        } else {
+                            "Agent".into()
+                        }),
                         color: cx.theme().players().agent(),
                     })
                 } else {

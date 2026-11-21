@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+import argparse
+import os
+from pathlib import Path
+import plistlib
+import re
+import shutil
+import shlex
+import signal
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+TARGET = ROOT / "target" / "debug"
+APP = TARGET / "Dum.app"
+DATA = ROOT / "target" / "dum-dev-data"
+
+
+def build(standalone=False):
+    cargo = shutil.which("cargo") or str(Path.home() / ".cargo/bin/cargo")
+    environment = os.environ.copy()
+    toolchain = re.search(r'^channel\s*=\s*"([^"]+)"', (ROOT / "rust-toolchain.toml").read_text(), re.MULTILINE)
+    if toolchain is None:
+        raise RuntimeError("rust-toolchain.toml is missing its channel")
+    environment.setdefault("RUSTUP_TOOLCHAIN", toolchain.group(1))
+    environment.setdefault("CARGO_PROFILE_DEV_DEBUG", "0")
+    environment.setdefault("CARGO_BUILD_JOBS", "3")
+    print("Building Dum...", flush=True)
+    features = "gpui_platform/runtime_shaders"
+    if standalone:
+        features += ",util/debug-embed"
+    result = subprocess.run(
+        [cargo, "build", "--locked", "-p", "zed", "--bin", "dum", "--features", features],
+        cwd=ROOT, env=environment,
+    )
+    return result.returncode == 0
+
+
+def bundle(standalone=False):
+    app = ROOT / "target/standalone/Dum.app" if standalone else APP
+    executable = app / "Contents/MacOS/Dum"
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    if executable.exists():
+        executable.unlink()
+    if standalone:
+        shutil.copy2(TARGET / "dum", executable)
+    else:
+        os.link(TARGET / "dum", executable)
+    resources = app / "Contents/Resources"
+    resources.mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "assets/app-icons/Dum.icns", resources / "Dum.icns")
+    info = {
+        "CFBundleName": "Dum",
+        "CFBundleDisplayName": "Dum",
+        "CFBundleIdentifier": "dev.hubry.Dum" if standalone else "dev.hubry.Dum-Dev",
+        "CFBundleExecutable": "Dum",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "0.1.0",
+        "CFBundleShortVersionString": "0.1.0" if standalone else "0.1.0-dev",
+        "CFBundleIconFile": "Dum.icns",
+        "LSApplicationCategoryType": "public.app-category.developer-tools",
+        "NSMicrophoneUsageDescription": "Dum uses your microphone for collaboration calls.",
+        "LSMinimumSystemVersion": "12.0",
+        "NSHighResolutionCapable": True,
+        "NSPrincipalClass": "NSApplication",
+    }
+    with (app / "Contents/Info.plist").open("wb") as output:
+        plistlib.dump(info, output)
+    if standalone:
+        for filename in ["LICENSE-GPL", "LICENSE-AGPL", "LICENSE-APACHE"]:
+            source = ROOT / filename
+            if source.exists():
+                shutil.copy2(source, resources / filename)
+        subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], check=True)
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+    return app
+
+
+def install():
+    app = bundle(standalone=True)
+    destination = Path("/Applications/Dum.app")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    staging = destination.with_name(f".Dum-{stamp}.app")
+    shutil.copytree(app, staging)
+    if destination.exists():
+        backup = destination.with_name(f"Dum.previous-{stamp}.app")
+        destination.rename(backup)
+        print(f"Previous app saved at {backup}", flush=True)
+    staging.rename(destination)
+    shutil.rmtree(app)
+
+    installed_data = Path.home() / "Library/Application Support/Dum"
+    installed_config = Path.home() / ".config/dum"
+    if (DATA / "interns.json").exists() and not (installed_data / "interns.json").exists():
+        for source, target in [(DATA, installed_data), (DATA / "config", installed_config)]:
+            if not source.exists():
+                continue
+            if target.exists():
+                backup = target.with_name(f"{target.name}.before-v0-{stamp}")
+                target.rename(backup)
+                print(f"Previous data saved at {backup}", flush=True)
+            shutil.copytree(source, target)
+        settings_path = installed_config / "settings.json"
+        if settings_path.exists():
+            settings = settings_path.read_text()
+            if re.search(r'(?m)^\s*"auto_update"\s*:', settings):
+                settings = re.sub(r'(?m)^(\s*"auto_update"\s*:\s*)(true|false)', r'\1false', settings)
+            else:
+                settings = re.sub(r'(?m)^(\s*)\{', r'\1{\n  "auto_update": false,', settings, count=1)
+            settings_path.write_text(settings)
+        print(f"Copied development interns and settings to {installed_data}", flush=True)
+    print(f"Installed Dum 0.1.0 at {destination}", flush=True)
+    return destination
+
+
+def launch(paths):
+    bundle()
+    DATA.mkdir(parents=True, exist_ok=True)
+    print(f"Launching Dum with separate development data at {DATA}", flush=True)
+    return subprocess.Popen(
+        [str(APP / "Contents/MacOS/Dum"), "--user-data-dir", str(DATA), *paths],
+        cwd=ROOT,
+    )
+
+
+def ensure_not_running():
+    processes = subprocess.run(
+        ["ps", "-axo", "pid=,args="], check=True, capture_output=True, text=True,
+    )
+    executables = {
+        str(APP / "Contents/MacOS/Dum"),
+        str(ROOT / "target/standalone/Dum.app/Contents/MacOS/Dum"),
+        "/Applications/Dum.app/Contents/MacOS/Dum",
+    }
+    for line in processes.stdout.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2:
+            continue
+        try:
+            arguments = shlex.split(fields[1])
+        except ValueError:
+            continue
+        if arguments and arguments[0] in executables:
+            raise RuntimeError("Dum is already open. Quit it before rebuilding or installing.")
+
+
+def fingerprint():
+    result = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=ROOT, check=True, capture_output=True,
+    )
+    stamps = []
+    for name in result.stdout.decode().split("\0"):
+        path = ROOT / name
+        if path.suffix not in {".rs", ".toml", ".json", ".metal", ".scm", ".svg"}:
+            continue
+        try:
+            stat = path.stat()
+            stamps.append((name, stat.st_mtime_ns, stat.st_size))
+        except FileNotFoundError:
+            stamps.append((name, None, None))
+    return tuple(stamps)
+
+
+def stop(process):
+    if process.poll() is None:
+        process.send_signal(signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Dum did not close. Close its development window before rebuilding.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Build and run Dum locally on macOS.")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--install", action="store_true", help="build a self-contained app and install it in /Applications")
+    modes.add_argument("--watch", action="store_true", help="rebuild and restart when source files change")
+    modes.add_argument("--build-only", action="store_true", help="build without opening a window")
+    parser.add_argument("paths", nargs="*", help="files or projects to open; defaults to the pairing playground")
+    args = parser.parse_args()
+    if sys.platform != "darwin":
+        parser.error("this development launcher currently supports macOS")
+    if not args.build_only:
+        ensure_not_running()
+    if not build(standalone=args.install):
+        return 1
+    if args.install:
+        install()
+        return 0
+    if args.build_only:
+        bundle()
+        return 0
+    paths = args.paths or [str(ROOT / "demo" / "dum-intern"), str(ROOT / "demo" / "dum-intern" / "playground.jsx")]
+    process = launch(paths)
+    try:
+        if not args.watch:
+            return process.wait()
+        previous = fingerprint()
+        print("Watching source files. Rebuilds restart Dum; save playground edits before changing source.", flush=True)
+        while process.poll() is None:
+            time.sleep(1)
+            current = fingerprint()
+            if current == previous:
+                continue
+            time.sleep(0.4)
+            previous = fingerprint()
+            if build():
+                stop(process)
+                process = launch(paths)
+        return process.returncode
+    finally:
+        stop(process)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except (OSError, RuntimeError) as error:
+        print(f"Dum development setup: {error}", file=sys.stderr)
+        sys.exit(1)

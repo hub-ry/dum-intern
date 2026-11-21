@@ -70,6 +70,10 @@ impl Editor {
     }
 
     pub fn handle_input(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if text == "@" && self.can_compose_intern_assignment(cx) {
+            self.compose_intern_assignment(window, cx);
+            return;
+        }
         let text: Arc<str> = text.into();
 
         if self.read_only(cx) {

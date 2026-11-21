@@ -122,6 +122,11 @@ pub enum Event {
 impl EventEmitter<Event> for LanguageModelRegistry {}
 
 impl LanguageModelRegistry {
+    pub fn try_global(cx: &App) -> Option<Entity<Self>> {
+        cx.try_global::<GlobalLanguageModelRegistry>()
+            .map(|registry| registry.0.clone())
+    }
+
     pub fn global(cx: &App) -> Entity<Self> {
         cx.global::<GlobalLanguageModelRegistry>().0.clone()
     }

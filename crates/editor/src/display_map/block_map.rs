@@ -169,6 +169,8 @@ pub enum BlockPlacement<T> {
     Near(T),
     /// Replace the given range of positions with the block.
     Replace(RangeInclusive<T>),
+    /// Replace a single source line, including an empty line.
+    ReplaceLine(T),
 }
 
 impl<T> BlockPlacement<T> {
@@ -176,7 +178,7 @@ impl<T> BlockPlacement<T> {
         match self {
             BlockPlacement::Above(position) => position,
             BlockPlacement::Below(position) => position,
-            BlockPlacement::Near(position) => position,
+            BlockPlacement::Near(position) | BlockPlacement::ReplaceLine(position) => position,
             BlockPlacement::Replace(range) => range.start(),
         }
     }
@@ -185,7 +187,7 @@ impl<T> BlockPlacement<T> {
         match self {
             BlockPlacement::Above(position) => position,
             BlockPlacement::Below(position) => position,
-            BlockPlacement::Near(position) => position,
+            BlockPlacement::Near(position) | BlockPlacement::ReplaceLine(position) => position,
             BlockPlacement::Replace(range) => range.end(),
         }
     }
@@ -195,6 +197,7 @@ impl<T> BlockPlacement<T> {
             BlockPlacement::Above(position) => BlockPlacement::Above(position),
             BlockPlacement::Below(position) => BlockPlacement::Below(position),
             BlockPlacement::Near(position) => BlockPlacement::Near(position),
+            BlockPlacement::ReplaceLine(position) => BlockPlacement::ReplaceLine(position),
             BlockPlacement::Replace(range) => BlockPlacement::Replace(range.start()..=range.end()),
         }
     }
@@ -204,6 +207,7 @@ impl<T> BlockPlacement<T> {
             BlockPlacement::Above(position) => BlockPlacement::Above(f(position)),
             BlockPlacement::Below(position) => BlockPlacement::Below(f(position)),
             BlockPlacement::Near(position) => BlockPlacement::Near(f(position)),
+            BlockPlacement::ReplaceLine(position) => BlockPlacement::ReplaceLine(f(position)),
             BlockPlacement::Replace(range) => {
                 let (start, end) = range.into_inner();
                 BlockPlacement::Replace(f(start)..=f(end))
@@ -213,7 +217,7 @@ impl<T> BlockPlacement<T> {
 
     fn tie_break(&self) -> u8 {
         match self {
-            BlockPlacement::Replace(_) => 0,
+            BlockPlacement::Replace(_) | BlockPlacement::ReplaceLine(_) => 0,
             BlockPlacement::Above(_) => 1,
             BlockPlacement::Near(_) => 2,
             BlockPlacement::Below(_) => 3,
@@ -251,6 +255,22 @@ impl BlockPlacement<Anchor> {
                 position.column = buffer_snapshot.line_len(MultiBufferRow(position.row));
                 let wrap_row = wrap_snapshot.make_wrap_point(position, Bias::Left).row();
                 Some(BlockPlacement::Below(wrap_row))
+            }
+            BlockPlacement::ReplaceLine(position) => {
+                let point = position.to_point(buffer_snapshot);
+                let start = wrap_snapshot
+                    .make_wrap_point(Point::new(point.row, 0), Bias::Left)
+                    .row();
+                let end = wrap_snapshot
+                    .make_wrap_point(
+                        Point::new(
+                            point.row,
+                            buffer_snapshot.line_len(MultiBufferRow(point.row)),
+                        ),
+                        Bias::Left,
+                    )
+                    .row();
+                Some(BlockPlacement::Replace(start..=end))
             }
             BlockPlacement::Replace(range) => {
                 let mut start = range.start().to_point(buffer_snapshot);
@@ -479,7 +499,10 @@ impl Block {
 
     fn is_replacement(&self) -> bool {
         match self {
-            Block::Custom(block) => matches!(block.placement, BlockPlacement::Replace(_)),
+            Block::Custom(block) => matches!(
+                block.placement,
+                BlockPlacement::Replace(_) | BlockPlacement::ReplaceLine(_)
+            ),
             Block::FoldedBuffer { .. } => true,
             Block::ExcerptBoundary { .. } => false,
             Block::BufferHeader { .. } => false,
@@ -1163,6 +1186,13 @@ impl BlockMap {
                         };
                         rows_before_block = delta;
                     }
+                    BlockPlacement::ReplaceLine(position) => {
+                        let Some(delta) = position.checked_sub(input_rows) else {
+                            continue;
+                        };
+                        rows_before_block = delta;
+                        summary.input_rows = WrapRow(1);
+                    }
                     BlockPlacement::Replace(range) => {
                         let Some(delta) = range.start().checked_sub(input_rows) else {
                             continue;
@@ -1774,7 +1804,9 @@ pub(crate) fn balancing_block(
             }
         }
         // Not supported for balancing
-        BlockPlacement::Near(_) | BlockPlacement::Replace(_) => return None,
+        BlockPlacement::Near(_) | BlockPlacement::Replace(_) | BlockPlacement::ReplaceLine(_) => {
+            return None;
+        }
     };
     Some(BlockProperties {
         placement: their_placement,
@@ -1821,8 +1853,11 @@ impl BlockMapWriter<'_> {
         let mut previous_wrap_row_range: Option<Range<WrapRow>> = None;
         let mut companion_blocks = Vec::new();
         for block in blocks {
-            if let BlockPlacement::Replace(_) = &block.placement {
-                debug_assert!(block.height.unwrap() > 0);
+            if matches!(
+                &block.placement,
+                BlockPlacement::Replace(_) | BlockPlacement::ReplaceLine(_)
+            ) {
+                debug_assert!(block.height.is_some_and(|height| height > 0));
             }
 
             let id = self.block_map.insert_block_raw(block.clone(), &buffer);
@@ -1903,7 +1938,10 @@ impl BlockMapWriter<'_> {
         let mut companion_heights = HashMap::default();
         for block in &mut self.block_map.custom_blocks {
             if let Some(new_height) = heights.remove(&block.id) {
-                if let BlockPlacement::Replace(_) = &block.placement {
+                if matches!(
+                    &block.placement,
+                    BlockPlacement::Replace(_) | BlockPlacement::ReplaceLine(_)
+                ) {
                     debug_assert!(new_height > 0);
                 }
 
@@ -2062,7 +2100,10 @@ impl BlockMapWriter<'_> {
         let mut blocks_to_remove = HashSet::default();
         for range in ranges {
             for block in self.blocks_intersecting_buffer_range(range, inclusive) {
-                if matches!(block.placement, BlockPlacement::Replace(_)) {
+                if matches!(
+                    block.placement,
+                    BlockPlacement::Replace(_) | BlockPlacement::ReplaceLine(_)
+                ) {
                     blocks_to_remove.insert(block.id);
                 }
             }

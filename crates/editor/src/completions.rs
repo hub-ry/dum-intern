@@ -1032,7 +1032,9 @@ impl Editor {
             self.open_or_update_completions_menu(None, None, false, window, cx);
         }
 
-        let provider = self.completion_provider.as_ref()?;
+        let Some(provider) = self.completion_provider.as_ref() else {
+            return Some(Task::ready(Ok(())));
+        };
 
         let lsp_store = self.project().map(|project| project.read(cx).lsp_store());
         let command = lsp_store.as_ref().and_then(|lsp_store| {
